@@ -120,8 +120,9 @@ extract_pdf_tables <- function(pdf_path) {
     tryCatch(
       {
         # Extract all tables from PDF
+        tab_fun <- getExportedValue("tabulizer", "extract_tables")
         tables <- suppressWarnings({
-          tabulizer::extract_tables(pdf_path, method = "stream", output = "data.frame")
+          tab_fun(pdf_path, method = "stream", output = "data.frame")
         })
 
         # Convert tables to text format

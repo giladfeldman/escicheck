@@ -149,7 +149,7 @@ numify <- function(x) {
 
 #' Extract context window around a sentence
 #'
-#' Gets ±n sentences around a given sentence index for design inference.
+#' Gets \u00b1n sentences around a given sentence index for design inference.
 #'
 #' @param chunks Character vector of sentence chunks
 #' @param idx Index of current sentence
@@ -254,9 +254,9 @@ parse_text <- function(text, context_window_size = 2) {
   pat_z <- "z\\s*=\\s*([-+]?\\d*\\.?\\d+)"
   # Correlation: r(df) = value, r = value, r(df)=value
   pat_r <- "r\\s*\\(\\s*(\\d+(?:\\.\\d+)?)\\s*\\)\\s*=\\s*([-+]?\\d*\\.?\\d+)"
-  # Chi-square: chi-square(df) = value, χ²(df) = value, Chi-square(df)=value
-  # Also match: χ2, chi2, X2, X²
-  pat_chi <- "(?:chi-?square|χ\\s*\\^?2|χ²|Chi-?square|chi2|X\\s*\\^?2|X²)\\s*\\(\\s*(\\d+(?:\\.\\d+)?)\\s*\\)\\s*=\\s*([-+]?\\d*\\.?\\d+)"
+  # Chi-square: chi-square(df) = value, \u03c7\u00b2(df) = value, Chi-square(df)=value
+  # Also match: \u03c72, chi2, X2, X\u00b2
+  pat_chi <- "(?:chi-?square|\u03c7\\s*\\^?2|\u03c7\u00b2|Chi-?square|chi2|X\\s*\\^?2|X\u00b2)\\s*\\(\\s*(\\d+(?:\\.\\d+)?)\\s*\\)\\s*=\\s*([-+]?\\d*\\.?\\d+)"
 
   # Patterns for sample sizes and design info
   # Improved p-value regex: handle optional leading '0', various separators, and spaces
@@ -265,7 +265,7 @@ parse_text <- function(text, context_window_size = 2) {
   pat_N <- "\\bN\\s*=\\s*(\\d+)"
   pat_n1 <- "\\bn1\\s*=\\s*(\\d+)"
   pat_n2 <- "\\bn2\\s*=\\s*(\\d+)"
-  pat_dims <- "(\\d+)\\s*[x×]\\s*(\\d+)"
+  pat_dims <- "(\\d+)\\s*[x\u00d7]\\s*(\\d+)"
 
   # Patterns for effect sizes
   pat_d <- "\\bd\\s*=\\s*([-+]?\\d*\\.?\\d+)"
@@ -273,13 +273,13 @@ parse_text <- function(text, context_window_size = 2) {
   pat_dz <- "\\bdz\\s*=\\s*([-+]?\\d*\\.?\\d+)"
   pat_dav <- "\\bdav\\s*=\\s*([-+]?\\d*\\.?\\d+)"
   pat_drm <- "\\bdrm\\s*=\\s*([-+]?\\d*\\.?\\d+)"
-  pat_phi <- "(?:phi|φ)\\s*=\\s*([-+]?\\d*\\.?\\d+)"
+  pat_phi <- "(?:phi|\u03c6)\\s*=\\s*([-+]?\\d*\\.?\\d+)"
   pat_V <- "(?:Cramer'?s?\\s*V|\\bV\\b)\\s*=\\s*([-+]?\\d*\\.?\\d+)"
-  pat_eta <- "(?:eta|η)\\s*=\\s*([-+]?\\d*\\.?\\d+)"
-  pat_eta2 <- "(?:eta\\s*[-]?squared|η²|eta\\^2|η\\^2)\\s*=\\s*([-+]?\\d*\\.?\\d+)"
-  pat_etap2 <- "(?:partial\\s*eta\\s*[-]?squared|partial\\s*η²|ηp²|partial\\s*eta\\^2)\\s*=\\s*([-+]?\\d*\\.?\\d+)"
-  pat_eta2_corrupted <- "(?:2G|n2G|η2G|etaG2)\\s*=\\s*([-+]?\\d*\\.?\\d+)" # PDF corruption: 2G = generalized eta²
-  pat_omega2 <- "(?:omega\\s*[-]?squared|ω²|omega\\^2|ω\\^2)\\s*=\\s*([-+]?\\d*\\.?\\d+)"
+  pat_eta <- "(?:eta|\u03b7)\\s*=\\s*([-+]?\\d*\\.?\\d+)"
+  pat_eta2 <- "(?:eta\\s*[-]?squared|\u03b7\u00b2|eta\\^2|\u03b7\\^2)\\s*=\\s*([-+]?\\d*\\.?\\d+)"
+  pat_etap2 <- "(?:partial\\s*eta\\s*[-]?squared|partial\\s*\u03b7\u00b2|\u03b7p\u00b2|partial\\s*eta\\^2)\\s*=\\s*([-+]?\\d*\\.?\\d+)"
+  pat_eta2_corrupted <- "(?:2G|n2G|\u03b72G|etaG2)\\s*=\\s*([-+]?\\d*\\.?\\d+)" # PDF corruption: 2G = generalized eta²
+  pat_omega2 <- "(?:omega\\s*[-]?squared|\u03c9\u00b2|omega\\^2|\u03c9\\^2)\\s*=\\s*([-+]?\\d*\\.?\\d+)"
 
   # Cohen's f - match explicit labels OR bare "f" with word boundaries
   pat_cohens_f <- "(?:Cohen'?s?\\s*f|effect\\s*size\\s*f|\\bf)\\s*=\\s*([-+]?\\d*\\.?\\d+)"
@@ -287,9 +287,9 @@ parse_text <- function(text, context_window_size = 2) {
   # Generic/Fallback effect size pattern (Phase 2F - RESTRICTED)
   # Only matches explicit Greek symbols to avoid false positives: ε δ ρ τ and PDF corruption char
   # Previous permissive pattern matched any letter, causing false matches with variables
-  pat_fallback_es <- "\\b([εδρτ]|[a-z]\uFFFD)\\s*=\\s*([-+]?\\d*\\.?\\d+)"
+  pat_fallback_es <- "\\b([\u03b5\u03b4\u03c1\u03c4]|[a-z]\uFFFD)\\s*=\\s*([-+]?\\d*\\.?\\d+)"
 
-  pat_beta <- "(?:beta|β|standardized\\s*beta)\\s*=\\s*([-+]?\\d*\\.?\\d+)"
+  pat_beta <- "(?:beta|\u03b2|standardized\\s*beta)\\s*=\\s*([-+]?\\d*\\.?\\d+)"
   pat_f2 <- "f\\^?2\\s*=\\s*([-+]?\\d*\\.?\\d+)"
   pat_R2 <- "R\\^?2\\s*=\\s*([-+]?\\d*\\.?\\d+)"
   pat_OR <- "(?:OR|odds\\s*ratio)\\s*=\\s*([-+]?\\d*\\.?\\d+)"
@@ -449,7 +449,7 @@ parse_text <- function(text, context_window_size = 2) {
       effect_name <- "eta2"
       effect_reported <- numify(m_eta2[2])
     } else if (!all(is.na(m_eta2_corrupted))) {
-      # PDF corruption: "2G" is likely generalized eta-squared (η²G)
+      # PDF corruption: "2G" is likely generalized eta-squared (\u03b7\u00b2G)
       effect_name <- "generalized_eta2"
       effect_reported <- numify(m_eta2_corrupted[2])
       effect_fallback <- TRUE # Flag as uncertain extraction
@@ -503,17 +503,17 @@ parse_text <- function(text, context_window_size = 2) {
       sym <- if (length(m_fallback_es) >= 2) m_fallback_es[2] else "ES"
 
       # Try to identify the symbol
-      effect_name <- if (sym == "ε") {
+      effect_name <- if (sym == "\u03b5") {
         "epsilon"
-      } else if (sym == "δ") {
+      } else if (sym == "\u03b4") {
         "delta"
-      } else if (sym == "ρ") {
+      } else if (sym == "\u03c1") {
         "rho"
-      } else if (sym == "τ") {
+      } else if (sym == "\u03c4") {
         "tau"
       } else if (grepl("\uFFFD", sym)) {
         "unknown_symbol" # PDF corruption replacement character
-      } else if (sym %in% c("η", "\u03B7")) {
+      } else if (sym %in% c("\u03b7", "\u03B7")) {
         "eta" # Already handled above, but keep for safety
       } else {
         sym # Unknown - use as-is

@@ -440,8 +440,8 @@ enumerate_m_from_df <- function(df) {
 
 # ---- ANOVA / F-test effect sizes ----
 
-# Eta-squared (η²) from F-statistic
-# Formula: η² = (F * df1) / (F * df1 + df2)
+# Eta-squared (\u03b7\u00b2) from F-statistic
+# Formula: \u03b7\u00b2 = (F * df1) / (F * df1 + df2)
 # This is the standard eta-squared for between-subjects designs
 eta2_from_F <- function(F_val, df1, df2) {
   # Ensure scalar inputs
@@ -455,8 +455,8 @@ eta2_from_F <- function(F_val, df1, df2) {
   (F_val * df1) / (F_val * df1 + df2)
 }
 
-# Partial eta-squared (ηp²) from F-statistic
-# Formula: ηp² = (F * df1) / (F * df1 + df2)
+# Partial eta-squared (\u03b7p\u00b2) from F-statistic
+# Formula: \u03b7p\u00b2 = (F * df1) / (F * df1 + df2)
 # Note: For one-way ANOVA, partial eta² = eta²
 # For factorial designs, partial eta² controls for other factors
 partial_eta2_from_F <- function(F_val, df1, df2) {
@@ -515,13 +515,13 @@ omega2_from_F <- function(F_val, df1, df2) {
     return(NA_real_)
   }
   result <- numerator / denominator
-  # Omega² can be negative (indicating very small effect)
+  # Omega\u00b2 can be negative (indicating very small effect)
   # Clamp to 0 for interpretability, but could return negative
   max(0, result)
 }
 
 # Cohen's f from F-statistic
-# Formula: f = sqrt(η² / (1 - η²))
+# Formula: f = sqrt(\u03b7\u00b2 / (1 - \u03b7\u00b2))
 # Or directly: f = sqrt((F * df1) / df2)
 cohens_f_from_F <- function(F_val, df1, df2) {
   # Ensure scalar inputs
@@ -632,7 +632,7 @@ semi_partial_r_from_t <- function(t, df, R2_full = NA_real_, R2_other = NA_real_
   }
 }
 
-# Cohen's f² from R²
+# Cohen's f\u00b2 from R\u00b2
 # Formula: f² = R² / (1 - R²)
 cohens_f2_from_R2 <- function(R2) {
   if (is.na(R2) || R2 < 0 || R2 >= 1) {
@@ -645,7 +645,7 @@ cohens_f2_from_R2 <- function(R2) {
 }
 
 # Cohen's f² from F-statistic and df
-# Formula: f² = (F * df1) / df2
+# Formula: f\u00b2 = (F * df1) / df2
 cohens_f2_from_F <- function(F_val, df1, df2) {
   if (any(is.na(c(F_val, df1, df2))) || F_val < 0 || df1 <= 0 || df2 <= 0) {
     return(NA_real_)
@@ -653,7 +653,7 @@ cohens_f2_from_F <- function(F_val, df1, df2) {
   (F_val * df1) / df2
 }
 
-# R² from F-statistic
+# R\u00b2 from F-statistic
 # Formula: R² = (F * df1) / (F * df1 + df2)
 # This is the same as eta² for regression models
 R2_from_F <- function(F_val, df1, df2) {
@@ -705,7 +705,7 @@ compute_regression_effects <- function(t = NA_real_, df = NA_real_,
 # ---- Ratio measures (OR, RR, IRR) ----
 
 # Odds Ratio (OR) - typically reported directly
-# CI computation: log(OR) ± z * SE(log(OR))
+# CI computation: log(OR) \u00b1 z * SE(log(OR))
 # If SE not available, approximate from CI bounds if provided
 or_ci_from_bounds <- function(OR, ciL, ciU, level = 0.95) {
   if (any(is.na(c(OR, ciL, ciU)))) {
@@ -740,7 +740,7 @@ irr_ci_from_bounds <- function(IRR, ciL, ciU, level = 0.95) {
 
 # Rank-biserial correlation (r_rb) from Mann-Whitney U
 # Formula: r_rb = 1 - (2*U) / (n1 * n2)
-# Or from z-score: r_rb ≈ z / sqrt(N)
+# Or from z-score: r_rb \u2248 z / sqrt(N)
 rank_biserial_r_from_U <- function(U, n1, n2) {
   if (any(is.na(c(U, n1, n2))) || n1 <= 0 || n2 <= 0) {
     return(NA_real_)
@@ -759,8 +759,8 @@ rank_biserial_r_from_z <- function(z, N) {
   z / sqrt(N)
 }
 
-# Cliff's delta (δ) from Mann-Whitney U
-# Formula: δ = (2*U) / (n1 * n2) - 1
+# Cliff's delta (\u03b4) from Mann-Whitney U
+# Formula: \u03b4 = (2*U) / (n1 * n2) - 1
 cliffs_delta_from_U <- function(U, n1, n2) {
   if (any(is.na(c(U, n1, n2))) || n1 <= 0 || n2 <= 0) {
     return(NA_real_)
@@ -772,7 +772,7 @@ cliffs_delta_from_U <- function(U, n1, n2) {
 }
 
 # Kendall's W (coefficient of concordance) from chi-square
-# Formula: W = χ² / (N * (k - 1))
+# Formula: W = \u03c7\u00b2 / (N * (k - 1))
 # where k = number of groups/raters, N = number of items
 kendalls_W_from_chisq <- function(chisq, N, k) {
   if (any(is.na(c(chisq, N, k))) || N <= 0 || k <= 1) {
@@ -786,8 +786,8 @@ kendalls_W_from_chisq <- function(chisq, N, k) {
   pmin(pmax(W, 0), 1)
 }
 
-# Epsilon-squared (ε²) from Kruskal-Wallis H
-# Formula: ε² = (H - k + 1) / (N - k)
+# Epsilon-squared (\u03b5\u00b2) from Kruskal-Wallis H \u2248 eta\u00b2
+# Formula: \u03b5\u00b2 = (H - k + 1) / (N - k)
 # where k = number of groups, N = total sample size
 epsilon_squared_from_H <- function(H, N, k) {
   if (any(is.na(c(H, N, k))) || N <= 0 || k <= 1) {
@@ -802,12 +802,12 @@ epsilon_squared_from_H <- function(H, N, k) {
     return(NA_real_)
   }
   result <- numerator / denominator
-  # Epsilon² can be negative (very small effect)
+  # Epsilon\u00b2 can be negative (very small effect)
   max(0, result)
 }
 
 # Epsilon-squared from chi-square (approximation for some tests)
-# Formula: ε² = χ² / N (for some nonparametric tests)
+# Formula: \u03b5\u00b2 = \u03c7\u00b2 / N (for some nonparametric tests)
 epsilon_squared_from_chisq <- function(chisq, N) {
   if (any(is.na(c(chisq, N))) || N <= 0) {
     return(NA_real_)
@@ -833,62 +833,68 @@ get_ncp_F <- function(F_val, df1, df2, level = 0.95) {
   if (is.na(F_val) || is.na(df1) || is.na(df2) || F_val < 0) {
     return(c(NA_real_, NA_real_))
   }
-  
+
   alpha <- 1 - level
-  probs <- c(1 - alpha/2, alpha/2) # Upper/Lower probabilities for the limits
-  
+  probs <- c(1 - alpha / 2, alpha / 2) # Upper/Lower probabilities for the limits
+
   # Function to minimize: Cumulative Prob(F_obs | lambda) - target_prob = 0
-  # Note: 
+  # Note:
   # Lower limit lambda_L: P(F > F_obs | lambda_L) = alpha/2  => P(F < F_obs | lambda_L) = 1 - alpha/2
   # Upper limit lambda_U: P(F > F_obs | lambda_U) = 1 - alpha/2 => P(F < F_obs | lambda_U) = alpha/2
-  
+
   limits <- c(NA_real_, NA_real_)
-  
+
   # Search range for lambda. F-values shouldn't imply massive lambdas usually.
-  # Max lambda roughly corresponds to huge effect. 
+  # Max lambda roughly corresponds to huge effect.
   max_lambda <- 1000 * max(1, F_val)
-  
+
   # Find Lower Limit (corresponds to Upper Tail Prob = alpha/2, or CDF = 1 - alpha/2)
   # BUT: If F_obs is small, lambda_L might be 0.
   # Check P(F < F_obs | lambda=0)
-  p0 <- tryCatch(stats::pf(F_val, df1, df2, ncp = 0), error=function(e) NA)
-  
+  p0 <- tryCatch(stats::pf(F_val, df1, df2, ncp = 0), error = function(e) NA)
+
   # Upper limit for LAMBDA corresponds to LOWER CDF probability (alpha/2)
   # Lower limit for LAMBDA corresponds to HIGHER CDF probability (1 - alpha/2)
   # This is because as lambda increases, P(F < F_obs) decreases.
-  
+
   # 1. Find Upper Limit (Prob = alpha/2)
   f_upper <- function(lam) {
-    stats::pf(F_val, df1, df2, ncp = lam) - (alpha/2)
+    stats::pf(F_val, df1, df2, ncp = lam) - (alpha / 2)
   }
-  
+
   # Check if root is bracketed
-  if (!is.na(p0) && p0 > alpha/2) {
+  if (!is.na(p0) && p0 > alpha / 2) {
     # Valid upper limit > 0 exists
-    ul_try <- tryCatch({
-      stats::uniroot(f_upper, c(0, max_lambda))$root
-    }, error = function(e) NA_real_)
+    ul_try <- tryCatch(
+      {
+        stats::uniroot(f_upper, c(0, max_lambda))$root
+      },
+      error = function(e) NA_real_
+    )
     limits[2] <- ul_try
   } else {
     # Even at lambda=0, probability is too low (unlikely for upper limit)
     limits[2] <- NA_real_
   }
-  
+
   # 2. Find Lower Limit (Prob = 1 - alpha/2)
   f_lower <- function(lam) {
-    stats::pf(F_val, df1, df2, ncp = lam) - (1 - alpha/2)
+    stats::pf(F_val, df1, df2, ncp = lam) - (1 - alpha / 2)
   }
-  
-  if (!is.na(p0) && p0 > (1 - alpha/2)) {
+
+  if (!is.na(p0) && p0 > (1 - alpha / 2)) {
     # Valid lower limit > 0
-    ll_try <- tryCatch({
-       stats::uniroot(f_lower, c(0, max_lambda))$root
-    }, error = function(e) NA_real_)
+    ll_try <- tryCatch(
+      {
+        stats::uniroot(f_lower, c(0, max_lambda))$root
+      },
+      error = function(e) NA_real_
+    )
     limits[1] <- ll_try
   } else {
     limits[1] <- 0 # If p_null is too small, lower bound is 0
   }
-  
+
   return(limits)
 }
 
@@ -904,29 +910,29 @@ ci_etap2 <- function(F_val, df1, df2, level = 0.95) {
   if (any(is.na(c(F_val, df1, df2)))) {
     return(ci_result(reason = "Missing parameters"))
   }
-  
+
   lambdas <- get_ncp_F(F_val, df1, df2, level)
   if (any(is.na(lambdas))) {
     return(ci_result(reason = "Could not converge on NCP"))
   }
-  
+
   # Convert lambda to partial eta-squared
   # eta_p2 = lambda / (lambda + df1 + df2 + 1)
   # Wait, accurate formula for population estimation is:
   # eta_p2 = lambda / (lambda + df1 + df2 + 1)
   # However, Cohen's conversion often uses:
   # lambda = f^2 * (df1 + df2 + 1) ? No.
-  
+
   # Standard conversion used in MBESS/psych:
   # lambda = N_eff * f^2
   # Let's use the transformation:
   # eta_p^2 = lambda / (lambda + df1 + df2 + 1)
   # This formula assumes fixed effects ANOVA logic.
-  
+
   calc_eta <- function(lam) {
     lam / (lam + df1 + df2 + 1)
   }
-  
+
   bounds <- c(calc_eta(lambdas[1]), calc_eta(lambdas[2]))
   ci_result(bounds = bounds, method = "ncf_inversion", success = TRUE)
 }
@@ -950,13 +956,13 @@ ci_cohens_f <- function(F_val, df1, df2, level = 0.95) {
   if (!res$success) {
     return(res)
   }
-  
+
   # Convert eta2 bounds to f bounds
   # f = sqrt(eta2 / (1 - eta2))
   convert <- function(e) {
     if (is.na(e) || e >= 1) Inf else sqrt(e / (1 - e))
   }
-  
+
   bounds <- c(convert(res$bounds[1]), convert(res$bounds[2]))
   ci_result(bounds = bounds, method = "from_eta2_ncf", success = TRUE)
 }

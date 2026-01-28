@@ -1,5 +1,0 @@
-Participants in the controllable condition reported higher responsibility than the uncontrollable condition, t(28) = 2.21, p = .035, d = 0.80, 95% CI [0.12, 1.48].
-A moderate positive association was observed, r(198) = .34, p < .001, 95% CI [.21, .45].
-A chi-square indicated dependence, χ²(1) = 7.2, N = 120, phi = .10.
-Another test showed χ²(4) = 18.0, N = 300, V = .15.
-A paired-samples comparison yielded t(39) = 3.0, p = .004, d = 0.45.

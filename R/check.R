@@ -1,7 +1,7 @@
 #' Effect Size Type Definitions
 #'
 #' Maps reported effect size names to their family and variants.
-#' Based on Guide to Effect Sizes and Confidence Intervals (Jané et al., 2024)
+#' Based on Guide to Effect Sizes and Confidence Intervals (Jan\u00e9 et al., 2024)
 #' https://matthewbjane.quarto.pub/
 #'
 #' @keywords internal
@@ -105,7 +105,7 @@ EFFECT_SIZE_FAMILIES <- list(
     family = "f2",
     variants = c("cohens_f2"),
     alternatives = c("R2"),
-    description = "Cohen's f² - regression effect size"
+    description = "Cohen's f\u00b2 - regression effect size"
   )
 )
 
@@ -160,13 +160,13 @@ VARIANT_METADATA <- list(
     name = "Cohen's drm",
     assumptions = "Repeated measures design",
     when_to_use = "Repeated measures ANOVA contexts",
-    formula = "drm ≈ dz (often used interchangeably)"
+    formula = "drm \u2248 dz (often used interchangeably)"
   ),
   r = list(
     name = "Pearson r",
     assumptions = "Bivariate normal distribution",
     when_to_use = "Correlation between two continuous variables",
-    formula = "r = t / sqrt(t² + df)"
+    formula = "r = t / sqrt(t\u00b2 + df)"
   ),
   eta = list(
     name = "Eta",
@@ -178,7 +178,7 @@ VARIANT_METADATA <- list(
     name = "Eta-squared",
     assumptions = "Between-subjects ANOVA",
     when_to_use = "Simple one-way ANOVA, proportion of total variance",
-    formula = "η² = SS_effect / SS_total"
+    formula = "\u03b7\u00b2 = SS_effect / SS_total"
   ),
   partial_eta2 = list(
     name = "Partial eta-squared",
@@ -202,7 +202,7 @@ VARIANT_METADATA <- list(
     name = "Cohen's f",
     assumptions = "ANOVA effect size",
     when_to_use = "Power analysis, comparing across studies",
-    formula = "f = sqrt(η² / (1 - η²))"
+    formula = "f = sqrt(\u03b7\u00b2 / (1 - \u03b7\u00b2))"
   ),
   phi = list(
     name = "Phi coefficient",
@@ -334,15 +334,15 @@ compute_and_compare_one <- function(row,
     "dav" = "dav", "d_av" = "dav",
     "drm" = "drm", "d_rm" = "drm",
     "r" = "r", "correlation" = "r",
-    "eta" = "eta", "η" = "eta",
-    "eta2" = "eta2", "eta-squared" = "eta2", "eta squared" = "eta2", "η²" = "eta2",
+    "eta" = "eta", "\u03b7" = "eta",
+    "eta2" = "eta2", "eta-squared" = "eta2", "eta squared" = "eta2", "\u03b7\u00b2" = "eta2",
     "etap2" = "etap2", "partial eta2" = "etap2", "partial eta-squared" = "etap2",
-    "partial eta squared" = "etap2", "ηp²" = "etap2", "partial η²" = "etap2",
-    "omega2" = "omega2", "omega-squared" = "omega2", "omega squared" = "omega2", "ω²" = "omega2",
+    "partial eta squared" = "etap2", "\u03b7p\u00b2" = "etap2", "partial \u03b7\u00b2" = "etap2",
+    "omega2" = "omega2", "omega-squared" = "omega2", "omega squared" = "omega2", "\u03c9\u00b2" = "omega2",
     "f" = "cohens_f", "cohen's f" = "cohens_f", "cohens f" = "cohens_f",
-    "phi" = "phi", "φ" = "phi",
+    "phi" = "phi", "\u03c6" = "phi",
     "v" = "V", "cramer's v" = "V", "cramers v" = "V",
-    "beta" = "beta", "β" = "beta", "standardized beta" = "beta",
+    "beta" = "beta", "\u03b2" = "beta", "standardized beta" = "beta",
     "r2" = "R2", "r-squared" = "R2", "r squared" = "R2",
     "f2" = "f2", "f-squared" = "f2", "f squared" = "f2", "cohen's f2" = "f2"
   )
@@ -386,25 +386,25 @@ compute_and_compare_one <- function(row,
         suggestion <- "For t-tests, typical effect sizes are Cohen's d, Hedges' g (between-subjects), dz/dav/drm (within-subjects), or correlation r"
       }
     } else if (tt == "F") {
-      # F-tests/ANOVA: eta², partial eta², omega², Cohen's f, R²
+      # F-tests/ANOVA: eta\u00b2, partial eta\u00b2, omega\u00b2, Cohen's f, R\u00b2
       valid_types <- c("eta", "eta2", "etap2", "omega2", "cohens_f", "R2", "f2")
       if (!canonical_type %in% valid_types) {
         valid_for_test <- FALSE
-        suggestion <- "For F-tests/ANOVA, typical effect sizes are eta-squared (η²), partial eta-squared (ηp²), omega-squared (ω²), or Cohen's f"
+        suggestion <- "For F-tests/ANOVA, typical effect sizes are eta-squared (\u03b7\u00b2), partial eta-squared (\u03b7p\u00b2), omega-squared (\u03c9\u00b2), or Cohen's f"
       }
     } else if (tt == "r") {
-      # Correlation: r or R²
+      # Correlation: r or R\u00b2
       valid_types <- c("r", "R2")
       if (!canonical_type %in% valid_types) {
         valid_for_test <- FALSE
         suggestion <- "For correlations, typical effect sizes are Pearson's r or R-squared"
       }
     } else if (tt == "chisq") {
-      # Chi-square: phi (2×2), Cramer's V (larger tables)
+      # Chi-square: phi (2\u00d72), Cramer's V (larger tables)
       valid_types <- c("phi", "V")
       if (!canonical_type %in% valid_types) {
         valid_for_test <- FALSE
-        suggestion <- "For chi-square tests, typical effect sizes are phi (φ) for 2×2 tables or Cramer's V for larger tables"
+        suggestion <- "For chi-square tests, typical effect sizes are phi (\u03c6) for 2\u00d72 tables or Cramer's V for larger tables"
       }
     } else if (tt == "z") {
       # z-tests: similar to t-tests
@@ -564,7 +564,7 @@ compute_and_compare_one <- function(row,
         N <- round(df1 + 2)
         assumptions <- c(
           assumptions,
-          sprintf("Welch's t-test: conservatively estimated N ≈ %.0f (actual N uncertain)", N)
+          sprintf("Welch's t-test: conservatively estimated N \u2248 %.0f (actual N uncertain)", N)
         )
         uncertainty <- c(
           uncertainty,
@@ -815,7 +815,7 @@ compute_and_compare_one <- function(row,
         }
       }
 
-      # Add r² as alternative
+      # Add r\u00b2 as alternative
       alternatives$r_squared <- list(
         value = r_value^2,
         metadata = list(
@@ -902,7 +902,7 @@ compute_and_compare_one <- function(row,
           alternatives$omega2 <- list(
             value = anova_effects$omega2,
             metadata = VARIANT_METADATA$omega2,
-            why_consider = "Less biased population estimate than eta²"
+            why_consider = "Less biased population estimate than eta\u00b2"
           )
         }
       }
@@ -922,42 +922,42 @@ compute_and_compare_one <- function(row,
         # Compute CI for Cohen's f
         f_ci <- tryCatch(ci_cohens_f(stat, df1, df2, ci_level_used), error = function(e) list(success = FALSE))
         if (f_ci$success) {
-           if (!is.null(computed_variants$cohens_f)) {
-             computed_variants$cohens_f$ci <- f_ci$bounds
-           } else if (!is.null(alternatives$cohens_f)) {
-             alternatives$cohens_f$ci <- f_ci$bounds
-           }
+          if (!is.null(computed_variants$cohens_f)) {
+            computed_variants$cohens_f$ci <- f_ci$bounds
+          } else if (!is.null(alternatives$cohens_f)) {
+            alternatives$cohens_f$ci <- f_ci$bounds
+          }
         }
       }
 
       # Add d and r as alternatives for F-tests (helpful for meta-analysis)
       if (df1 == 1) {
-          # Equivalence to t-test: t = sqrt(F)
-          # d = 2*r / sqrt(1-r^2) where r = sqrt(eta2)
-          # Simplified: d = 2 * sqrt(F / df2) approx
-          # r = sqrt(F / (F + df2))
-          
-          r_equiv <- sqrt(stat / (stat + df2))
-          d_equiv <- 2 * sqrt(stat / df2)
-          
-          alternatives$r <- list(
-              value = r_equiv,
-              metadata = VARIANT_METADATA$r,
-              why_consider = "Correlation equivalent (since df1=1)"
-          )
-          alternatives$d <- list(
-              value = d_equiv,
-              metadata = VARIANT_METADATA$d_ind,
-              why_consider = "Cohen's d equivalent (assuming equal groups)"
-          )
-          
-          # Try CIs for these
-          n_equiv <- df1 + df2 + 1 # Approx N
-          ci_r_val <- ci_r(r_equiv, n_equiv, ci_level_used)
-          if(ci_r_val$success) alternatives$r$ci <- ci_r_val$bounds
-          
-          ci_d_val <- ci_d_ind_approx(d_equiv, n_equiv/2, n_equiv/2, ci_level_used)
-          if(!any(is.na(ci_d_val))) alternatives$d$ci <- ci_d_val
+        # Equivalence to t-test: t = sqrt(F)
+        # d = 2*r / sqrt(1-r^2) where r = sqrt(eta2)
+        # Simplified: d = 2 * sqrt(F / df2) approx
+        # r = sqrt(F / (F + df2))
+
+        r_equiv <- sqrt(stat / (stat + df2))
+        d_equiv <- 2 * sqrt(stat / df2)
+
+        alternatives$r <- list(
+          value = r_equiv,
+          metadata = VARIANT_METADATA$r,
+          why_consider = "Correlation equivalent (since df1=1)"
+        )
+        alternatives$d <- list(
+          value = d_equiv,
+          metadata = VARIANT_METADATA$d_ind,
+          why_consider = "Cohen's d equivalent (assuming equal groups)"
+        )
+
+        # Try CIs for these
+        n_equiv <- df1 + df2 + 1 # Approx N
+        ci_r_val <- ci_r(r_equiv, n_equiv, ci_level_used)
+        if (ci_r_val$success) alternatives$r$ci <- ci_r_val$bounds
+
+        ci_d_val <- ci_d_ind_approx(d_equiv, n_equiv / 2, n_equiv / 2, ci_level_used)
+        if (!any(is.na(ci_d_val))) alternatives$d$ci <- ci_d_val
       }
 
       # Compute CIs for eta-squared variants
@@ -971,7 +971,7 @@ compute_and_compare_one <- function(row,
       }
 
       if (design == "unclear") {
-        uncertainty <- c(uncertainty, "ANOVA design unclear (between/within/mixed) — computed all variants")
+        uncertainty <- c(uncertainty, "ANOVA design unclear (between/within/mixed) \u2014 computed all variants")
       }
     }
   } else if (tt == "chisq") {
@@ -989,7 +989,7 @@ compute_and_compare_one <- function(row,
       for (r in 2:20) {
         for (c in 2:20) {
           if ((r - 1) * (c - 1) == df) {
-            dims <- c(dims, sprintf("%d×%d", r, c))
+            dims <- c(dims, sprintf("%d\u00d7%d", r, c))
           }
         }
       }
@@ -1005,7 +1005,7 @@ compute_and_compare_one <- function(row,
         uncertainty <- c(
           uncertainty,
           sprintf(
-            "Table dimensions (%d×%d) imply df=%d, but reported df=%.0f - dimensions or df may be incorrect",
+            "Table dimensions (%d\u00d7%d) imply df=%d, but reported df=%.0f - dimensions or df may be incorrect",
             as.integer(table_r), as.integer(table_c),
             as.integer(expected_df), df1
           )
@@ -1643,107 +1643,106 @@ compute_and_compare_one <- function(row,
     ciU_computed = computed_ciU,
     ci_delta_lower = ci_delta_lower,
     # Status and metadata
-    
+
     # REPRO code generation
     repro_code = {
-        code <- c(
-            sprintf("# Reproducing check for %s test", tt),
-            sprintf("stat <- %.4f", stat),
-            if (!is.na(df1)) sprintf("df1 <- %.2f", df1) else NULL,
-            if (!is.na(df2)) sprintf("df2 <- %.2f", df2) else NULL,
-            if (!is.na(N)) sprintf("N <- %s", N) else NULL,
-            
-            "# Compute P-value"
+      code <- c(
+        sprintf("# Reproducing check for %s test", tt),
+        sprintf("stat <- %.4f", stat),
+        if (!is.na(df1)) sprintf("df1 <- %.2f", df1) else NULL,
+        if (!is.na(df2)) sprintf("df2 <- %.2f", df2) else NULL,
+        if (!is.na(N)) sprintf("N <- %s", N) else NULL,
+        "# Compute P-value"
+      )
+
+      # P-value code
+      p_code <- if (tt == "t") {
+        sprintf("p_val <- 2 * pt(abs(stat), df1, lower.tail = FALSE) # %.5g", p_computed)
+      } else if (tt == "F") {
+        sprintf("p_val <- pf(stat, df1, df2, lower.tail = FALSE) # %.5g", p_computed)
+      } else if (tt == "z") {
+        sprintf("p_val <- 2 * pnorm(abs(stat), lower.tail = FALSE) # %.5g", p_computed)
+      } else if (tt == "chisq") {
+        sprintf("p_val <- pchisq(stat, df1, lower.tail = FALSE) # %.5g", p_computed)
+      } else if (tt == "r") {
+        sprintf("# t-test for r\nt_stat <- stat * sqrt((df1) / (1 - stat^2))\np_val <- 2 * pt(abs(t_stat), df1, lower.tail = FALSE) # %.5g", p_computed)
+      } else {
+        "# Unknown test type"
+      }
+      code <- c(code, p_code)
+
+      code <- c(code, "# Effect Size Computations")
+
+      # Effect size code
+      es_code <- if (tt == "t") {
+        c(
+          "d_ind <- 2 * stat / sqrt(df1) # Cohens d (approx)",
+          if (!is.na(N)) sprintf("d_exact <- stat * sqrt(1/%.1f + 1/%.1f) # Assuming equal n", N / 2, N / 2) else NULL
         )
-        
-        # P-value code
-        p_code <- if (tt == "t") {
-            sprintf("p_val <- 2 * pt(abs(stat), df1, lower.tail = FALSE) # %.5g", p_computed)
-        } else if (tt == "F") {
-            sprintf("p_val <- pf(stat, df1, df2, lower.tail = FALSE) # %.5g", p_computed)
-        } else if (tt == "z") {
-            sprintf("p_val <- 2 * pnorm(abs(stat), lower.tail = FALSE) # %.5g", p_computed)
-        } else if (tt == "chisq") {
-            sprintf("p_val <- pchisq(stat, df1, lower.tail = FALSE) # %.5g", p_computed)
-        } else if (tt == "r") {
-            sprintf("# t-test for r\nt_stat <- stat * sqrt((df1) / (1 - stat^2))\np_val <- 2 * pt(abs(t_stat), df1, lower.tail = FALSE) # %.5g", p_computed)
-        } else {
-             "# Unknown test type"
-        }
-        code <- c(code, p_code)
-        
-        code <- c(code, "# Effect Size Computations")
-        
-        # Effect size code
-        es_code <- if (tt == "t") {
-             c(
-                 "d_ind <- 2 * stat / sqrt(df1) # Cohens d (approx)",
-                 if (!is.na(N)) sprintf("d_exact <- stat * sqrt(1/%.1f + 1/%.1f) # Assuming equal n", N/2, N/2) else NULL
-             )
-        } else if (tt == "F") {
-             c(
-                 "eta2 <- (stat * df1) / (stat * df1 + df2)",
-                 "cohens_f <- sqrt(eta2 / (1 - eta2))",
-                 "# Non-centrality based CI (requires effectcheck or MBESS)",
-                 sprintf("# effectcheck:::ci_cohens_f(%.2f, %.0f, %.0f)", stat, df1, df2)
-             )
-        } else if (tt == "chisq") {
-             if (!is.na(N)) "phi <- sqrt(stat / N)" else "# N needed for phi"
-        } else {
-             NULL
-        }
-        code <- c(code, es_code)
-        
-        paste(code, collapse = "\n")
+      } else if (tt == "F") {
+        c(
+          "eta2 <- (stat * df1) / (stat * df1 + df2)",
+          "cohens_f <- sqrt(eta2 / (1 - eta2))",
+          "# Non-centrality based CI (requires effectcheck or MBESS)",
+          sprintf("# effectcheck:::ci_cohens_f(%.2f, %.0f, %.0f)", stat, df1, df2)
+        )
+      } else if (tt == "chisq") {
+        if (!is.na(N)) "phi <- sqrt(stat / N)" else "# N needed for phi"
+      } else {
+        NULL
+      }
+      code <- c(code, es_code)
+
+      paste(code, collapse = "\n")
     },
-    
+
     # REPRO output generation (Simulated)
     repro_output = {
-         out <- c(
-             sprintf("> stat"),
-             sprintf("[1] %.4f", stat),
-             sprintf("> p_val"),
-             sprintf("[1] %.5g", p_computed)
-         )
-         
-         if (tt == "t") {
-             if ("d_ind" %in% names(computed_variants)) {
-                 out <- c(out, "> d_ind", sprintf("[1] %.4f", computed_variants$d_ind$value))
-             } else if ("d_ind" %in% names(alternatives)) { # Fallback code is calculating d_ind as primary
-                  out <- c(out, "> d_ind", sprintf("[1] %.4f", alternatives$d_ind$value))
-             } else {
-                  # Fallback calc for output display if not stored (e.g. from code logic)
-                  out <- c(out, "> d_ind", sprintf("[1] %.4f", 2 * stat / sqrt(df1)))
-             }
-         } else if (tt == "F") {
-             if ("eta2" %in% names(computed_variants)) {
-                 out <- c(out, "> eta2", sprintf("[1] %.4f", computed_variants$eta2$value))
-             } else {
-                 eta2_sim <- (stat * df1) / (stat * df1 + df2)
-                 out <- c(out, "> eta2", sprintf("[1] %.4f", eta2_sim))
-             }
-             
-             if ("cohens_f" %in% names(computed_variants)) {
-                 out <- c(out, "> cohens_f", sprintf("[1] %.4f", computed_variants$cohens_f$value))
-             } else {
-                 eta2_sim <- (stat * df1) / (stat * df1 + df2)
-                 f_sim <- sqrt(eta2_sim / (1 - eta2_sim))
-                 out <- c(out, "> cohens_f", sprintf("[1] %.4f", f_sim))
-             }
-         } else if (tt == "chisq") {
-             if ("phi" %in% names(computed_variants)) {
-                 out <- c(out, "> phi", sprintf("[1] %.4f", computed_variants$phi$value))
-             }
-         } else if (tt == "r") {
-             out <- c(out, "> r", sprintf("[1] %.4f", stat))
-         } else if (tt == "z") {
-             # d or r
-             if ("d" %in% names(computed_variants)) {
-                 out <- c(out, "> d_equiv", sprintf("[1] %.4f", computed_variants$d$value))
-             }
-         }
-         
-         paste(out, collapse = "\n")
+      out <- c(
+        sprintf("> stat"),
+        sprintf("[1] %.4f", stat),
+        sprintf("> p_val"),
+        sprintf("[1] %.5g", p_computed)
+      )
+
+      if (tt == "t") {
+        if ("d_ind" %in% names(computed_variants)) {
+          out <- c(out, "> d_ind", sprintf("[1] %.4f", computed_variants$d_ind$value))
+        } else if ("d_ind" %in% names(alternatives)) { # Fallback code is calculating d_ind as primary
+          out <- c(out, "> d_ind", sprintf("[1] %.4f", alternatives$d_ind$value))
+        } else {
+          # Fallback calc for output display if not stored (e.g. from code logic)
+          out <- c(out, "> d_ind", sprintf("[1] %.4f", 2 * stat / sqrt(df1)))
+        }
+      } else if (tt == "F") {
+        if ("eta2" %in% names(computed_variants)) {
+          out <- c(out, "> eta2", sprintf("[1] %.4f", computed_variants$eta2$value))
+        } else {
+          eta2_sim <- (stat * df1) / (stat * df1 + df2)
+          out <- c(out, "> eta2", sprintf("[1] %.4f", eta2_sim))
+        }
+
+        if ("cohens_f" %in% names(computed_variants)) {
+          out <- c(out, "> cohens_f", sprintf("[1] %.4f", computed_variants$cohens_f$value))
+        } else {
+          eta2_sim <- (stat * df1) / (stat * df1 + df2)
+          f_sim <- sqrt(eta2_sim / (1 - eta2_sim))
+          out <- c(out, "> cohens_f", sprintf("[1] %.4f", f_sim))
+        }
+      } else if (tt == "chisq") {
+        if ("phi" %in% names(computed_variants)) {
+          out <- c(out, "> phi", sprintf("[1] %.4f", computed_variants$phi$value))
+        }
+      } else if (tt == "r") {
+        out <- c(out, "> r", sprintf("[1] %.4f", stat))
+      } else if (tt == "z") {
+        # d or r
+        if ("d" %in% names(computed_variants)) {
+          out <- c(out, "> d_equiv", sprintf("[1] %.4f", computed_variants$d$value))
+        }
+      }
+
+      paste(out, collapse = "\n")
     },
 
     # Status and metadata

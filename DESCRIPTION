@@ -23,10 +23,11 @@ Imports:
     dplyr,
     purrr,
     tibble,
-    tidyr,
     xml2,
     rvest,
     officer,
+    glue,
+    logger,
     graphics,
     stats,
     utils
