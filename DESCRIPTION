@@ -41,11 +41,12 @@ Suggests:
     effectsize,
     jsonlite,
     pdftools,
-    tabulizer,
     tesseract,
     magick,
     tm,
     qpdf,
     Rpoppler
+Enhances:
+    tabulizer
 Depends: R (>= 3.6)
 Config/testthat/edition: 3
