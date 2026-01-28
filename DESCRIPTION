@@ -44,7 +44,6 @@ Suggests:
     tesseract,
     magick,
     tm,
-    qpdf,
-    Rpoppler
+    qpdf
 Depends: R (>= 4.1.0)
 Config/testthat/edition: 3
