@@ -48,5 +48,5 @@ Suggests:
     Rpoppler
 Enhances:
     tabulizer
-Depends: R (>= 3.6)
+Depends: R (>= 4.1.0)
 Config/testthat/edition: 3
