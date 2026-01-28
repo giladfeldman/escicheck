@@ -1,0 +1,47 @@
+# Golden Examples Test Corpus
+# These are known-good examples for regression testing
+
+# Example 1: Basic t-test with all info
+t(28) = 2.21, p = .035, d = 0.80, 95% CI [0.12, 1.48], N = 30, n1 = 15, n2 = 15
+
+# Example 2: Correlation with CI
+r(198) = .34, p < .001, 95% CI [.21, .45]
+
+# Example 3: Chi-square
+χ²(1) = 7.2, N = 120, phi = .10
+
+# Example 4: F-test / ANOVA
+F(2, 27) = 4.56, p < .05, η² = 0.25, ηp² = 0.30
+
+# Example 5: Paired t-test
+A paired-samples comparison yielded t(39) = 3.0, p = .004, d = 0.45.
+
+# Example 6: Mixed decimal styles (stress test)
+t(28) = 2,21, d = 0,45, CI [0,12; 0,78]
+
+# Example 7: CI without level
+d = 0.80, CI [0.12, 1.48]
+
+# Example 8: Multiple stats per sentence
+t(28) = 2.21, p = .035, d = 0.80, 95% CI [0.12, 1.48]. Another test: F(2, 27) = 4.56.
+
+# Example 9: z-test
+z = 2.33, p < .05
+
+# Example 10: Regression context
+The regression model was significant, F(3, 96) = 8.45, p < .001, R² = 0.21.
+
+# Example 11: Edge case - df but no N
+t(28) = 2.21, d = 0.80
+
+# Example 12: CI before effect
+95% CI [0.12, 1.48], d = 0.80, t(28) = 2.21
+
+# Example 13: Negative values
+t(28) = -2.21, CI [-0.3, 1.2]
+
+# Example 14: Leading zeros
+d = .45, CI [.12, .78]
+
+# Example 15: Unicode minus
+t(28) = −2.21, d = 0.80

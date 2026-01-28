@@ -1,0 +1,54 @@
+# Import pipe operator
+importFrom(dplyr,"%>%")
+
+# Core check functions
+export(check_text)
+export(check_file)
+export(check_files)
+export(check_dir)
+
+# statcheck-compatible API functions
+export(checkPDF)
+export(checkHTML)
+export(checkPDFdir)
+export(checkHTMLdir)
+export(checkDOCXdir)
+
+# S3 class and methods
+export(is.effectcheck)
+S3method(print, effectcheck)
+S3method(summary, effectcheck)
+S3method(print, summary.effectcheck)
+S3method(plot, effectcheck)
+S3method("[", effectcheck)
+S3method(rbind, effectcheck)
+
+# Identify and filter functions
+export(identify)
+export(get_errors)
+export(get_warnings)
+export(get_decision_errors)
+export(filter_by_test_type)
+export(filter_by_uncertainty)
+export(filter_by_source)
+export(filter_by_delta)
+export(count_by)
+
+# Variant helper functions (v2.0)
+export(get_variants)
+export(get_same_type_variants)
+export(get_alternatives)
+export(format_variants)
+export(compare_to_variants)
+export(get_variant_metadata)
+export(get_effect_family)
+
+# Parsing and I/O functions
+export(parse_text)
+export(read_any_text)
+export(extract_pdf_comprehensive)
+
+# Report and export functions
+export(render_report)
+export(export_csv)
+export(export_json)
