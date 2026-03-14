@@ -15,3 +15,6 @@ A list with family, variants, alternatives, and description
 \description{
 Returns information about an effect size family and its variants.
 }
+\examples{
+get_effect_family("d")
+}

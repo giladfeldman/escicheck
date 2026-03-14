@@ -12,8 +12,13 @@
 \item{...}{Additional arguments (ignored)}
 }
 \value{
-Invisibly returns x
+Invisibly returns \code{x}.
 }
 \description{
 Print method for summary.effectcheck objects
+}
+\examples{
+res <- check_text("t(28) = 2.21, p = .035, d = 0.80")
+s <- summary(res)
+print(s)
 }

@@ -199,6 +199,11 @@ extract_pdf_ocr <- function(pdf_path, language = "eng") {
 #' @param min_text_length Minimum text length to consider extraction successful (default 100)
 #' @return List with 'text' (main text), 'tables' (table text), 'ocr' (OCR text), 'method' (method used)
 #' @export
+#' @examples
+#' \dontrun{
+#' result <- extract_pdf_comprehensive("paper.pdf")
+#' cat(result$text)
+#' }
 extract_pdf_comprehensive <- function(pdf_path, try_tables = TRUE, try_ocr = TRUE,
                                       min_text_length = 100) {
   result <- list(

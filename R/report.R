@@ -13,6 +13,11 @@
 #' @param include_repro_code Logical, include reproducible R code section (default TRUE)
 #' @return Invisible path to the generated report file
 #' @export
+#' @examples
+#' \donttest{
+#' res <- check_text("t(28) = 2.21, p = .035, d = 0.80")
+#' generate_report(res, out = tempfile(fileext = ".html"))
+#' }
 generate_report <- function(res, out = "effectcheck_report.html",
                             format = "html", title = "EffectCheck Report",
                             author = NULL, source_name = NULL,
@@ -268,7 +273,13 @@ render_report_pdf <- function(res, out = "effectcheck_report.pdf",
 #'
 #' @param res tibble returned by check_text() / check_files()
 #' @param out output file path (html)
+#' @return Invisible path to the generated HTML report file.
 #' @export
+#' @examples
+#' \donttest{
+#' res <- check_text("t(28) = 2.21, p = .035, d = 0.80")
+#' render_report(res, out = tempfile(fileext = ".html"))
+#' }
 render_report <- function(res, out = "effectcheck_report.html") {
   stopifnot("data.frame" %in% class(res))
   
@@ -517,7 +528,13 @@ htmlEscape <- function(text) {
 #' @param out output file path (csv)
 #' @param na string to use for NA values (default: "")
 #' @param row.names logical, include row names (default: FALSE)
+#' @return Invisible path to the generated CSV file.
 #' @export
+#' @examples
+#' \donttest{
+#' res <- check_text("t(28) = 2.21, p = .035, d = 0.80")
+#' export_csv(res, out = tempfile(fileext = ".csv"))
+#' }
 export_csv <- function(res, out = "effectcheck_results.csv", na = "", row.names = FALSE) {
   stopifnot("data.frame" %in% class(res))
   
@@ -555,7 +572,13 @@ export_csv <- function(res, out = "effectcheck_results.csv", na = "", row.names 
 #' @param res tibble returned by check_text() / check_files()
 #' @param out output file path (json)
 #' @param pretty logical, pretty-print JSON (default: TRUE)
+#' @return Invisible path to the generated JSON file.
 #' @export
+#' @examples
+#' \donttest{
+#' res <- check_text("t(28) = 2.21, p = .035, d = 0.80")
+#' export_json(res, out = tempfile(fileext = ".json"))
+#' }
 export_json <- function(res, out = "effectcheck_results.json", pretty = TRUE) {
   stopifnot("data.frame" %in% class(res))
   

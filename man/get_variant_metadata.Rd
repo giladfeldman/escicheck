@@ -15,3 +15,6 @@ A list with name, assumptions, when_to_use, and formula
 \description{
 Returns metadata for a specific effect size variant type.
 }
+\examples{
+get_variant_metadata("d_ind")
+}

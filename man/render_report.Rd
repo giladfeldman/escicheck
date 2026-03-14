@@ -11,7 +11,16 @@ render_report(res, out = "effectcheck_report.html")
 
 \item{out}{output file path (html)}
 }
+\value{
+Invisible path to the generated HTML report file.
+}
 \description{
 Creates an HTML report with summary statistics, expandable sections,
 and uncertainty visualization.
+}
+\examples{
+\donttest{
+res <- check_text("t(28) = 2.21, p = .035, d = 0.80")
+render_report(res, out = tempfile(fileext = ".html"))
+}
 }

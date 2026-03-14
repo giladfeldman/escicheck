@@ -6,6 +6,10 @@
 #' @param try_ocr Logical, attempt OCR for scanned PDFs (default FALSE)
 #' @return character vector of full text
 #' @export
+#' @examples
+#' \dontrun{
+#' text <- read_any_text("paper.pdf")
+#' }
 read_any_text <- function(path, try_tables = TRUE, try_ocr = FALSE) {
   stopifnot(file.exists(path))
   ext <- tolower(tools::file_ext(path))

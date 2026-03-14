@@ -17,3 +17,7 @@ A list of alternative effect size suggestions
 \description{
 Get alternative suggestions for a row
 }
+\examples{
+res <- check_text("t(28) = 2.21, p = .035, d = 0.80")
+get_alternatives(res, 1)
+}

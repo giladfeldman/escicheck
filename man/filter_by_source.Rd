@@ -27,6 +27,6 @@ results <- check_dir("manuscripts/")
 paper1 <- filter_by_source(results, "paper1.pdf")
 
 # Get results matching pattern
-2024_papers <- filter_by_source(results, "2024.*\\\\.pdf", pattern = TRUE)
+recent <- filter_by_source(results, "2024.*\\\\.pdf", pattern = TRUE)
 }
 }

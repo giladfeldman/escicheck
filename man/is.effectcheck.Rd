@@ -15,3 +15,7 @@ Logical
 \description{
 Test if object is an effectcheck object
 }
+\examples{
+res <- check_text("t(28) = 2.21, p = .035, d = 0.80")
+is.effectcheck(res)
+}

@@ -36,3 +36,9 @@ Invisible path to the generated report file
 Creates a self-contained HTML report with executive summary, color-coded
 results table, expandable details, reproducible R code, and footer stamp.
 }
+\examples{
+\donttest{
+res <- check_text("t(28) = 2.21, p = .035, d = 0.80")
+generate_report(res, out = tempfile(fileext = ".html"))
+}
+}

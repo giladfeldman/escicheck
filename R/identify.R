@@ -213,7 +213,7 @@ filter_by_uncertainty <- function(x, levels) {
 #' paper1 <- filter_by_source(results, "paper1.pdf")
 #' 
 #' # Get results matching pattern
-#' 2024_papers <- filter_by_source(results, "2024.*\\.pdf", pattern = TRUE)
+#' recent <- filter_by_source(results, "2024.*\\.pdf", pattern = TRUE)
 #' }
 filter_by_source <- function(x, files, pattern = FALSE) {
   if (!inherits(x, "effectcheck")) {

@@ -9,6 +9,10 @@ get_tolerance(type = c("effect", "ci", "p"))
 \arguments{
 \item{type}{Type of tolerance ("effect", "ci", "p")}
 }
+\value{
+Named list of tolerance thresholds for the specified type.
+}
 \description{
 Helper to get tolerances, falling back to constants.
 }
+\keyword{internal}

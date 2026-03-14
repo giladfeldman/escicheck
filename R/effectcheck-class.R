@@ -30,6 +30,9 @@ new_effectcheck <- function(x, call = NULL, settings = list()) {
 #' @param x Object to test
 #' @return Logical
 #' @export
+#' @examples
+#' res <- check_text("t(28) = 2.21, p = .035, d = 0.80")
+#' is.effectcheck(res)
 is.effectcheck <- function(x) {
   inherits(x, "effectcheck")
 }
@@ -42,8 +45,11 @@ is.effectcheck <- function(x) {
 #' @param short Logical, if TRUE show abbreviated output (default TRUE)
 #' @param n Maximum number of rows to display (default 10)
 #' @param ... Additional arguments (ignored)
-#' @return Invisibly returns x
+#' @return Invisibly returns `x`.
 #' @export
+#' @examples
+#' res <- check_text("t(28) = 2.21, p = .035, d = 0.80")
+#' print(res)
 print.effectcheck <- function(x, short = TRUE, n = 10, ...) {
   cat("\n")
   cat("=== EffectCheck Results ===\n")
@@ -144,6 +150,9 @@ print.effectcheck <- function(x, short = TRUE, n = 10, ...) {
 #' @param ... Additional arguments (ignored)
 #' @return A list of class "summary.effectcheck" containing summary statistics
 #' @export
+#' @examples
+#' res <- check_text("t(28) = 2.21, p = .035, d = 0.80")
+#' summary(res)
 summary.effectcheck <- function(object, ...) {
   x <- object
 
@@ -233,8 +242,12 @@ summary.effectcheck <- function(object, ...) {
 #'
 #' @param x A summary.effectcheck object
 #' @param ... Additional arguments (ignored)
-#' @return Invisibly returns x
+#' @return Invisibly returns `x`.
 #' @export
+#' @examples
+#' res <- check_text("t(28) = 2.21, p = .035, d = 0.80")
+#' s <- summary(res)
+#' print(s)
 print.summary.effectcheck <- function(x, ...) {
   cat("\n")
   cat("========================================\n")
@@ -340,8 +353,13 @@ print.summary.effectcheck <- function(x, ...) {
 #' @param x An effectcheck object
 #' @param type Type of plot: "status", "uncertainty", "test_type", "delta", or "all"
 #' @param ... Additional arguments passed to plotting functions
-#' @return Invisibly returns x
+#' @return Invisibly returns `x`.
 #' @export
+#' @examples
+#' \donttest{
+#' res <- check_text("t(28) = 2.21, p = .035, d = 0.80")
+#' plot(res, type = "status")
+#' }
 plot.effectcheck <- function(x, type = c("status", "uncertainty", "test_type", "delta", "all"), ...) {
   type <- match.arg(type)
 
@@ -497,6 +515,9 @@ plot_delta <- function(x) {
 #' @param ... Subsetting arguments
 #' @return An effectcheck object
 #' @export
+#' @examples
+#' res <- check_text("t(28) = 2.21, p = .035. F(1, 50) = 4.03, p = .049")
+#' res[1, ]
 `[.effectcheck` <- function(x, ...) {
   result <- NextMethod("[")
 
@@ -517,6 +538,10 @@ plot_delta <- function(x) {
 #' @param ... effectcheck objects to combine
 #' @return Combined effectcheck object
 #' @export
+#' @examples
+#' res1 <- check_text("t(28) = 2.21, p = .035")
+#' res2 <- check_text("F(1, 50) = 4.03, p = .049")
+#' combined <- rbind(res1, res2)
 rbind.effectcheck <- function(...) {
   objects <- list(...)
 
@@ -546,6 +571,9 @@ rbind.effectcheck <- function(...) {
 #' @param row_index The row index to extract variants from
 #' @return A list with same_type and alternatives sublists
 #' @export
+#' @examples
+#' res <- check_text("t(28) = 2.21, p = .035, d = 0.80")
+#' get_variants(res, 1)
 get_variants <- function(x, row_index = 1) {
   if (!is.effectcheck(x)) {
     stop("Input must be an effectcheck object")
@@ -580,6 +608,9 @@ get_variants <- function(x, row_index = 1) {
 #' @param row_index The row index
 #' @return A list of same-type variants with their values and metadata
 #' @export
+#' @examples
+#' res <- check_text("t(28) = 2.21, p = .035, d = 0.80")
+#' get_same_type_variants(res, 1)
 get_same_type_variants <- function(x, row_index = 1) {
   variants <- get_variants(x, row_index)
   variants$same_type
@@ -591,6 +622,9 @@ get_same_type_variants <- function(x, row_index = 1) {
 #' @param row_index The row index
 #' @return A list of alternative effect size suggestions
 #' @export
+#' @examples
+#' res <- check_text("t(28) = 2.21, p = .035, d = 0.80")
+#' get_alternatives(res, 1)
 get_alternatives <- function(x, row_index = 1) {
   variants <- get_variants(x, row_index)
   variants$alternatives
@@ -605,6 +639,9 @@ get_alternatives <- function(x, row_index = 1) {
 #' @param include_alternatives Whether to include alternative suggestions
 #' @return A character string with formatted variant information
 #' @export
+#' @examples
+#' res <- check_text("t(28) = 2.21, p = .035, d = 0.80")
+#' cat(format_variants(res, 1))
 format_variants <- function(x, row_index = 1, include_alternatives = TRUE) {
   variants <- get_variants(x, row_index)
 
@@ -655,6 +692,8 @@ format_variants <- function(x, row_index = 1, include_alternatives = TRUE) {
 #' @param variant_name The name of the variant (e.g., "d_ind", "dz", "eta2")
 #' @return A list with name, assumptions, when_to_use, and formula
 #' @export
+#' @examples
+#' get_variant_metadata("d_ind")
 get_variant_metadata <- function(variant_name) {
   # Access VARIANT_METADATA from check.R
   if (exists("VARIANT_METADATA", envir = asNamespace("effectcheck"))) {
@@ -680,6 +719,8 @@ get_variant_metadata <- function(variant_name) {
 #' @param effect_type The effect size type (e.g., "d", "eta2", "r")
 #' @return A list with family, variants, alternatives, and description
 #' @export
+#' @examples
+#' get_effect_family("d")
 get_effect_family <- function(effect_type) {
   # Access EFFECT_SIZE_FAMILIES from check.R
   if (exists("EFFECT_SIZE_FAMILIES", envir = asNamespace("effectcheck"))) {
@@ -706,6 +747,9 @@ get_effect_family <- function(effect_type) {
 #' @param row_index The row index
 #' @return A data frame with variant comparisons
 #' @export
+#' @examples
+#' res <- check_text("t(28) = 2.21, p = .035, d = 0.80")
+#' compare_to_variants(res, 1)
 compare_to_variants <- function(x, row_index = 1) {
   if (!is.effectcheck(x)) {
     stop("Input must be an effectcheck object")

@@ -311,6 +311,10 @@ extract_context <- function(chunks, idx, window_size = 2, extended = FALSE) {
 #' @param context_window_size Number of sentences before/after to capture (default 2)
 #' @return Tibble with parsed elements including context windows
 #' @export
+#' @examples
+#' parsed <- parse_text("t(28) = 2.21, p = .035, d = 0.80")
+#' parsed$test_type
+#' parsed$stat_value
 parse_text <- function(text, context_window_size = 2) {
   if (length(text) == 0 || all(is.na(text))) {
     return(tibble::tibble(

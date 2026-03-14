@@ -11,6 +11,15 @@
 
 \item{...}{Additional arguments (ignored)}
 }
+\value{
+Invisibly returns \code{x}.
+}
 \description{
 Print method for effectcheck comparison
+}
+\examples{
+\donttest{
+comp <- compare_with_statcheck("t(28) = 2.21, p = .035, d = 0.80")
+print(comp)
+}
 }

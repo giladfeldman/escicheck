@@ -62,10 +62,7 @@ between reported and computed values. Uses type-matched comparison to ensure
 reported effect sizes are compared against the same type of computed values.
 }
 \examples{
-\dontrun{
-text <- "t(28) = 2.21, p = .035, d = 0.80, 95\% CI [0.12, 1.48]"
-result <- check_text(text)
+result <- check_text("t(28) = 2.21, p = .035, d = 0.80")
 print(result)
 summary(result)
-}
 }

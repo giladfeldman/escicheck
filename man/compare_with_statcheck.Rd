@@ -18,3 +18,9 @@ A tibble with source column ("both", "effectcheck_only", "statcheck_only")
 Runs both effectcheck and statcheck on the same text and returns a
 merged comparison tibble.
 }
+\examples{
+\donttest{
+comp <- compare_with_statcheck("t(28) = 2.21, p = .035, d = 0.80")
+print(comp)
+}
+}

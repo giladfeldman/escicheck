@@ -2,6 +2,7 @@
 #'
 #' Retrieves configuration values from environment variables, options, or defaults.
 #'
+#' @name effectcheck-config
 #' @keywords internal
 NULL
 
@@ -15,7 +16,7 @@ NULL
 #' @param key Configuration key (lowercase)
 #' @param default Default value if not found
 #' @return Configuration value
-#' @export
+#' @keywords internal
 get_config <- function(key, default = NULL) {
     # 1. Check Options
     opt_key <- paste0("effectcheck.", key)
@@ -56,7 +57,8 @@ get_config <- function(key, default = NULL) {
 #' Helper to get tolerances, falling back to constants.
 #'
 #' @param type Type of tolerance ("effect", "ci", "p")
-#' @export
+#' @return Named list of tolerance thresholds for the specified type.
+#' @keywords internal
 get_tolerance <- function(type = c("effect", "ci", "p")) {
     type <- match.arg(type)
 

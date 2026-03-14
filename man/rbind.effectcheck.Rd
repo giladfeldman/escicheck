@@ -15,3 +15,8 @@ Combined effectcheck object
 \description{
 Combine effectcheck objects
 }
+\examples{
+res1 <- check_text("t(28) = 2.21, p = .035")
+res2 <- check_text("F(1, 50) = 4.03, p = .049")
+combined <- rbind(res1, res2)
+}

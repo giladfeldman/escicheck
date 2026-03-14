@@ -17,3 +17,7 @@ An effectcheck object
 \description{
 Preserves effectcheck class when subsetting.
 }
+\examples{
+res <- check_text("t(28) = 2.21, p = .035. F(1, 50) = 4.03, p = .049")
+res[1, ]
+}

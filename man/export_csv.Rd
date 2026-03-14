@@ -15,7 +15,16 @@ export_csv(res, out = "effectcheck_results.csv", na = "", row.names = FALSE)
 
 \item{row.names}{logical, include row names (default: FALSE)}
 }
+\value{
+Invisible path to the generated CSV file.
+}
 \description{
 Exports check results to CSV format with proper handling of special characters
 and NA values.
+}
+\examples{
+\donttest{
+res <- check_text("t(28) = 2.21, p = .035, d = 0.80")
+export_csv(res, out = tempfile(fileext = ".csv"))
+}
 }

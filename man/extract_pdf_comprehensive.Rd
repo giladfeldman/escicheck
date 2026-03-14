@@ -26,3 +26,9 @@ List with 'text' (main text), 'tables' (table text), 'ocr' (OCR text), 'method' 
 \description{
 Tries multiple methods: regular text extraction, table extraction, and OCR.
 }
+\examples{
+\dontrun{
+result <- extract_pdf_comprehensive("paper.pdf")
+cat(result$text)
+}
+}

@@ -18,3 +18,8 @@ Tibble with parsed elements including context windows
 Extracts test statistics, effect sizes, confidence intervals, and sample sizes
 from APA-style text. Includes context window extraction for design inference.
 }
+\examples{
+parsed <- parse_text("t(28) = 2.21, p = .035, d = 0.80")
+parsed$test_type
+parsed$stat_value
+}

@@ -8,6 +8,11 @@
 #' @param ... Additional arguments passed to check_text()
 #' @return A tibble with source column ("both", "effectcheck_only", "statcheck_only")
 #' @export
+#' @examples
+#' \donttest{
+#' comp <- compare_with_statcheck("t(28) = 2.21, p = .035, d = 0.80")
+#' print(comp)
+#' }
 compare_with_statcheck <- function(text, ...) {
   if (!requireNamespace("statcheck", quietly = TRUE)) {
     warning("statcheck package not installed. Install with: install.packages('statcheck')")
@@ -39,6 +44,10 @@ compare_with_statcheck <- function(text, ...) {
 #' @param ... Additional arguments passed to check_file()
 #' @return A tibble with source column
 #' @export
+#' @examples
+#' \dontrun{
+#' comp <- compare_file_with_statcheck("paper.pdf")
+#' }
 compare_file_with_statcheck <- function(path, ...) {
   if (!requireNamespace("statcheck", quietly = TRUE)) {
     warning("statcheck package not installed. Install with: install.packages('statcheck')")
@@ -158,7 +167,13 @@ match_results <- function(ec, sc) {
 #'
 #' @param x An effectcheck_comparison object
 #' @param ... Additional arguments (ignored)
+#' @return Invisibly returns `x`.
 #' @export
+#' @examples
+#' \donttest{
+#' comp <- compare_with_statcheck("t(28) = 2.21, p = .035, d = 0.80")
+#' print(comp)
+#' }
 print.effectcheck_comparison <- function(x, ...) {
   cat("EffectCheck vs statcheck comparison\n")
   cat("-----------------------------------\n")

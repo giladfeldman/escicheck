@@ -13,6 +13,15 @@ export_json(res, out = "effectcheck_results.json", pretty = TRUE)
 
 \item{pretty}{logical, pretty-print JSON (default: TRUE)}
 }
+\value{
+Invisible path to the generated JSON file.
+}
 \description{
 Exports check results to JSON format with structured metadata.
+}
+\examples{
+\donttest{
+res <- check_text("t(28) = 2.21, p = .035, d = 0.80")
+export_json(res, out = tempfile(fileext = ".json"))
+}
 }

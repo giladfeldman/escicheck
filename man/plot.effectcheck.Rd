@@ -14,8 +14,14 @@
 \item{...}{Additional arguments passed to plotting functions}
 }
 \value{
-Invisibly returns x
+Invisibly returns \code{x}.
 }
 \description{
 Creates visualizations of effectcheck results.
+}
+\examples{
+\donttest{
+res <- check_text("t(28) = 2.21, p = .035, d = 0.80")
+plot(res, type = "status")
+}
 }

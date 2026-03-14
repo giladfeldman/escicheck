@@ -19,3 +19,7 @@ A character string with formatted variant information
 \description{
 Creates a formatted string representation of variants for a row.
 }
+\examples{
+res <- check_text("t(28) = 2.21, p = .035, d = 0.80")
+cat(format_variants(res, 1))
+}

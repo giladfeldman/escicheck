@@ -11,7 +11,11 @@ safe_stop(msg, public_msg = "An error occurred during processing.")
 
 \item{public_msg}{Optional public-facing message (default: generic error)}
 }
+\value{
+Does not return; always calls \code{\link[=stop]{stop()}}.
+}
 \description{
 Stops execution with a sanitized error message in production,
 or full details in development.
 }
+\keyword{internal}

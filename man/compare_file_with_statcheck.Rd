@@ -17,3 +17,8 @@ A tibble with source column
 \description{
 Compare effectcheck and statcheck results on a file
 }
+\examples{
+\dontrun{
+comp <- compare_file_with_statcheck("paper.pdf")
+}
+}

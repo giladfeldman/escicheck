@@ -17,3 +17,7 @@ A list of class "summary.effectcheck" containing summary statistics
 \description{
 Provides comprehensive summary statistics for effectcheck results.
 }
+\examples{
+res <- check_text("t(28) = 2.21, p = .035, d = 0.80")
+summary(res)
+}

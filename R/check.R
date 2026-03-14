@@ -2124,12 +2124,9 @@ compute_and_compare_one <- function(row,
 #' @return An effectcheck S3 object with consistency check results
 #' @export
 #' @examples
-#' \dontrun{
-#' text <- "t(28) = 2.21, p = .035, d = 0.80, 95% CI [0.12, 1.48]"
-#' result <- check_text(text)
+#' result <- check_text("t(28) = 2.21, p = .035, d = 0.80")
 #' print(result)
 #' summary(result)
-#' }
 check_text <- function(text,
                        stats = c("t", "F", "r", "chisq", "z", "U", "W", "H", "regression"),
                        ci_level = 0.95,

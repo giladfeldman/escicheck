@@ -17,3 +17,7 @@ A list with same_type and alternatives sublists
 \description{
 Extracts and parses the all_variants JSON structure for a given row.
 }
+\examples{
+res <- check_text("t(28) = 2.21, p = .035, d = 0.80")
+get_variants(res, 1)
+}

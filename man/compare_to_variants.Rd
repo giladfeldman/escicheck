@@ -17,3 +17,7 @@ A data frame with variant comparisons
 \description{
 Creates a comparison table showing the reported value against all computed variants.
 }
+\examples{
+res <- check_text("t(28) = 2.21, p = .035, d = 0.80")
+compare_to_variants(res, 1)
+}

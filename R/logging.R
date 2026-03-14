@@ -2,6 +2,7 @@
 #'
 #' Provides structured logging capabilities with fallback to standard R messaging.
 #'
+#' @name effectcheck-logging
 #' @keywords internal
 NULL
 
@@ -12,7 +13,8 @@ NULL
 #' @param level Logging level (default "INFO")
 #' @param file Optional file path to log to
 #' @param console Logical, whether to log to console (default TRUE)
-#' @export
+#' @return Invisible NULL. Called for its side effect of configuring the logger.
+#' @keywords internal
 init_logger <- function(level = c("DEBUG", "INFO", "WARN", "ERROR"),
                         file = NULL,
                         console = TRUE) {
@@ -53,7 +55,8 @@ init_logger <- function(level = c("DEBUG", "INFO", "WARN", "ERROR"),
 #'
 #' @param msg Message string (supports glue-style interpolation)
 #' @param ... variables for interpolation
-#' @export
+#' @return Invisible NULL. Called for its side effect of logging.
+#' @keywords internal
 log_info <- function(msg, ...) {
     if (requireNamespace("logger", quietly = TRUE)) {
         logger::log_info(msg, ...)
@@ -73,7 +76,8 @@ log_info <- function(msg, ...) {
 #'
 #' @param msg Message string
 #' @param ... variables for interpolation
-#' @export
+#' @return Invisible NULL. Called for its side effect of logging.
+#' @keywords internal
 log_error <- function(msg, ...) {
     if (requireNamespace("logger", quietly = TRUE)) {
         # logger::log_error handles captured locals, but we pass ... for glue
@@ -96,7 +100,8 @@ log_error <- function(msg, ...) {
 #'
 #' @param msg Internal detailed error message
 #' @param public_msg Optional public-facing message (default: generic error)
-#' @export
+#' @return Does not return; always calls [stop()].
+#' @keywords internal
 safe_stop <- function(msg, public_msg = "An error occurred during processing.") {
     is_production <- getOption("effectcheck.production_mode", FALSE)
 

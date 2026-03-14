@@ -17,3 +17,7 @@ A list of same-type variants with their values and metadata
 \description{
 Get same-type variants for a row
 }
+\examples{
+res <- check_text("t(28) = 2.21, p = .035, d = 0.80")
+get_same_type_variants(res, 1)
+}

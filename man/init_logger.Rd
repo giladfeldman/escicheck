@@ -17,6 +17,10 @@ init_logger(
 
 \item{console}{Logical, whether to log to console (default TRUE)}
 }
+\value{
+Invisible NULL. Called for its side effect of configuring the logger.
+}
 \description{
 Sets up the logging configuration.
 }
+\keyword{internal}

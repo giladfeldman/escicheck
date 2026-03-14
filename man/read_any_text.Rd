@@ -19,3 +19,8 @@ character vector of full text
 \description{
 Read text from .docx, .html, .txt, or .pdf
 }
+\examples{
+\dontrun{
+text <- read_any_text("paper.pdf")
+}
+}

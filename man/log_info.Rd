@@ -11,6 +11,10 @@ log_info(msg, ...)
 
 \item{...}{variables for interpolation}
 }
+\value{
+Invisible NULL. Called for its side effect of logging.
+}
 \description{
 Log Information Message
 }
+\keyword{internal}
