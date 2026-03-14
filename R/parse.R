@@ -109,6 +109,11 @@ normalize_text <- function(x) {
   # Must run before decimal comma conversion because "F1,200" would be corrupted
   # ============================================================================
 
+  # Fix F-test with square brackets: F[1,30] = 8.33 -> F(1, 30) = 8.33
+  # Common in Scientific Reports and some Nature portfolio journals
+  x <- gsub("F\\s*\\[\\s*(\\d+(?:\\.\\d+)?)\\s*,\\s*(\\d+(?:\\.\\d+)?)\\s*\\]",
+             "F(\\1, \\2)", x, perl = TRUE)
+
   # Fix subscript notation: t754 = -33 -> t(754) = -33
   # Common in Royal Society Open Science (RSOS) and other journals
   x <- gsub("(?<![a-zA-Z])t(\\d{2,})\\s*=\\s*([-+]?\\d)", "t(\\1) = \\2", x, perl = TRUE)
@@ -351,14 +356,16 @@ parse_text <- function(text, context_window_size = 2) {
   # This prevents str_match() from silently dropping 2nd/3rd/4th matches.
   stat_start_pattern <- paste0(
     "(?:",
-    "(?:^|(?<=\\s|,|;|\\())F\\s*\\(\\s*\\d",  # F(df1, df2)
-    "|(?:^|(?<=\\s|,|;|\\())t\\s*\\(\\s*\\d",  # t(df)
-    "|(?:^|(?<=\\s|,|;|\\())r\\s*\\(\\s*\\d",  # r(df)
-    "|(?:chi-?square|\u03c7\\s*\\^?2|Chi-?square|chi2|X\\s*\\^?2)\\s*\\(\\s*\\d",
-    "|(?:^|(?<=\\s|,|;|\\())H\\s*\\(\\s*\\d",  # H(df)
-    "|(?:^|(?<=\\s|,|;|\\())(?:Sobel\\s+)?[Zz]\\s*=\\s*[-+]?\\d",  # z = value, Sobel Z = value
-    "|(?:^|(?<=\\s|,|;|\\())U\\s*=\\s*\\d",    # U = value
-    "|(?:^|(?<=\\s|,|;|\\())W\\s*=\\s*\\d",    # W = value
+    "(?:^|(?<=\\s|,|;|\\(|\\[|\\{))F\\s*[\\(\\[]\\s*\\d",  # F(df1, df2) or F[df1, df2]
+    "|(?:^|(?<=\\s|,|;|\\(|\\{))t\\s*\\(\\s*\\d",  # t(df)
+    "|(?:^|(?<=\\s|,|;|\\(|\\{))t\\s*=\\s*[-+]?\\d",  # t = value (bare, for t_nodf)
+    "|(?:^|(?<=\\s|,|;|\\(|\\{))r\\s*\\(\\s*\\d",  # r(df)
+    "|(?:^|(?<=\\s|,|;|\\(|\\{))(?<![a-zA-Z])r\\s*=\\s*[-+]?\\d",  # r = value (bare, for r_nodf)
+    "|(?:chi-?square|\u03c7\\s*\\^?2|Chi-?square|chi2|X\\s*\\^?2)\\s*[\\(\\[]\\s*\\d",
+    "|(?:^|(?<=\\s|,|;|\\(|\\{))H\\s*\\(\\s*\\d",  # H(df)
+    "|(?:^|(?<=\\s|,|;|\\(|\\{))(?:Sobel\\s+)?[Zz]\\s*=\\s*[-+]?\\d",  # z = value, Sobel Z = value
+    "|(?:^|(?<=\\s|,|;|\\(|\\{))U\\s*=\\s*\\d",    # U = value
+    "|(?:^|(?<=\\s|,|;|\\(|\\{))W\\s*=\\s*\\d",    # W = value
     ")"
   )
   chunks <- unlist(lapply(chunks, function(chunk) {
@@ -435,16 +442,23 @@ parse_text <- function(text, context_window_size = 2) {
   }
 
   # Regex patterns for test statistics (improved to catch more variants)
-  # t-test: t(df) = value, t = value, t(df)=value (with/without spaces)
+  # t-test: t(df) = value, t(df)=value (with/without spaces)
   pat_t <- "t\\s*\\(\\s*(\\d+(?:\\.\\d+)?)\\s*\\)\\s*=\\s*([-+]?\\d*\\.?\\d+)"
-  # F-test: F(df1, df2) = value, F(df1,df2)=value, F = value (with/without spaces)
-  pat_F <- "F\\s*\\(\\s*(\\d+(?:\\.\\d+)?)\\s*,\\s*(\\d+(?:\\.\\d+)?)\\s*\\)\\s*=\\s*([-+]?\\d*\\.?\\d+)"
-  # z-test: z = value, z=value, z-value (with/without spaces)
+  # t-test without parenthetical df: "t = value, df = value"
+  pat_t_nodf <- "\\bt\\s*=\\s*([-+]?\\d*\\.?\\d+)\\s*,\\s*df\\s*=\\s*(\\d+(?:\\.\\d+)?)"
+  # F-test: F(df1, df2) = value OR F[df1, df2] = value (square brackets for Scientific Reports)
+  pat_F <- "F\\s*[\\(\\[]\\s*(\\d+(?:\\.\\d+)?)\\s*,\\s*(\\d+(?:\\.\\d+)?)\\s*[\\)\\]]\\s*=\\s*([-+]?\\d*\\.?\\d+)"
+  # z-test: z = value, z=value (with/without spaces)
   # Negative lookbehind excludes dz (Cohen's d paired) from matching
+  # Also exclude fMRI coordinates: "x = NN, y = NN, z = NN" pattern
   # Also match "Sobel Z = value" as a named z-test variant
   pat_z <- "(?:(?<![a-zA-Z])z|Sobel\\s+[Zz])\\s*=\\s*([-+]?\\d*\\.?\\d+)"
-  # Correlation: r(df) = value, r = value, r(df)=value
+  # Pattern to detect fMRI/MNI coordinate context (used to filter z false positives)
+  pat_fmri_coords <- "[xyz]\\s*=\\s*[-+]?\\d+\\s*,\\s*[xyz]\\s*=\\s*[-+]?\\d+\\s*,\\s*[xyz]\\s*=\\s*[-+]?\\d+"
+  # Correlation: r(df) = value, r(df)=value
   pat_r <- "r\\s*\\(\\s*(\\d+(?:\\.\\d+)?)\\s*\\)\\s*=\\s*([-+]?\\d*\\.?\\d+)"
+  # Correlation without df: r = value (requires p-value nearby for validation)
+  pat_r_nodf <- "(?<![a-zA-Z])r\\s*=\\s*([-+]?\\d*\\.?\\d+)"
   # Chi-square: chi-square(df) = value, \u03c7\u00b2(df) = value, Chi-square(df)=value
   # Also match: \u03c72, chi2, X2, X\u00b2
   pat_chi <- "(?:chi-?square|\u03c7\\s*\\^?2|\u03c7\u00b2|Chi-?square|chi2|X\\s*\\^?2|X\u00b2)\\s*\\(\\s*(\\d+(?:\\.\\d+)?)\\s*\\)\\s*=\\s*([-+]?\\d*\\.?\\d+)"
@@ -464,8 +478,11 @@ parse_text <- function(text, context_window_size = 2) {
 
   # Patterns for sample sizes and design info
   # Improved p-value regex: handle optional leading '0', various separators, and spaces
-  # Also match "p < 0.001" (with leading zero) and "p = .05"
-  pat_p <- "\\bp\\s*([<=>]{1,2})\\s*(0?\\.[0-9]+|[01]\\.[0-9]+|[01])"
+  # Match both lowercase p and uppercase P (Nature, Scientific Reports, medical journals)
+  # Also match "p < 0.001" (with leading zero) and "p = .05" (without)
+  pat_p <- "\\b[pP]\\s*([<=>]{1,2})\\s*(0?\\.[0-9]+|[01]\\.[0-9]+|[01])"
+  # Scientific notation p-values: p < 10^-15, p < 10-12 (PDF strips ^ in exponent)
+  pat_p_sci <- "\\b[pP]\\s*([<=>]{1,2})\\s*10\\s*\\^?\\s*[-\u2212](\\d+)"
   # N regex: restrict to word boundary and look for nearby equals
   pat_N <- "\\bN\\s*=\\s*(\\d+)"
   pat_n1 <- "\\bn1\\s*=\\s*(\\d+)"
@@ -551,17 +568,28 @@ parse_text <- function(text, context_window_size = 2) {
 
     # Match test statistics
     m_t <- stringr::str_match(s, pat_t)
+    m_t_nodf <- stringr::str_match(s, pat_t_nodf)
     m_F <- stringr::str_match(s, pat_F)
     m_z <- stringr::str_match(s, pat_z)
     m_r <- stringr::str_match(s, pat_r)
+    m_r_nodf <- stringr::str_match(s, pat_r_nodf)
     m_chi <- stringr::str_match(s, pat_chi)
     m_chi_nodf <- stringr::str_match(s, pat_chi_nodf)
     m_U <- stringr::str_match(s, pat_U)
     m_W_stat <- stringr::str_match(s, pat_W)
     m_H <- stringr::str_match(s, pat_H)
 
-    # Match sample sizes and design info
+    # Match p-values (try scientific notation first, then standard)
+    m_p_sci <- stringr::str_match(s, pat_p_sci)
     m_p <- stringr::str_match(s, pat_p)
+    # If scientific notation p matched, convert to standard format for downstream use
+    if (!all(is.na(m_p_sci))) {
+      sci_exp <- as.integer(m_p_sci[3])
+      # Format as plain decimal string (not scientific notation) to survive downstream gsub
+      sci_val <- format(10^(-sci_exp), scientific = FALSE)
+      # Override m_p with synthesized match: symbol from original, value as decimal
+      m_p <- matrix(c(m_p_sci[1], m_p_sci[2], sci_val), nrow = 1)
+    }
 
     # Enhanced N extraction with extended context and global fallback (Phase 2C)
     # Priority: local context > extended context > global
@@ -636,6 +664,11 @@ parse_text <- function(text, context_window_size = 2) {
       test_type <- "t"
       df1 <- numify(m_t[2])
       stat_value <- numify(m_t[3])
+    } else if (!all(is.na(m_t_nodf))) {
+      # t = value, df = value (non-standard format, e.g., "one-sample t-test: t = -1.30, df = 42")
+      test_type <- "t"
+      stat_value <- numify(m_t_nodf[2])
+      df1 <- numify(m_t_nodf[3])
     } else if (!all(is.na(m_F))) {
       test_type <- "F"
       df1 <- numify(m_F[2])
@@ -645,6 +678,16 @@ parse_text <- function(text, context_window_size = 2) {
       test_type <- "r"
       df1 <- numify(m_r[2])
       stat_value <- numify(m_r[3])
+    } else if (!all(is.na(m_r_nodf))) {
+      # r = value without df (requires p-value nearby to avoid false positives)
+      has_p <- !all(is.na(stringr::str_match(s, pat_p)))
+      r_val <- numify(m_r_nodf[2])
+      # Only accept if: (a) p-value nearby AND (b) |r| <= 1 to avoid matching unrelated "r = ..."
+      if (has_p && !is.na(r_val) && abs(r_val) <= 1) {
+        test_type <- "r"
+        stat_value <- r_val
+        # df is NA -- will be flagged as "requires verification" in check.R
+      }
     } else if (!all(is.na(m_chi))) {
       test_type <- "chisq"
       df1 <- numify(m_chi[2])
@@ -690,8 +733,12 @@ parse_text <- function(text, context_window_size = 2) {
     }
     # z-test is checked last - if U or W consumed the sentence, z is auxiliary
     if (is.na(test_type) && !all(is.na(m_z))) {
-      test_type <- "z"
-      stat_value <- numify(m_z[2])
+      # Filter out fMRI/MNI coordinate false positives (x = NN, y = NN, z = NN)
+      is_fmri <- grepl(pat_fmri_coords, s, perl = TRUE)
+      if (!is_fmri) {
+        test_type <- "z"
+        stat_value <- numify(m_z[2])
+      }
     }
 
     # Extract z_auxiliary for nonparametric tests
