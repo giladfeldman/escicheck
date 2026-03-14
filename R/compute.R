@@ -1030,6 +1030,8 @@ ci_etap2 <- function(F_val, df1, df2, level = 0.95) {
 }
 
 #' Alias for ci_etap2 (used for eta2 when design implies equivalence or as approximation)
+#' @inheritParams ci_etap2
+#' @keywords internal
 ci_eta2 <- ci_etap2
 
 #' Calculate CI for Cohen's f

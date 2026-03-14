@@ -1,6 +1,9 @@
 # Import pipe operator
 importFrom(dplyr,"%>%")
 
+# Import stats functions used in package
+importFrom(stats, median, qnorm, sd)
+
 # Core check functions
 export(check_text)
 export(check_file)

@@ -2,7 +2,7 @@
 % Please edit documentation in R/api.R
 \name{process_files_internal}
 \alias{process_files_internal}
-\title{Check a directory for statistical consistency}
+\title{Internal helper to process a list of files}
 \usage{
 process_files_internal(
   files,
@@ -12,31 +12,18 @@ process_files_internal(
 )
 }
 \arguments{
+\item{files}{Character vector of file paths to process}
+
+\item{read_args}{List of arguments for read_any_text()}
+
+\item{check_args}{List of arguments for check_text()}
+
 \item{messages}{Logical, show progress messages (default TRUE)}
-
-\item{dir}{Directory path to scan}
-
-\item{subdir}{Logical, recurse into subdirectories (default TRUE)}
-
-\item{pattern}{File pattern regex (default matches .pdf, .html, .htm, .docx, .txt)}
-
-\item{try_tables}{Logical, attempt table extraction from PDFs (default TRUE)}
-
-\item{try_ocr}{Logical, attempt OCR for scanned PDFs (default FALSE)}
-
-\item{...}{Additional arguments passed to check_text()}
 }
 \value{
 An effectcheck object with results from all files
 }
 \description{
-Recursively scans a directory for supported files and checks all
-detected statistics for consistency.
+Internal helper to process a list of files
 }
-\examples{
-\dontrun{
-results <- check_dir("manuscripts/")
-summary(results)
-plot(results, type = "all")
-}
-}
+\keyword{internal}

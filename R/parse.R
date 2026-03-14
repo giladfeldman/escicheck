@@ -1,3 +1,6 @@
+# Suppress R CMD check NOTEs for NSE column references
+utils::globalVariables(c("p_reported", "test_type"))
+
 #' Normalize text for parsing
 #'
 #' Comprehensive normalization pipeline handling Unicode, decimals, whitespace,

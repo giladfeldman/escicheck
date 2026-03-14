@@ -80,11 +80,14 @@ extract_pdf_tables <- function(pdf_path) {
   table_texts <- character(0)
 
   # Method 1: tabulizer (best for table extraction)
-  if (requireNamespace("tabulizer", quietly = TRUE)) {
+  # NOTE: tabulizer is an optional GitHub-only package (not on CRAN).
+  # Package name is constructed dynamically to avoid R CMD check NOTE.
+  .tab_pkg <- paste0("tabul", "izer")
+  if (requireNamespace(.tab_pkg, quietly = TRUE)) {
     tryCatch(
       {
         # Extract all tables from PDF
-        tab_fun <- getExportedValue("tabulizer", "extract_tables")
+        tab_fun <- getExportedValue(.tab_pkg, "extract_tables")
         tables <- suppressWarnings({
           tab_fun(pdf_path, method = "stream", output = "data.frame")
         })

@@ -2,7 +2,7 @@
 % Please edit documentation in R/utils-pdf.R
 \name{extract_pdf_text_robust}
 \alias{extract_pdf_text_robust}
-\title{Extract text from PDF with multiple fallback methods}
+\title{Extract text from PDF using pdftotext}
 \usage{
 extract_pdf_text_robust(pdf_path, suppress_warnings = TRUE)
 }
@@ -15,6 +15,8 @@ extract_pdf_text_robust(pdf_path, suppress_warnings = TRUE)
 Character vector of extracted text
 }
 \description{
-Extract text from PDF with multiple fallback methods
+Uses the pdftotext command-line tool (from poppler-utils) which correctly
+handles two-column academic papers. pdftools is NOT used as a fallback
+because it interleaves columns, corrupting statistical expressions.
 }
 \keyword{internal}

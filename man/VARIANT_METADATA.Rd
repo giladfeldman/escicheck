@@ -5,7 +5,7 @@
 \alias{VARIANT_METADATA}
 \title{Variant Metadata}
 \format{
-An object of class \code{list} of length 21.
+An object of class \code{list} of length 25.
 }
 \usage{
 VARIANT_METADATA

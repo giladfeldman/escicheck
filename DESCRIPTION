@@ -2,7 +2,7 @@ Package: effectcheck
 Type: Package
 Title: Effect Size Checker for APA-Style Results
 Version: 0.2.0
-Authors@R: c(person(given = "Your", family = "Name", role = c("aut", "cre"), email = "you@example.com"))
+Authors@R: c(person(given = "Gilad", family = "Feldman", role = c("aut", "cre"), email = "giladfel@gmail.com"))
 Description: A conservative, assumption-aware statistical consistency checker for 
     APA-style research results. Parses test statistics, effect sizes, and confidence 
     intervals from text, PDF, HTML, and Word documents. Recomputes effect sizes using 
@@ -14,7 +14,7 @@ Description: A conservative, assumption-aware statistical consistency checker fo
     to statcheck.
 License: MIT + file LICENSE
 Encoding: UTF-8
-LazyData: true
+LazyData: false
 Roxygen: list(markdown = TRUE)
 RoxygenNote: 7.3.3
 Imports:

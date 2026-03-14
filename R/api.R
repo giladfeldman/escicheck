@@ -43,27 +43,14 @@ check_file <- function(path, try_tables = TRUE, try_ocr = FALSE, ...) {
   result
 }
 
-#' Check a directory for statistical consistency
+#' Internal helper to process a list of files
 #'
-#' Recursively scans a directory for supported files and checks all
-#' detected statistics for consistency.
-#'
-#' @param dir Directory path to scan
-#' @param subdir Logical, recurse into subdirectories (default TRUE)
-#' @param pattern File pattern regex (default matches .pdf, .html, .htm, .docx, .txt)
-#' @param try_tables Logical, attempt table extraction from PDFs (default TRUE)
-#' @param try_ocr Logical, attempt OCR for scanned PDFs (default FALSE)
+#' @param files Character vector of file paths to process
+#' @param read_args List of arguments for read_any_text()
+#' @param check_args List of arguments for check_text()
 #' @param messages Logical, show progress messages (default TRUE)
-#' @param ... Additional arguments passed to check_text()
 #' @return An effectcheck object with results from all files
-#' @export
-#' @examples
-#' \dontrun{
-#' results <- check_dir("manuscripts/")
-#' summary(results)
-#' plot(results, type = "all")
-#' }
-# Internal helper to reduce code duplication
+#' @keywords internal
 process_files_internal <- function(files,
                                    read_args = list(),
                                    check_args = list(),
