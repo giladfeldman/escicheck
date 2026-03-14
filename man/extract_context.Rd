@@ -12,11 +12,13 @@ extract_context(chunks, idx, window_size = 2, extended = FALSE)
 \item{idx}{Index of current sentence}
 
 \item{window_size}{Number of sentences before/after to include (default 2)}
+
+\item{extended}{Logical, return extended context (default FALSE)}
 }
 \value{
 Character vector of context sentences
 }
 \description{
-Gets ±n sentences around a given sentence index for design inference.
+Gets n sentences around a given sentence index for design inference.
 }
 \keyword{internal}

@@ -68,7 +68,7 @@ has_effectsize <- function() {
 #' @param n1 Sample size 1
 #' @param n2 Sample size 2
 #' @param level Confidence level (default 0.95)
-#' @return Vector of bounds [lower, upper]
+#' @return Vector of bounds (lower, upper)
 #' @keywords internal
 ci_d_ind_approx <- function(d, n1, n2, level = 0.95) {
   if (any(is.na(c(d, n1, n2)))) {
@@ -88,7 +88,7 @@ ci_d_ind_approx <- function(d, n1, n2, level = 0.95) {
 #' @param n1 Sample size 1
 #' @param n2 Sample size 2
 #' @param level Confidence level (default 0.95)
-#' @return Vector of bounds [lower, upper]
+#' @return Vector of bounds (lower, upper)
 #' @keywords internal
 ci_d_ind_noncentral_t <- function(d, n1, n2, level = 0.95) {
   if (any(is.na(c(d, n1, n2)))) {
@@ -303,7 +303,7 @@ r_from_t <- function(t, df) {
 #' @param r Correlation coefficient
 #' @param n Sample size
 #' @param level Confidence level
-#' @return Vector of bounds [lower, upper]
+#' @return Vector of bounds (lower, upper)
 #' @keywords internal
 fisher_ci_r <- function(r, n, level = 0.95) {
   if (any(is.na(c(r, n))) || n <= 3 || abs(r) >= 1) {
@@ -497,8 +497,8 @@ eta2_from_F <- function(F_val, df1, df2) {
 
 # Partial eta-squared (\u03b7p\u00b2) from F-statistic
 # Formula: \u03b7p\u00b2 = (F * df1) / (F * df1 + df2)
-# Note: For one-way ANOVA, partial eta² = eta²
-# For factorial designs, partial eta² controls for other factors
+# Note: For one-way ANOVA, partial eta^2 = eta^2
+# For factorial designs, partial eta^2 controls for other factors
 partial_eta2_from_F <- function(F_val, df1, df2) {
   # Ensure scalar inputs
   F_val <- as.numeric(F_val[1])
@@ -508,16 +508,16 @@ partial_eta2_from_F <- function(F_val, df1, df2) {
   if (any(is.na(c(F_val, df1, df2))) || F_val < 0 || df1 <= 0 || df2 <= 0) {
     return(NA_real_)
   }
-  # Partial eta² formula is the same as eta² for one-way designs
+  # Partial eta^2 formula is the same as eta^2 for one-way designs
   # For factorial designs, this would need SS_effect and SS_error explicitly
   # Here we use the approximation that works for one-way and some factorial cases
   (F_val * df1) / (F_val * df1 + df2)
 }
 
-# Generalized eta-squared (ηG²) from F-statistic
-# Formula: ηG² = SS_effect / (SS_effect + SS_error + SS_subjects)
+# Generalized eta-squared (eta_G^2) from F-statistic
+# Formula: eta_G^2 = SS_effect / (SS_effect + SS_error + SS_subjects)
 # This requires more information than just F, df1, df2
-# Approximation for between-subjects: same as eta²
+# Approximation for between-subjects: same as eta^2
 # For within-subjects: requires knowledge of design structure
 generalized_eta2_from_F <- function(F_val, df1, df2, design = "between") {
   # Ensure scalar inputs
@@ -528,7 +528,7 @@ generalized_eta2_from_F <- function(F_val, df1, df2, design = "between") {
   if (any(is.na(c(F_val, df1, df2))) || F_val < 0 || df1 <= 0 || df2 <= 0) {
     return(NA_real_)
   }
-  # For between-subjects, generalized eta² ≈ eta²
+  # For between-subjects, generalized eta^2 ~= eta^2
   if (design == "between") {
     return(eta2_from_F(F_val, df1, df2))
   }
@@ -537,9 +537,9 @@ generalized_eta2_from_F <- function(F_val, df1, df2, design = "between") {
   NA_real_
 }
 
-# Omega-squared (ω²) from F-statistic
-# Formula: ω² = (F * df1 - df1) / (F * df1 + df2 + 1)
-# This is a less biased estimate than eta²
+# Omega-squared (omega^2) from F-statistic
+# Formula: omega^2 = (F * df1 - df1) / (F * df1 + df2 + 1)
+# This is a less biased estimate than eta^2
 omega2_from_F <- function(F_val, df1, df2) {
   # Ensure scalar inputs
   F_val <- as.numeric(F_val[1])
@@ -609,7 +609,7 @@ compute_all_anova_effects <- function(F_val, df1, df2, design = "unclear") {
   results$omega2 <- omega2_from_F(F_val, df1, df2)
   results$cohens_f <- cohens_f_from_F(F_val, df1, df2)
 
-  # Generalized eta² depends on design
+  # Generalized eta^2 depends on design
   if (design == "between") {
     results$generalized_eta2 <- generalized_eta2_from_F(F_val, df1, df2, "between")
   } else if (design == "within") {
@@ -628,9 +628,9 @@ compute_all_anova_effects <- function(F_val, df1, df2, design = "unclear") {
 
 # ---- Regression & GLM effect sizes ----
 
-# Standardized beta (β) from t-statistic
-# Formula: β = t / sqrt(t² + df)
-# This is an approximation; exact β requires raw coefficients and SDs
+# Standardized beta (beta) from t-statistic
+# Formula: beta = t / sqrt(t^2 + df)
+# This is an approximation; exact beta requires raw coefficients and SDs
 standardized_beta_from_t <- function(t, df) {
   if (any(is.na(c(t, df))) || df <= 0) {
     return(NA_real_)
@@ -639,7 +639,7 @@ standardized_beta_from_t <- function(t, df) {
 }
 
 # Partial correlation (r_partial) from t-statistic
-# Formula: r_partial = t / sqrt(t² + df)
+# Formula: r_partial = t / sqrt(t^2 + df)
 # This is the same as standardized beta for simple regression
 partial_r_from_t <- function(t, df) {
   if (any(is.na(c(t, df))) || df <= 0) {
@@ -648,10 +648,10 @@ partial_r_from_t <- function(t, df) {
   t / sqrt(t^2 + df)
 }
 
-# Semi-partial correlation (r_semi) from t-statistic and R²
-# Formula: r_semi = t / sqrt(t² + df) * sqrt(1 - R²_other)
-# Requires R² of model without this predictor
-# Approximation: if R²_other unknown, use r_semi ≈ r_partial * sqrt(1 - R²_full)
+# Semi-partial correlation (r_semi) from t-statistic and R^2
+# Formula: r_semi = t / sqrt(t^2 + df) * sqrt(1 - R^2_other)
+# Requires R^2 of model without this predictor
+# Approximation: if R^2_other unknown, use r_semi ~= r_partial * sqrt(1 - R^2_full)
 semi_partial_r_from_t <- function(t, df, R2_full = NA_real_, R2_other = NA_real_) {
   if (any(is.na(c(t, df))) || df <= 0) {
     return(NA_real_)
@@ -659,21 +659,21 @@ semi_partial_r_from_t <- function(t, df, R2_full = NA_real_, R2_other = NA_real_
 
   r_partial <- partial_r_from_t(t, df)
 
-  # If we have R² information, use it
+  # If we have R^2 information, use it
   if (!is.na(R2_full) && !is.na(R2_other)) {
     return(r_partial * sqrt(1 - R2_other))
   } else if (!is.na(R2_full)) {
-    # Approximation: assume this predictor explains some of R²
-    # Conservative: use R²_full as upper bound
+    # Approximation: assume this predictor explains some of R^2
+    # Conservative: use R^2_full as upper bound
     return(r_partial * sqrt(1 - R2_full))
   } else {
-    # No R² info - return NA
+    # No R^2 info - return NA
     return(NA_real_)
   }
 }
 
 # Cohen's f\u00b2 from R\u00b2
-# Formula: f² = R² / (1 - R²)
+# Formula: f^2 = R^2 / (1 - R^2)
 cohens_f2_from_R2 <- function(R2) {
   if (is.na(R2) || R2 < 0 || R2 >= 1) {
     return(NA_real_)
@@ -684,7 +684,7 @@ cohens_f2_from_R2 <- function(R2) {
   R2 / (1 - R2)
 }
 
-# Cohen's f² from F-statistic and df
+# Cohen's f^2 from F-statistic and df
 # Formula: f\u00b2 = (F * df1) / df2
 cohens_f2_from_F <- function(F_val, df1, df2) {
   if (any(is.na(c(F_val, df1, df2))) || F_val < 0 || df1 <= 0 || df2 <= 0) {
@@ -694,8 +694,8 @@ cohens_f2_from_F <- function(F_val, df1, df2) {
 }
 
 # R\u00b2 from F-statistic
-# Formula: R² = (F * df1) / (F * df1 + df2)
-# This is the same as eta² for regression models
+# Formula: R^2 = (F * df1) / (F * df1 + df2)
+# This is the same as eta^2 for regression models
 R2_from_F <- function(F_val, df1, df2) {
   if (any(is.na(c(F_val, df1, df2))) || F_val < 0 || df1 <= 0 || df2 <= 0) {
     return(NA_real_)
@@ -727,13 +727,13 @@ compute_regression_effects <- function(t = NA_real_, df = NA_real_,
     results$cohens_f2 <- cohens_f2_from_F(F_val, df1, df2)
     results$R2 <- R2_from_F(F_val, df1, df2)
 
-    # If we have R², can compute semi-partial r approximation
+    # If we have R^2, can compute semi-partial r approximation
     if (!is.na(results$R2) && !is.na(results$partial_r)) {
       results$semi_partial_r <- semi_partial_r_from_t(t, df, R2_full = results$R2)
     }
   }
 
-  # If R² directly provided, use it
+  # If R^2 directly provided, use it
   if (!is.na(R2)) {
     results$R2 <- R2
     results$cohens_f2 <- cohens_f2_from_R2(R2)

@@ -1,7 +1,7 @@
 #' Effect Size Type Definitions
 #'
 #' Maps reported effect size names to their family and variants.
-#' Based on Guide to Effect Sizes and Confidence Intervals (Jan\u00e9 et al., 2024)
+#' Based on Guide to Effect Sizes and Confidence Intervals (Jane et al., 2024)
 #' https://matthewbjane.quarto.pub/
 #'
 #' @keywords internal
@@ -209,19 +209,19 @@ VARIANT_METADATA <- list(
     name = "Partial eta-squared",
     assumptions = "Factorial ANOVA",
     when_to_use = "When controlling for other factors in ANOVA",
-    formula = "ηp² = SS_effect / (SS_effect + SS_error)"
+    formula = "\u03b7p\u00b2 = SS_effect / (SS_effect + SS_error)"
   ),
   generalized_eta2 = list(
     name = "Generalized eta-squared",
     assumptions = "Mixed/repeated measures ANOVA",
     when_to_use = "Comparing effects across different designs",
-    formula = "ηG² = SS_effect / (SS_effect + SS_subjects + SS_error)"
+    formula = "\u03b7G\u00b2 = SS_effect / (SS_effect + SS_subjects + SS_error)"
   ),
   omega2 = list(
     name = "Omega-squared",
     assumptions = "Population estimate",
-    when_to_use = "Less biased than eta², better for small samples",
-    formula = "ω² = (SS_effect - df_effect*MS_error) / (SS_total + MS_error)"
+    when_to_use = "Less biased than \u03b7\u00b2, better for small samples",
+    formula = "\u03c9\u00b2 = (SS_effect - df_effect*MS_error) / (SS_total + MS_error)"
   ),
   cohens_f = list(
     name = "Cohen's f",
@@ -233,37 +233,37 @@ VARIANT_METADATA <- list(
     name = "Phi coefficient",
     assumptions = "2x2 contingency table",
     when_to_use = "Association in 2x2 tables",
-    formula = "φ = sqrt(χ² / N)"
+    formula = "\u03c6 = sqrt(\u03c7\u00b2 / N)"
   ),
   V = list(
     name = "Cramer's V",
     assumptions = "Larger contingency tables",
     when_to_use = "Association in tables larger than 2x2",
-    formula = "V = sqrt(χ² / (N * min(r-1, c-1)))"
+    formula = "V = sqrt(\u03c7\u00b2 / (N * min(r-1, c-1)))"
   ),
   standardized_beta = list(
     name = "Standardized beta",
     assumptions = "Multiple regression",
     when_to_use = "Comparing predictor importance in regression",
-    formula = "β = b * (SD_x / SD_y)"
+    formula = "\u03b2 = b * (SD_x / SD_y)"
   ),
   partial_r = list(
     name = "Partial r",
     assumptions = "Multiple regression",
     when_to_use = "Unique contribution controlling for other predictors",
-    formula = "partial r = t / sqrt(t² + df_residual)"
+    formula = "partial r = t / sqrt(t\u00b2 + df_residual)"
   ),
   cohens_f2 = list(
-    name = "Cohen's f²",
+    name = "Cohen's f\u00b2",
     assumptions = "Regression effect size",
-    when_to_use = "Effect size for R² change, power analysis",
-    formula = "f² = R² / (1 - R²)"
+    when_to_use = "Effect size for R\u00b2 change, power analysis",
+    formula = "f\u00b2 = R\u00b2 / (1 - R\u00b2)"
   ),
   R2 = list(
     name = "R-squared",
     assumptions = "Linear regression",
     when_to_use = "Proportion of variance explained by model",
-    formula = "R² = SS_regression / SS_total"
+    formula = "R\u00b2 = SS_regression / SS_total"
   ),
   rank_biserial_r = list(
     name = "Rank-biserial r",
@@ -2119,6 +2119,8 @@ compute_and_compare_one <- function(row,
 #' @param tol_ci Tolerance for CI bounds (default 0.02)
 #' @param tol_p Tolerance for p-values (default 0.001)
 #' @param messages Logical, show progress messages (default FALSE)
+#' @param max_text_length Maximum total text length in characters (default 10^7)
+#' @param max_stats_per_text Maximum number of stats to process per text (default 10000)
 #' @return An effectcheck S3 object with consistency check results
 #' @export
 #' @examples

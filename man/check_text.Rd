@@ -6,7 +6,7 @@
 \usage{
 check_text(
   text,
-  stats = c("t", "F", "r", "chisq", "z"),
+  stats = c("t", "F", "r", "chisq", "z", "U", "W", "H", "regression"),
   ci_level = 0.95,
   alpha = 0.05,
   one_tailed = FALSE,
@@ -48,6 +48,10 @@ check_text(
 \item{tol_p}{Tolerance for p-values (default 0.001)}
 
 \item{messages}{Logical, show progress messages (default FALSE)}
+
+\item{max_text_length}{Maximum total text length in characters (default 10^7)}
+
+\item{max_stats_per_text}{Maximum number of stats to process per text (default 10000)}
 }
 \value{
 An effectcheck S3 object with consistency check results

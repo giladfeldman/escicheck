@@ -206,7 +206,7 @@ extract_pdf_comprehensive <- function(pdf_path, try_tables = TRUE, try_ocr = TRU
   )
 
   # Step 1: Extract text via pdftotext (required)
-  # Let "pdftotext not found" errors propagate — they are not recoverable.
+  # Let "pdftotext not found" errors propagate -- they are not recoverable.
   # Only catch errors from the extraction itself (e.g., corrupted PDF).
   text_main <- tryCatch(
     {

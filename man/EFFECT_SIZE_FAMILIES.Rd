@@ -12,7 +12,7 @@ EFFECT_SIZE_FAMILIES
 }
 \description{
 Maps reported effect size names to their family and variants.
-Based on Guide to Effect Sizes and Confidence Intervals (Jané et al., 2024)
+Based on Guide to Effect Sizes and Confidence Intervals (Jane et al., 2024)
 https://matthewbjane.quarto.pub/
 }
 \keyword{internal}

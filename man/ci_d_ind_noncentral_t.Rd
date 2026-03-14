@@ -16,7 +16,7 @@ ci_d_ind_noncentral_t(d, n1, n2, level = 0.95)
 \item{level}{Confidence level (default 0.95)}
 }
 \value{
-Vector of bounds \link{lower, upper}
+Vector of bounds (lower, upper)
 }
 \description{
 Uses noncentral t-distribution (via MBESS if available).

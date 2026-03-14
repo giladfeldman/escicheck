@@ -14,7 +14,7 @@ fisher_ci_r(r, n, level = 0.95)
 \item{level}{Confidence level}
 }
 \value{
-Vector of bounds \link{lower, upper}
+Vector of bounds (lower, upper)
 }
 \description{
 Fisher's z-transformation CI for correlation

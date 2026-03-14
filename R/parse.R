@@ -28,7 +28,7 @@ normalize_text <- function(x) {
   # Unicode normalization (simple replacements)
   # --- Minus/dash variants (all to ASCII hyphen-minus) ---
   x <- gsub("\u2212", "-", x)  # Unicode minus sign (U+2212)
-  x <- gsub("\uFFFD", "-", x)  # Replacement character (U+FFFD) — PDF corruption
+  x <- gsub("\uFFFD", "-", x)  # Replacement character (U+FFFD) -- PDF corruption
   x <- gsub("[\u2013\u2014]", "-", x)  # En dash (U+2013) and em dash (U+2014)
   x <- gsub("[\u2010\u2011\u2012]", "-", x)  # Hyphen (U+2010), non-breaking hyphen (U+2011), figure dash (U+2012)
   x <- gsub("\uFE63", "-", x)  # Small hyphen-minus (U+FE63)
@@ -55,9 +55,9 @@ normalize_text <- function(x) {
   x <- gsub("\u2248", "~", x)   # Almost-equal / approximately (U+2248)
 
   # --- Mathematical operators ---
-  x <- gsub("\u00D7", "x", x)   # Multiplication sign (U+00D7) — for "2x2 ANOVA"
+  x <- gsub("\u00D7", "x", x)   # Multiplication sign (U+00D7) -- for "2x2 ANOVA"
   x <- gsub("\u00B1", "+/-", x)  # Plus-minus sign (U+00B1)
-  x <- gsub("\u00B7", ".", x)    # Middle dot (U+00B7) — decimal separator in some locales
+  x <- gsub("\u00B7", ".", x)    # Middle dot (U+00B7) -- decimal separator in some locales
 
   # --- Superscript digits to caret notation ---
   x <- gsub("\u00B9", "^1", x)  # Superscript 1
@@ -70,7 +70,7 @@ normalize_text <- function(x) {
   x <- gsub("[\u2079]", "^9", x)  # Superscript 9
   x <- gsub("[\u2070]", "^0", x)  # Superscript 0
 
-  # --- Subscript digits (strip — used in notation like η₂ which we handle separately) ---
+  # --- Subscript digits (strip -- used in notation like eta2 which we handle separately) ---
   x <- gsub("\u2080", "0", x)  # Subscript 0
   x <- gsub("\u2081", "1", x)  # Subscript 1
   x <- gsub("\u2082", "2", x)  # Subscript 2
@@ -99,7 +99,7 @@ normalize_text <- function(x) {
 
   # Remove spurious words between F/t and their parenthesized df arguments
   # Pattern: standalone F or t, then alphabetic junk (1-60 chars), then (digit
-  # Safe because APA never has "F word. (df1, df2)" — F is always directly
+  # Safe because APA never has "F word. (df1, df2)" -- F is always directly
   # followed by parentheses
   x <- gsub("\\bF\\s+[a-zA-Z][a-zA-Z .',;:-]{0,60}\\(\\s*(\\d)", "F(\\1", x, perl = TRUE)
   x <- gsub("\\bt\\s+[a-zA-Z][a-zA-Z .',;:-]{0,60}\\(\\s*(\\d)", "t(\\1", x, perl = TRUE)
@@ -281,11 +281,12 @@ numify <- function(x) {
 
 #' Extract context window around a sentence
 #'
-#' Gets \u00b1n sentences around a given sentence index for design inference.
+#' Gets n sentences around a given sentence index for design inference.
 #'
 #' @param chunks Character vector of sentence chunks
 #' @param idx Index of current sentence
 #' @param window_size Number of sentences before/after to include (default 2)
+#' @param extended Logical, return extended context (default FALSE)
 #' @return Character vector of context sentences
 #' @keywords internal
 extract_context <- function(chunks, idx, window_size = 2, extended = FALSE) {
@@ -372,7 +373,7 @@ parse_text <- function(text, context_window_size = 2) {
     # Find positions of all test stat starts
     positions <- gregexpr(stat_start_pattern, chunk, perl = TRUE)[[1]]
     if (length(positions) <= 1 || positions[1] == -1) {
-      return(chunk)  # 0 or 1 stat — keep as-is
+      return(chunk)  # 0 or 1 stat -- keep as-is
     }
     # Filter out z positions that are auxiliary to a U/W test
     # (z co-reported after "U = digits," or "W = digits," within 30 chars)
@@ -500,14 +501,14 @@ parse_text <- function(text, context_window_size = 2) {
   pat_eta <- "(?:eta|\u03b7)\\s*=\\s*([-+]?\\d*\\.?\\d+)"
   pat_eta2 <- "(?:eta\\s*[-]?squared|\u03b7\u00b2|eta\\^2|\u03b7\\^2)\\s*=\\s*([-+]?\\d*\\.?\\d+)"
   pat_etap2 <- "(?:partial\\s*eta\\s*[-]?squared|partial\\s*\u03b7\u00b2|\u03b7p\u00b2|partial\\s*eta\\^2)\\s*=\\s*([-+]?\\d*\\.?\\d+)"
-  pat_eta2_corrupted <- "(?:2G|n2G|\u03b72G|etaG2)\\s*=\\s*([-+]?\\d*\\.?\\d+)" # PDF corruption: 2G = generalized eta²
+  pat_eta2_corrupted <- "(?:2G|n2G|\u03b72G|etaG2)\\s*=\\s*([-+]?\\d*\\.?\\d+)" # PDF corruption: 2G = generalized eta^2
   pat_omega2 <- "(?:omega\\s*[-]?squared|\u03c9\u00b2|omega\\^2|\u03c9\\^2)\\s*=\\s*([-+]?\\d*\\.?\\d+)"
 
   # Cohen's f - only match explicit labels to avoid false positives with bare "f"
   pat_cohens_f <- "(?:Cohen'?s?\\s*f|effect\\s*size\\s*f)\\s*=\\s*([-+]?\\d*\\.?\\d+)"
 
   # Generic/Fallback effect size pattern (Phase 2F - RESTRICTED)
-  # Only matches explicit Greek symbols to avoid false positives: ε δ ρ τ and PDF corruption char
+  # Only matches explicit Greek symbols to avoid false positives and PDF corruption char
   # Previous permissive pattern matched any letter, causing false matches with variables
   pat_fallback_es <- "\\b([\u03b5\u03b4\u03c1\u03c4]|[a-z]\uFFFD)\\s*=\\s*([-+]?\\d*\\.?\\d+)"
 

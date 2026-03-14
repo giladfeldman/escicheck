@@ -16,7 +16,7 @@ ci_d_ind_approx(d, n1, n2, level = 0.95)
 \item{level}{Confidence level (default 0.95)}
 }
 \value{
-Vector of bounds \link{lower, upper}
+Vector of bounds (lower, upper)
 }
 \description{
 Uses Hedges/CMC large-sample approximation.
