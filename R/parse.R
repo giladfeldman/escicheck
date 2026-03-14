@@ -26,14 +26,61 @@ normalize_text <- function(x) {
   }
 
   # Unicode normalization (simple replacements)
-  # Unicode minus sign (U+2212) to ASCII hyphen-minus
-  x <- gsub("\u2212", "-", x)
-  # Non-breaking space (U+00A0) to regular space
-  x <- gsub("\u00A0", " ", x)
-  # Other Unicode whitespace characters
-  x <- gsub("[\u2000-\u200B\u202F\u205F\u3000]", " ", x)
-  # En dash and em dash to hyphen (for consistency)
-  x <- gsub("[\u2013\u2014]", "-", x)
+  # --- Minus/dash variants (all to ASCII hyphen-minus) ---
+  x <- gsub("\u2212", "-", x)  # Unicode minus sign (U+2212)
+  x <- gsub("\uFFFD", "-", x)  # Replacement character (U+FFFD) — PDF corruption
+  x <- gsub("[\u2013\u2014]", "-", x)  # En dash (U+2013) and em dash (U+2014)
+  x <- gsub("[\u2010\u2011\u2012]", "-", x)  # Hyphen (U+2010), non-breaking hyphen (U+2011), figure dash (U+2012)
+  x <- gsub("\uFE63", "-", x)  # Small hyphen-minus (U+FE63)
+  x <- gsub("\uFF0D", "-", x)  # Fullwidth hyphen-minus (U+FF0D)
+  x <- gsub("\u207B", "-", x)  # Superscript minus (U+207B)
+
+  # --- Whitespace variants (all to regular space or removed) ---
+  x <- gsub("\u00A0", " ", x)  # Non-breaking space (U+00A0)
+  x <- gsub("[\u2000-\u200A\u202F\u205F\u3000]", " ", x)  # Various typographic spaces
+  x <- gsub("[\u200B-\u200D\uFEFF]", "", x)  # Zero-width spaces and BOM (remove entirely)
+
+  # --- Quotation marks (all to straight ASCII) ---
+  x <- gsub("[\u201C\u201D\u201E\u201F]", "\"", x)  # Curly/low/reversed double quotes
+  x <- gsub("[\u00AB\u00BB]", "\"", x)  # Guillemets (angle double quotes)
+  x <- gsub("[\u2018\u2019\u201A\u201B]", "'", x)  # Curly/low/reversed single quotes
+  x <- gsub("[\u2039\u203A]", "'", x)  # Single angle quotes
+  x <- gsub("[\u2032\u00B4]", "'", x)  # Prime (U+2032) and acute accent (U+00B4)
+  x <- gsub("\u2033", "\"", x)  # Double prime (U+2033)
+
+  # --- Mathematical comparison operators ---
+  x <- gsub("\u2264", "<=", x)  # Less-than-or-equal (U+2264)
+  x <- gsub("\u2265", ">=", x)  # Greater-than-or-equal (U+2265)
+  x <- gsub("\u2260", "!=", x)  # Not-equal (U+2260)
+  x <- gsub("\u2248", "~", x)   # Almost-equal / approximately (U+2248)
+
+  # --- Mathematical operators ---
+  x <- gsub("\u00D7", "x", x)   # Multiplication sign (U+00D7) — for "2x2 ANOVA"
+  x <- gsub("\u00B1", "+/-", x)  # Plus-minus sign (U+00B1)
+  x <- gsub("\u00B7", ".", x)    # Middle dot (U+00B7) — decimal separator in some locales
+
+  # --- Superscript digits to caret notation ---
+  x <- gsub("\u00B9", "^1", x)  # Superscript 1
+  x <- gsub("\u00B3", "^3", x)  # Superscript 3
+  x <- gsub("[\u2074]", "^4", x)  # Superscript 4
+  x <- gsub("[\u2075]", "^5", x)  # Superscript 5
+  x <- gsub("[\u2076]", "^6", x)  # Superscript 6
+  x <- gsub("[\u2077]", "^7", x)  # Superscript 7
+  x <- gsub("[\u2078]", "^8", x)  # Superscript 8
+  x <- gsub("[\u2079]", "^9", x)  # Superscript 9
+  x <- gsub("[\u2070]", "^0", x)  # Superscript 0
+
+  # --- Subscript digits (strip — used in notation like η₂ which we handle separately) ---
+  x <- gsub("\u2080", "0", x)  # Subscript 0
+  x <- gsub("\u2081", "1", x)  # Subscript 1
+  x <- gsub("\u2082", "2", x)  # Subscript 2
+  x <- gsub("\u2083", "3", x)  # Subscript 3
+  x <- gsub("\u2084", "4", x)  # Subscript 4
+  x <- gsub("\u2085", "5", x)  # Subscript 5
+  x <- gsub("\u2086", "6", x)  # Subscript 6
+  x <- gsub("\u2087", "7", x)  # Subscript 7
+  x <- gsub("\u2088", "8", x)  # Subscript 8
+  x <- gsub("\u2089", "9", x)  # Subscript 9
 
   # Line break normalization (CRLF -> LF, then normalize)
   x <- gsub("\r\n", "\n", x)
@@ -44,7 +91,66 @@ normalize_text <- function(x) {
     x <- stringi::stri_enc_toutf8(x, validate = TRUE)
   }
 
+  # ============================================================================
+  # Fix PDF two-column interleaving artifacts near statistical expressions
+  # pdftools::pdf_text() sometimes inserts text from adjacent columns into stat
+  # expressions, e.g. "F smaller. (2, 430)" instead of "F(2, 430)"
+  # ============================================================================
+
+  # Remove spurious words between F/t and their parenthesized df arguments
+  # Pattern: standalone F or t, then alphabetic junk (1-60 chars), then (digit
+  # Safe because APA never has "F word. (df1, df2)" — F is always directly
+  # followed by parentheses
+  x <- gsub("\\bF\\s+[a-zA-Z][a-zA-Z .',;:-]{0,60}\\(\\s*(\\d)", "F(\\1", x, perl = TRUE)
+  x <- gsub("\\bt\\s+[a-zA-Z][a-zA-Z .',;:-]{0,60}\\(\\s*(\\d)", "t(\\1", x, perl = TRUE)
+
+  # ============================================================================
+  # PDF-specific stat notation normalization (BEFORE decimal comma conversion)
+  # Must run before decimal comma conversion because "F1,200" would be corrupted
+  # ============================================================================
+
+  # Fix subscript notation: t754 = -33 -> t(754) = -33
+  # Common in Royal Society Open Science (RSOS) and other journals
+  x <- gsub("(?<![a-zA-Z])t(\\d{2,})\\s*=\\s*([-+]?\\d)", "t(\\1) = \\2", x, perl = TRUE)
+
+  # Fix subscript r: r757 = 0.34 -> r(757) = 0.34
+  x <- gsub("(?<![a-zA-Z])r(\\d{2,})\\s*=\\s*([-+]?\\d)", "r(\\1) = \\2", x, perl = TRUE)
+
+  # Fix subscript F: F1,200 = 5.32 -> F(1, 200) = 5.32
+  x <- gsub("(?<![a-zA-Z])F(\\d+)\\s*,\\s*(\\d+)\\s*=\\s*(\\d)", "F(\\1, \\2) = \\3", x, perl = TRUE)
+
+  # Fix subscript F with decimal df (GG-corrected): F1.87, 654.3 = 37.32 -> F(1.87, 654.3) = 37.32
+  # PDF extraction drops parentheses from repeated-measures ANOVA results
+  x <- gsub("(?<![a-zA-Z])F(\\d+\\.\\d+)\\s*,\\s*(\\d+(?:\\.\\d+)?)\\s*=\\s*([-+]?\\d)",
+             "F(\\1, \\2) = \\3", x, perl = TRUE)
+
+  # Fix spaced-df from PDF extraction: t(4 2 1) -> t(421)
+  # Iteratively collapse spaces between digits inside t(...) and F(...)
+  # Use a loop because "4 2 1" needs two passes: "42 1" -> "421"
+  for (i in 1:3) {
+    x <- gsub("(t\\s*\\(\\d*)(\\d)\\s+(\\d)", "\\1\\2\\3", x, perl = TRUE)
+  }
+  # Same for F-test df2: F(1, 2 0 0) -> F(1, 200)
+  for (i in 1:3) {
+    x <- gsub("(F\\s*\\([0-9]+\\s*,\\s*\\d*)(\\d)\\s+(\\d)", "\\1\\2\\3", x, perl = TRUE)
+  }
+
+  # Fix eta2p / etap2 / eta_p^2 notation -> partial eta-squared = value
+  x <- gsub("(?:eta2p|\u03b72p|etap2|\u03b7p2)\\s*=", "partial eta-squared =", x, perl = TRUE)
+  # Also handle n2p (PDF corruption of eta2p) but only if followed by = and a number
+  x <- gsub("(?<![a-zA-Z])n2p\\s*=\\s*(\\d)", "partial eta-squared = \\1", x, perl = TRUE)
+  # Superscript 2 (U+00B2) to caret notation (e.g., chi squared, eta squared)
+  x <- gsub("\u00B2", "^2", x)
+
+  # Fix stripped chi-square symbol: PDF extraction sometimes strips chi/X leaving
+  # bare " 2 (df) = value" or " 2(df) = value" for chi-squared tests.
+  # Only match when preceded by space/paren/start and followed by (digit
+  x <- gsub("(^|[\\s(;,])2\\s*\\(\\s*(\\d+)\\s*(?:,\\s*N\\s*=\\s*\\d+)?\\s*\\)\\s*=",
+             "\\1chi-square(\\2) =", x, perl = TRUE)
+
+  # ============================================================================
   # Decimal separator normalization (locale-aware) - uses Perl regex
+  # ============================================================================
   # Strategy: Convert comma to dot only when it appears between digits
   # Pattern: digit, comma, digit (with optional spaces) -> digit, dot, digit
   # This preserves thousands separators in large numbers
@@ -69,6 +175,12 @@ normalize_text <- function(x) {
   x <- gsub("\\[\\s*([-+]?\\d*\\.?\\d+)\\s*,\\s*([-+]?\\d*\\.?\\d+)\\s*\\]", "[\\1, \\2]", x, perl = TRUE)
   x <- gsub("\\(\\s*([-+]?\\d*\\.?\\d+)\\s*,\\s*([-+]?\\d*\\.?\\d+)\\s*\\)", "(\\1, \\2)", x, perl = TRUE)
 
+  # Fix period separator in F-test df: F(1.45) -> F(1, 45)
+  # Decimal comma conversion above may turn F(1,45) into F(1.45)
+  # Must run AFTER decimal comma conversion
+  # Safe: only fires when df2 has 2+ digits (distinguishes from fractional GG-corrected df)
+  x <- gsub("F\\(\\s*(\\d{1,3})\\.(\\d{2,})\\s*\\)", "F(\\1, \\2)", x, perl = TRUE)
+
   # Whitespace normalization
   # Collapse multiple spaces to single space (but preserve intentional line breaks)
   # First, normalize tabs to spaces (simple replacement)
@@ -87,6 +199,16 @@ normalize_text <- function(x) {
   lines <- strsplit(x, "\n", fixed = TRUE)
   lines <- lapply(lines, function(l) trimws(l, which = "both"))
   x <- vapply(lines, function(l) paste(l, collapse = "\n"), character(1))
+
+  # Fix space between sign and number in stat values: "= - 3.79" -> "= -3.79"
+  # Common in PDF extraction where minus sign gets separated from the number
+  x <- gsub("=\\s+([-+])\\s+(\\d)", "= \\1\\2", x, perl = TRUE)
+  # Also fix in CI bounds: "[- 0.58, - 0.18]" -> "[-0.58, -0.18]"
+  x <- gsub("\\[\\s*-\\s+(\\d)", "[-\\1", x, perl = TRUE)
+  x <- gsub(",\\s*-\\s+(\\d)", ", -\\1", x, perl = TRUE)
+
+  # Fix missing separator before p-values: "= 2.21p = .035" -> "= 2.21, p = .035"
+  x <- gsub("(=\\s*[-+]?\\d+\\.?\\d*)\\s*(p\\s*[<=>])", "\\1, \\2", x, perl = TRUE)
 
   # Handle common PDF extraction artifacts
   # Fix broken hyphenation (word-\nword -> wordword, but be careful)
@@ -121,8 +243,13 @@ normalize_text <- function(x) {
   # This is more aggressive and handles OCR errors where p-value got separated
   x <- gsub("(p\\s*=\\s*)[^\\d\\n]{1,100}\\n\\s*([.\\d]+)(?=\\s*[,;]|\\s*$)", "\\1\\2", x, perl = TRUE)
 
+  # General mid-sentence line-break joining (lowercase to lowercase across newlines)
+  # Runs after stat-specific joins so those get priority
+  x <- gsub("([a-z,;])\\s*\\n\\s*([a-z])", "\\1 \\2", x, perl = TRUE)
+
   # Fix ligature issues (common in PDFs) - simple replacements
-  # fi, fl, ffi, ffl ligatures
+  # ff, fi, fl, ffi, ffl ligatures
+  x <- gsub("\uFB00", "ff", x, useBytes = TRUE)
   x <- gsub("\uFB01", "fi", x, useBytes = TRUE)
   x <- gsub("\uFB02", "fl", x, useBytes = TRUE)
   x <- gsub("\uFB03", "ffi", x, useBytes = TRUE)
@@ -202,7 +329,11 @@ parse_text <- function(text, context_window_size = 2) {
       ci_level = numeric(0),
       ci_level_source = character(0),
       ciL_reported = numeric(0),
-      ciU_reported = numeric(0)
+      ciU_reported = numeric(0),
+      z_auxiliary = numeric(0),
+      b_coeff = numeric(0),
+      SE_coeff = numeric(0),
+      adj_R2 = numeric(0)
     ))
   }
 
@@ -213,6 +344,60 @@ parse_text <- function(text, context_window_size = 2) {
   # Split on period/exclamation/question mark followed by space and capital letter or end
   # But not if period is part of number or abbreviation
   chunks <- unlist(strsplit(text_normalized, "(?<=[\\.!?])\\s+(?=[A-Z]|$)", perl = TRUE))
+  chunks <- chunks[nchar(trimws(chunks)) > 0]
+
+  # Sub-chunk splitting: when a sentence contains multiple test statistics,
+  # split it so each sub-chunk has exactly one test statistic.
+  # This prevents str_match() from silently dropping 2nd/3rd/4th matches.
+  stat_start_pattern <- paste0(
+    "(?:",
+    "(?:^|(?<=\\s|,|;|\\())F\\s*\\(\\s*\\d",  # F(df1, df2)
+    "|(?:^|(?<=\\s|,|;|\\())t\\s*\\(\\s*\\d",  # t(df)
+    "|(?:^|(?<=\\s|,|;|\\())r\\s*\\(\\s*\\d",  # r(df)
+    "|(?:chi-?square|\u03c7\\s*\\^?2|Chi-?square|chi2|X\\s*\\^?2)\\s*\\(\\s*\\d",
+    "|(?:^|(?<=\\s|,|;|\\())H\\s*\\(\\s*\\d",  # H(df)
+    "|(?:^|(?<=\\s|,|;|\\())(?:Sobel\\s+)?[Zz]\\s*=\\s*[-+]?\\d",  # z = value, Sobel Z = value
+    "|(?:^|(?<=\\s|,|;|\\())U\\s*=\\s*\\d",    # U = value
+    "|(?:^|(?<=\\s|,|;|\\())W\\s*=\\s*\\d",    # W = value
+    ")"
+  )
+  chunks <- unlist(lapply(chunks, function(chunk) {
+    # Find positions of all test stat starts
+    positions <- gregexpr(stat_start_pattern, chunk, perl = TRUE)[[1]]
+    if (length(positions) <= 1 || positions[1] == -1) {
+      return(chunk)  # 0 or 1 stat — keep as-is
+    }
+    # Filter out z positions that are auxiliary to a U/W test
+    # (z co-reported after "U = digits," or "W = digits," within 30 chars)
+    keep <- rep(TRUE, length(positions))
+    for (j in seq_along(positions)) {
+      pos <- positions[j]
+      match_char <- substr(chunk, pos, pos)
+      if (tolower(match_char) == "z") {
+        # Check if U or W appears within 30 chars before this z
+        lookback_start <- max(1, pos - 30)
+        lookback <- substr(chunk, lookback_start, pos - 1)
+        if (grepl("[UW]\\s*=\\s*\\d", lookback, perl = TRUE)) {
+          keep[j] <- FALSE  # This z is auxiliary to U/W, don't split here
+        }
+      }
+    }
+    positions <- positions[keep]
+    if (length(positions) <= 1) return(chunk)
+
+    # Split at positions of 2nd, 3rd, ... stats
+    sub_chunks <- character(length(positions))
+    for (j in seq_along(positions)) {
+      start <- positions[j]
+      end <- if (j < length(positions)) positions[j + 1] - 1L else nchar(chunk)
+      sub_chunks[j] <- substr(chunk, start, end)
+    }
+    # Prepend any text before the first stat to the first sub-chunk
+    if (positions[1] > 1) {
+      sub_chunks[1] <- paste0(substr(chunk, 1, positions[1] - 1L), sub_chunks[1])
+    }
+    sub_chunks[nchar(trimws(sub_chunks)) > 0]
+  }))
   chunks <- chunks[nchar(trimws(chunks)) > 0]
 
   if (length(chunks) == 0) {
@@ -241,7 +426,11 @@ parse_text <- function(text, context_window_size = 2) {
       ci_level = numeric(0),
       ci_level_source = character(0),
       ciL_reported = numeric(0),
-      ciU_reported = numeric(0)
+      ciU_reported = numeric(0),
+      z_auxiliary = numeric(0),
+      b_coeff = numeric(0),
+      SE_coeff = numeric(0),
+      adj_R2 = numeric(0)
     ))
   }
 
@@ -251,16 +440,32 @@ parse_text <- function(text, context_window_size = 2) {
   # F-test: F(df1, df2) = value, F(df1,df2)=value, F = value (with/without spaces)
   pat_F <- "F\\s*\\(\\s*(\\d+(?:\\.\\d+)?)\\s*,\\s*(\\d+(?:\\.\\d+)?)\\s*\\)\\s*=\\s*([-+]?\\d*\\.?\\d+)"
   # z-test: z = value, z=value, z-value (with/without spaces)
-  pat_z <- "z\\s*=\\s*([-+]?\\d*\\.?\\d+)"
+  # Negative lookbehind excludes dz (Cohen's d paired) from matching
+  # Also match "Sobel Z = value" as a named z-test variant
+  pat_z <- "(?:(?<![a-zA-Z])z|Sobel\\s+[Zz])\\s*=\\s*([-+]?\\d*\\.?\\d+)"
   # Correlation: r(df) = value, r = value, r(df)=value
   pat_r <- "r\\s*\\(\\s*(\\d+(?:\\.\\d+)?)\\s*\\)\\s*=\\s*([-+]?\\d*\\.?\\d+)"
   # Chi-square: chi-square(df) = value, \u03c7\u00b2(df) = value, Chi-square(df)=value
   # Also match: \u03c72, chi2, X2, X\u00b2
   pat_chi <- "(?:chi-?square|\u03c7\\s*\\^?2|\u03c7\u00b2|Chi-?square|chi2|X\\s*\\^?2|X\u00b2)\\s*\\(\\s*(\\d+(?:\\.\\d+)?)\\s*\\)\\s*=\\s*([-+]?\\d*\\.?\\d+)"
+  # Chi-square without parenthesized df: chi2 = 27.04, df = 1 (or chi2(N = 100) = 5.03)
+  pat_chi_nodf <- "(?:chi-?square|\u03c7\\s*\\^?2|\u03c7\u00b2|Chi-?square|chi2|X\\s*\\^?2|X\u00b2)\\s*=\\s*([-+]?\\d*\\.?\\d+)"
+
+  # Nonparametric test patterns
+  # Mann-Whitney U: require co-occurrence with p or z to avoid bare "U" false positives
+  pat_U <- "U\\s*=\\s*(\\d+(?:\\.\\d+)?)"
+  # Wilcoxon W
+  pat_W <- "W\\s*=\\s*(\\d+(?:\\.\\d+)?)"
+  # Kruskal-Wallis H: H(df) = value
+
+  pat_H <- "H\\s*\\(\\s*(\\d+(?:\\.\\d+)?)\\s*\\)\\s*=\\s*([-+]?\\d*\\.?\\d+)"
+  # Auxiliary z for nonparametric tests (z co-reported with U/W)
+  pat_z_aux <- "(?<![a-zA-Z])z\\s*=\\s*([-+]?\\d*\\.?\\d+)"
 
   # Patterns for sample sizes and design info
   # Improved p-value regex: handle optional leading '0', various separators, and spaces
-  pat_p <- "\\bp\\s*([<=>]{1,2})\\s*([0-9]?\\.[0-9]+)"
+  # Also match "p < 0.001" (with leading zero) and "p = .05"
+  pat_p <- "\\bp\\s*([<=>]{1,2})\\s*(0?\\.[0-9]+|[01]\\.[0-9]+|[01])"
   # N regex: restrict to word boundary and look for nearby equals
   pat_N <- "\\bN\\s*=\\s*(\\d+)"
   pat_n1 <- "\\bn1\\s*=\\s*(\\d+)"
@@ -281,8 +486,8 @@ parse_text <- function(text, context_window_size = 2) {
   pat_eta2_corrupted <- "(?:2G|n2G|\u03b72G|etaG2)\\s*=\\s*([-+]?\\d*\\.?\\d+)" # PDF corruption: 2G = generalized eta²
   pat_omega2 <- "(?:omega\\s*[-]?squared|\u03c9\u00b2|omega\\^2|\u03c9\\^2)\\s*=\\s*([-+]?\\d*\\.?\\d+)"
 
-  # Cohen's f - match explicit labels OR bare "f" with word boundaries
-  pat_cohens_f <- "(?:Cohen'?s?\\s*f|effect\\s*size\\s*f|\\bf)\\s*=\\s*([-+]?\\d*\\.?\\d+)"
+  # Cohen's f - only match explicit labels to avoid false positives with bare "f"
+  pat_cohens_f <- "(?:Cohen'?s?\\s*f|effect\\s*size\\s*f)\\s*=\\s*([-+]?\\d*\\.?\\d+)"
 
   # Generic/Fallback effect size pattern (Phase 2F - RESTRICTED)
   # Only matches explicit Greek symbols to avoid false positives: ε δ ρ τ and PDF corruption char
@@ -295,6 +500,13 @@ parse_text <- function(text, context_window_size = 2) {
   pat_OR <- "(?:OR|odds\\s*ratio)\\s*=\\s*([-+]?\\d*\\.?\\d+)"
   pat_RR <- "(?:RR|risk\\s*ratio)\\s*=\\s*([-+]?\\d*\\.?\\d+)"
   pat_IRR <- "(?:IRR|incidence\\s*rate\\s*ratio)\\s*=\\s*([-+]?\\d*\\.?\\d+)"
+  # Cohen's h (effect size for proportion comparisons)
+  pat_h <- "(?:Cohen'?s?\\s*h|\\bh\\b)\\s*=\\s*([-+]?\\d*\\.?\\d+)"
+
+  # Regression coefficient patterns
+  pat_b_coeff <- "\\bb\\s*=\\s*([-+]?\\d*\\.?\\d+)"
+  pat_SE <- "(?:SE|Std\\.?\\s*Error|standard\\s*error)\\s*=\\s*([-+]?\\d*\\.?\\d+)"
+  pat_adj_R2 <- "(?:adjusted\\s*R\\^?2|adj\\.?\\s*R\\^?2|R\\^?2\\s*adj)\\s*=\\s*([-+]?\\d*\\.?\\d+)"
 
   # Comprehensive CI patterns (Phase 2H - Enhanced with level detection)
   pat_CI1 <- "(\\d+)%\\s*(?:CI|C\\.I\\.|confidence\\s*interval)\\s*\\[\\s*([-+]?\\d*\\.?\\d+)\\s*,\\s*([-+]?\\d*\\.?\\d+)\\s*\\]"
@@ -343,6 +555,10 @@ parse_text <- function(text, context_window_size = 2) {
     m_z <- stringr::str_match(s, pat_z)
     m_r <- stringr::str_match(s, pat_r)
     m_chi <- stringr::str_match(s, pat_chi)
+    m_chi_nodf <- stringr::str_match(s, pat_chi_nodf)
+    m_U <- stringr::str_match(s, pat_U)
+    m_W_stat <- stringr::str_match(s, pat_W)
+    m_H <- stringr::str_match(s, pat_H)
 
     # Match sample sizes and design info
     m_p <- stringr::str_match(s, pat_p)
@@ -396,7 +612,13 @@ parse_text <- function(text, context_window_size = 2) {
     m_OR <- stringr::str_match(s, pat_OR)
     m_RR <- stringr::str_match(s, pat_RR)
     m_IRR <- stringr::str_match(s, pat_IRR)
+    m_h <- stringr::str_match(s, pat_h)
     m_fallback_es <- stringr::str_match(s, pat_fallback_es)
+
+    # Match regression coefficients
+    m_b_coeff <- stringr::str_match(s, pat_b_coeff)
+    m_SE <- stringr::str_match(s, pat_SE)
+    m_adj_R2 <- stringr::str_match(s, pat_adj_R2)
 
     # Match CI patterns (try all variants)
     m_CI1 <- stringr::str_match(s, pat_CI1)
@@ -419,9 +641,6 @@ parse_text <- function(text, context_window_size = 2) {
       df1 <- numify(m_F[2])
       df2 <- numify(m_F[3])
       stat_value <- numify(m_F[4])
-    } else if (!all(is.na(m_z))) {
-      test_type <- "z"
-      stat_value <- numify(m_z[2])
     } else if (!all(is.na(m_r))) {
       test_type <- "r"
       df1 <- numify(m_r[2])
@@ -430,6 +649,68 @@ parse_text <- function(text, context_window_size = 2) {
       test_type <- "chisq"
       df1 <- numify(m_chi[2])
       stat_value <- numify(m_chi[3])
+    } else if (!all(is.na(m_chi_nodf))) {
+      # Chi-square without parenthesized df (e.g., "chi2 = 27.04, df = 1")
+      # Only match if there's also a p-value or df stated nearby to avoid false positives
+      has_p <- !all(is.na(stringr::str_match(s, pat_p)))
+      has_df_nearby <- grepl("\\bdf\\s*=\\s*\\d+", s) || grepl("\\bdf\\s*=\\s*\\d+", context)
+      if (has_p || has_df_nearby) {
+        test_type <- "chisq"
+        stat_value <- numify(m_chi_nodf[2])
+        # Try to extract df from nearby "df = N" pattern
+        m_df_sep <- stringr::str_match(s, "\\bdf\\s*=\\s*(\\d+)")
+        if (all(is.na(m_df_sep))) {
+          m_df_sep <- stringr::str_match(context, "\\bdf\\s*=\\s*(\\d+)")
+        }
+        if (!all(is.na(m_df_sep))) {
+          df1 <- numify(m_df_sep[2])
+        }
+      }
+    } else if (!all(is.na(m_H))) {
+      # Kruskal-Wallis H(df) = value
+      test_type <- "H"
+      df1 <- numify(m_H[2])
+      stat_value <- numify(m_H[3])
+    } else if (!all(is.na(m_U))) {
+      # Mann-Whitney U - require p or z co-occurrence to avoid false positives
+      has_p <- !all(is.na(stringr::str_match(s, pat_p)))
+      has_z <- !all(is.na(stringr::str_match(s, pat_z_aux)))
+      if (has_p || has_z) {
+        test_type <- "U"
+        stat_value <- numify(m_U[2])
+      }
+    } else if (!all(is.na(m_W_stat))) {
+      # Wilcoxon W - require p or z co-occurrence
+      has_p <- !all(is.na(stringr::str_match(s, pat_p)))
+      has_z <- !all(is.na(stringr::str_match(s, pat_z_aux)))
+      if (has_p || has_z) {
+        test_type <- "W"
+        stat_value <- numify(m_W_stat[2])
+      }
+    }
+    # z-test is checked last - if U or W consumed the sentence, z is auxiliary
+    if (is.na(test_type) && !all(is.na(m_z))) {
+      test_type <- "z"
+      stat_value <- numify(m_z[2])
+    }
+
+    # Extract z_auxiliary for nonparametric tests
+    z_auxiliary <- NA_real_
+    if (!is.na(test_type) && test_type %in% c("U", "W")) {
+      m_z_aux <- stringr::str_match(s, pat_z_aux)
+      if (!all(is.na(m_z_aux))) {
+        z_auxiliary <- numify(m_z_aux[2])
+      }
+    }
+
+    # Extract regression coefficients
+    b_coeff <- if (!all(is.na(m_b_coeff))) numify(m_b_coeff[2]) else NA_real_
+    SE_coeff <- if (!all(is.na(m_SE))) numify(m_SE[2]) else NA_real_
+    adj_R2_val <- if (!all(is.na(m_adj_R2))) numify(m_adj_R2[2]) else NA_real_
+
+    # Regression type promotion: if t-test AND b + SE co-occur, set type to "regression"
+    if (!is.na(test_type) && test_type == "t" && !is.na(b_coeff) && !is.na(SE_coeff)) {
+      test_type <- "regression"
     }
 
     # Extract effect size (prioritize by specificity)
@@ -498,6 +779,13 @@ parse_text <- function(text, context_window_size = 2) {
     } else if (!all(is.na(m_IRR))) {
       effect_name <- "IRR"
       effect_reported <- numify(m_IRR[2])
+    } else if (!all(is.na(m_h))) {
+      # Cohen's h - only accept when co-occurring with a chi-square or z-test
+      # to avoid false positives from bare "h = X" in other contexts
+      if (!is.na(test_type) && test_type %in% c("chisq", "z")) {
+        effect_name <- "h"
+        effect_reported <- numify(m_h[2])
+      }
     } else if (!all(is.na(m_fallback_es))) {
       # Fallback match - likely PDF corruption or non-standard notation (Phase 2F)
       sym <- if (length(m_fallback_es) >= 2) m_fallback_es[2] else "ES"
@@ -632,7 +920,11 @@ parse_text <- function(text, context_window_size = 2) {
       ci_level = ci_level,
       ci_level_source = ci_level_source, # NEW: Phase 2H - Track where CI level came from
       ciL_reported = ciL,
-      ciU_reported = ciU
+      ciU_reported = ciU,
+      z_auxiliary = z_auxiliary,
+      b_coeff = b_coeff,
+      SE_coeff = SE_coeff,
+      adj_R2 = adj_R2_val
     )
   })
 
@@ -664,7 +956,11 @@ parse_text <- function(text, context_window_size = 2) {
       ci_level = numeric(0),
       ci_level_source = character(0),
       ciL_reported = numeric(0),
-      ciU_reported = numeric(0)
+      ciU_reported = numeric(0),
+      z_auxiliary = numeric(0),
+      b_coeff = numeric(0),
+      SE_coeff = numeric(0),
+      adj_R2 = numeric(0)
     ))
   }
 

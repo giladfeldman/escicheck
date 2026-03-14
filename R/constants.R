@@ -21,7 +21,11 @@ DEFAULT_TOL_EFFECT <- list(
     beta = 0.01,
     partial_r = 0.005,
     f2 = 0.02,
-    R2 = 0.01
+    R2 = 0.01,
+    rank_biserial_r = 0.02,
+    cliffs_delta = 0.02,
+    epsilon_squared = 0.01,
+    kendalls_W = 0.01
 )
 
 # Other Tolerances

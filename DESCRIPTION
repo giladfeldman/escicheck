@@ -1,7 +1,7 @@
 Package: effectcheck
 Type: Package
 Title: Effect Size Checker for APA-Style Results
-Version: 0.1.0
+Version: 0.2.0
 Authors@R: c(person(given = "Your", family = "Name", role = c("aut", "cre"), email = "you@example.com"))
 Description: A conservative, assumption-aware statistical consistency checker for 
     APA-style research results. Parses test statistics, effect sizes, and confidence 
@@ -41,10 +41,10 @@ Suggests:
     MBESS,
     effectsize,
     jsonlite,
-    pdftools,
     tesseract,
     magick,
-    tm,
-    qpdf
+    qpdf,
+    rmarkdown,
+    statcheck
 Depends: R (>= 4.1.0)
 Config/testthat/edition: 3

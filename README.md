@@ -278,7 +278,7 @@ EffectCheck automatically detects CI level from text:
 
 ## File Format Support
 
-- **.pdf**: PDF files (via `pdftools` package, with optional table extraction and OCR)
+- **.pdf**: PDF files (via `pdftotext` from poppler-utils, with optional table extraction and OCR)
 - **.docx**: Microsoft Word documents (via `officer` package)
 - **.html**: HTML files (via `rvest` package)
 - **.txt**: Plain text files

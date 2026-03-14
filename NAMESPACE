@@ -48,7 +48,13 @@ export(parse_text)
 export(read_any_text)
 export(extract_pdf_comprehensive)
 
+# Comparison functions
+export(compare_with_statcheck)
+export(compare_file_with_statcheck)
+S3method(print, effectcheck_comparison)
+
 # Report and export functions
 export(render_report)
+export(generate_report)
 export(export_csv)
 export(export_json)

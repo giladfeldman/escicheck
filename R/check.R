@@ -106,6 +106,31 @@ EFFECT_SIZE_FAMILIES <- list(
     variants = c("cohens_f2"),
     alternatives = c("R2"),
     description = "Cohen's f\u00b2 - regression effect size"
+  ),
+  # Nonparametric effect sizes
+  rank_biserial_r = list(
+    family = "rank_biserial_r",
+    variants = c("rank_biserial_r"),
+    alternatives = c("cliffs_delta"),
+    description = "Rank-biserial correlation from Mann-Whitney U"
+  ),
+  cliffs_delta = list(
+    family = "cliffs_delta",
+    variants = c("cliffs_delta"),
+    alternatives = c("rank_biserial_r"),
+    description = "Cliff's delta from Mann-Whitney U"
+  ),
+  epsilon_squared = list(
+    family = "epsilon_squared",
+    variants = c("epsilon_squared"),
+    alternatives = c("kendalls_W"),
+    description = "Epsilon-squared from Kruskal-Wallis H"
+  ),
+  kendalls_W = list(
+    family = "kendalls_W",
+    variants = c("kendalls_W"),
+    alternatives = c("epsilon_squared"),
+    description = "Kendall's W coefficient of concordance"
   )
 )
 
@@ -239,6 +264,30 @@ VARIANT_METADATA <- list(
     assumptions = "Linear regression",
     when_to_use = "Proportion of variance explained by model",
     formula = "R² = SS_regression / SS_total"
+  ),
+  rank_biserial_r = list(
+    name = "Rank-biserial r",
+    assumptions = "Mann-Whitney U test, known group sizes",
+    when_to_use = "Effect size for nonparametric two-group comparison",
+    formula = "r_rb = 1 - 2*U / (n1*n2)"
+  ),
+  cliffs_delta = list(
+    name = "Cliff's delta",
+    assumptions = "Mann-Whitney U test, known group sizes",
+    when_to_use = "Probability-based nonparametric effect size",
+    formula = "delta = 2*U / (n1*n2) - 1"
+  ),
+  epsilon_squared = list(
+    name = "Epsilon-squared",
+    assumptions = "Kruskal-Wallis H test",
+    when_to_use = "Nonparametric analog of eta-squared",
+    formula = "epsilon2 = (H - k + 1) / (N - k)"
+  ),
+  kendalls_W = list(
+    name = "Kendall's W",
+    assumptions = "Friedman test or concordance analysis",
+    when_to_use = "Agreement among multiple raters/repeated measures",
+    formula = "W = chi2 / (N * (k - 1))"
   )
 )
 
@@ -297,6 +346,15 @@ compute_and_compare_one <- function(row,
     NA_real_
   }
 
+  # P-value symbol extraction for inequality handling (< vs = vs >)
+  p_sym <- if ("p_symbol" %in% names(row) && length(row$p_symbol) > 0) {
+    as.character(row$p_symbol[1])
+  } else {
+    NA_character_
+  }
+  # Flag: p was reported as inequality (e.g., "p < .001")
+  p_is_inequality <- !is.na(p_sym) && grepl("<", p_sym)
+
   # Add uncertainty if p-value was out of range
   if ("p_out_of_range" %in% names(row) && isTRUE(row$p_out_of_range[1])) {
     uncertainty <- c(uncertainty, "Reported p-value could not be parsed or is out of valid range [0,1]")
@@ -344,7 +402,11 @@ compute_and_compare_one <- function(row,
     "v" = "V", "cramer's v" = "V", "cramers v" = "V",
     "beta" = "beta", "\u03b2" = "beta", "standardized beta" = "beta",
     "r2" = "R2", "r-squared" = "R2", "r squared" = "R2",
-    "f2" = "f2", "f-squared" = "f2", "f squared" = "f2", "cohen's f2" = "f2"
+    "f2" = "f2", "f-squared" = "f2", "f squared" = "f2", "cohen's f2" = "f2",
+    "rank_biserial_r" = "rank_biserial_r", "rank biserial r" = "rank_biserial_r",
+    "cliffs_delta" = "cliffs_delta", "cliff's delta" = "cliffs_delta",
+    "epsilon_squared" = "epsilon_squared", "epsilon squared" = "epsilon_squared",
+    "kendalls_w" = "kendalls_W", "kendall's w" = "kendalls_W"
   )
 
   canonical_type <- if (length(reported_type) > 0 && !is.na(reported_type) && reported_type %in% names(type_mapping)) {
@@ -462,7 +524,11 @@ compute_and_compare_one <- function(row,
     F = c("eta2", "etap2", "omega2", "cohens_f", "R2", "f2"), # F-tests: ANOVA effects
     r = c("r", "R2"), # Correlation tests
     chisq = c("phi", "V"), # Chi-square tests
-    z = c("r", "d", "g", "beta") # z-tests: various
+    z = c("r", "d", "g", "beta"), # z-tests: various
+    regression = c("beta", "partial_r", "R2", "f2", "d", "r"), # Regression coefficients
+    U = c("rank_biserial_r", "cliffs_delta"), # Mann-Whitney U
+    W = c("rank_biserial_r"), # Wilcoxon W
+    H = c("epsilon_squared", "kendalls_W") # Kruskal-Wallis H
   )
 
   # Check compatibility
@@ -745,11 +811,16 @@ compute_and_compare_one <- function(row,
           )
         }
 
-        # Compute drm
-        drm <- tryCatch(drm_from_dz(dz), error = function(e) NA_real_)
-        if (!is.na(drm)) {
+        # Compute drm range across r grid (drm = dz * sqrt(2*(1-r)))
+        drm_grid <- sapply(paired_r_grid, function(r) {
+          tryCatch(drm_from_dz(dz, r), error = function(e) NA_real_)
+        })
+        drm_grid <- drm_grid[!is.na(drm_grid)]
+
+        if (length(drm_grid) > 0) {
           computed_variants$drm <- list(
-            value = drm,
+            value = stats::median(drm_grid),
+            range = c(min(drm_grid), max(drm_grid)),
             metadata = VARIANT_METADATA$drm
           )
         }
@@ -1112,6 +1183,145 @@ compute_and_compare_one <- function(row,
         )
       }
     }
+  } else if (tt == "regression") {
+    # ------ REGRESSION COEFFICIENT COMPUTATIONS ------
+    # Extract regression-specific fields
+    b_val <- if ("b_coeff" %in% names(row) && length(row$b_coeff) > 0) as.numeric(row$b_coeff[1]) else NA_real_
+    SE_val <- if ("SE_coeff" %in% names(row) && length(row$SE_coeff) > 0) as.numeric(row$SE_coeff[1]) else NA_real_
+    adj_R2_reported <- if ("adj_R2" %in% names(row) && length(row$adj_R2) > 0) as.numeric(row$adj_R2[1]) else NA_real_
+
+    # Verify t = b/SE consistency
+    if (!is.na(b_val) && !is.na(SE_val) && !is.na(stat)) {
+      t_check <- verify_t_from_b_SE(b_val, SE_val, stat)
+      if (!is.na(t_check$consistent)) {
+        if (t_check$consistent) {
+          assumptions <- c(assumptions, sprintf("t = b/SE verified: b=%.4f, SE=%.4f, computed t=%.4f", b_val, SE_val, t_check$computed_t))
+        } else {
+          uncertainty <- c(uncertainty, sprintf(
+            "t = b/SE inconsistency: b=%.4f, SE=%.4f gives t=%.4f, but reported t=%.4f (delta=%.4f)",
+            b_val, SE_val, t_check$computed_t, stat, t_check$delta
+          ))
+        }
+      }
+    }
+
+    # Compute standardized beta and partial r using t and df
+    if (!is.na(stat) && !is.na(df1) && df1 > 0) {
+      beta_val <- tryCatch(standardized_beta_from_t(stat, df1), error = function(e) NA_real_)
+      if (!is.na(beta_val)) {
+        computed_variants$standardized_beta <- list(
+          value = beta_val,
+          metadata = VARIANT_METADATA$standardized_beta
+        )
+      }
+
+      partial_r_val <- tryCatch(partial_r_from_t(stat, df1), error = function(e) NA_real_)
+      if (!is.na(partial_r_val)) {
+        alternatives$partial_r <- list(
+          value = partial_r_val,
+          metadata = VARIANT_METADATA$partial_r,
+          why_consider = "Partial correlation from regression t-value"
+        )
+      }
+
+      # Compute d family as alternatives (regression t is like t-test)
+      if (!is.na(N) && N > 0) {
+        n_half <- floor(N / 2)
+        if (n_half > 0) {
+          d_val <- tryCatch(d_ind_from_t(stat, n_half, N - n_half), error = function(e) NA_real_)
+          if (!is.na(d_val)) {
+            alternatives$d <- list(
+              value = d_val,
+              metadata = VARIANT_METADATA$d_ind,
+              why_consider = "Cohen's d equivalent (assuming equal groups)"
+            )
+          }
+        }
+      }
+    }
+  } else if (tt == "U") {
+    # ------ MANN-WHITNEY U COMPUTATIONS ------
+    if (!is.na(stat) && !is.na(n1) && !is.na(n2) && n1 > 0 && n2 > 0) {
+      rb_val <- tryCatch(rank_biserial_r_from_U(stat, n1, n2), error = function(e) NA_real_)
+      if (!is.na(rb_val)) {
+        computed_variants$rank_biserial_r <- list(
+          value = rb_val,
+          metadata = VARIANT_METADATA$rank_biserial_r
+        )
+      }
+
+      cd_val <- tryCatch(cliffs_delta_from_U(stat, n1, n2), error = function(e) NA_real_)
+      if (!is.na(cd_val)) {
+        alternatives$cliffs_delta <- list(
+          value = cd_val,
+          metadata = VARIANT_METADATA$cliffs_delta,
+          why_consider = "Alternative nonparametric effect size (= -rank_biserial_r)"
+        )
+      }
+    } else if (!is.na(stat) && !is.na(N) && N > 0) {
+      # No group sizes - try z_auxiliary if available
+      z_aux <- if ("z_auxiliary" %in% names(row) && length(row$z_auxiliary) > 0) {
+        as.numeric(row$z_auxiliary[1])
+      } else {
+        NA_real_
+      }
+      if (!is.na(z_aux)) {
+        rb_z <- tryCatch(rank_biserial_r_from_z(z_aux, N), error = function(e) NA_real_)
+        if (!is.na(rb_z)) {
+          computed_variants$rank_biserial_r <- list(
+            value = rb_z,
+            metadata = VARIANT_METADATA$rank_biserial_r
+          )
+          assumptions <- c(assumptions, "Rank-biserial r approximated from z-score (r = z/sqrt(N))")
+        }
+      }
+      uncertainty <- c(uncertainty, "Group sizes (n1, n2) not found - U-based r requires group sizes for exact computation")
+    }
+  } else if (tt == "W") {
+    # ------ WILCOXON W COMPUTATIONS ------
+    # W is less directly convertible to effect size without group info
+    z_aux <- if ("z_auxiliary" %in% names(row) && length(row$z_auxiliary) > 0) {
+      as.numeric(row$z_auxiliary[1])
+    } else {
+      NA_real_
+    }
+    if (!is.na(z_aux) && !is.na(N) && N > 0) {
+      rb_z <- tryCatch(rank_biserial_r_from_z(z_aux, N), error = function(e) NA_real_)
+      if (!is.na(rb_z)) {
+        computed_variants$rank_biserial_r <- list(
+          value = rb_z,
+          metadata = VARIANT_METADATA$rank_biserial_r
+        )
+        assumptions <- c(assumptions, "Rank-biserial r approximated from z-score")
+      }
+    } else {
+      uncertainty <- c(uncertainty, "Wilcoxon W requires z-score and N for effect size computation")
+    }
+  } else if (tt == "H") {
+    # ------ KRUSKAL-WALLIS H COMPUTATIONS ------
+    if (!is.na(stat) && !is.na(df1) && df1 > 0 && !is.na(N) && N > 0) {
+      k <- df1 + 1 # Number of groups = df + 1
+
+      eps2 <- tryCatch(epsilon_squared_from_H(stat, N, k), error = function(e) NA_real_)
+      if (!is.na(eps2)) {
+        computed_variants$epsilon_squared <- list(
+          value = eps2,
+          metadata = VARIANT_METADATA$epsilon_squared
+        )
+      }
+
+      # Kendall's W as alternative (W = H / (N*(k-1)) is same as epsilon_squared_from_chisq in some formulations)
+      W_val <- tryCatch(kendalls_W_from_chisq(stat, N, k), error = function(e) NA_real_)
+      if (!is.na(W_val)) {
+        alternatives$kendalls_W <- list(
+          value = W_val,
+          metadata = VARIANT_METADATA$kendalls_W,
+          why_consider = "Concordance coefficient interpretation"
+        )
+      }
+    } else {
+      uncertainty <- c(uncertainty, "Kruskal-Wallis H requires df and N for effect size computation")
+    }
   }
 
   # ============================================================================
@@ -1271,9 +1481,17 @@ compute_and_compare_one <- function(row,
 
   # ============================================================================
   # PHASE 7: Status determination
+  #
+  # Five-level system:
+  #   PASS  - Effect size and p-value verified and consistent
+  #   OK    - No effect size to compare, but p-value consistent (technical check passed)
+  #   NOTE  - Verified but with minor caveats (ambiguous design, rounding notes)
+  #   WARN  - Moderate discrepancy or uncertain match that deserves human review
+  #   ERROR - Large discrepancy or clear inconsistency
   # ============================================================================
 
   status <- "WARN"
+  has_effect_reported <- !is.na(effect_reported)
 
   # Get tolerance for this effect size type
   tol_eff <- tol_effect[[canonical_type]]
@@ -1289,7 +1507,7 @@ compute_and_compare_one <- function(row,
   }
 
   if (!is.na(delta_effect_abs)) {
-    # APA 7 Rounding-aware check: if both round to 2 decimals effect sizes (or 3 decimals p-values), it's a pass
+    # APA 7 Rounding-aware check: if both round to 2 decimals effect sizes, it's a pass
     # This prevents warnings when calculation (e.g. 0.017) rounds to reported (e.g. 0.02)
     is_rounding_match <- FALSE
     if (!is.na(effect_reported) && !is.na(matched_value)) {
@@ -1302,8 +1520,9 @@ compute_and_compare_one <- function(row,
       if (ambiguity_level == "clear" || is_rounding_match) {
         status <- "PASS"
       } else {
-        status <- "WARN"
-        uncertainty <- c(uncertainty, "Match is good but comparison is ambiguous")
+        # Good match but ambiguous design -> NOTE instead of WARN
+        status <- "NOTE"
+        uncertainty <- c(uncertainty, "Match is good but comparison is ambiguous due to unclear design")
       }
     } else if (delta_effect_abs <= (3 * tol_eff)) {
       status <- "WARN"
@@ -1316,7 +1535,7 @@ compute_and_compare_one <- function(row,
 
   # CI affects status
   if (!is.na(ci_match) && !ci_match) {
-    if (status == "PASS") status <- "WARN"
+    if (status == "PASS") status <- "NOTE"
     uncertainty <- c(uncertainty, sprintf(
       "CI bounds mismatch: lower diff=%.3f, upper diff=%.3f",
       ci_delta_lower, ci_delta_upper
@@ -1389,16 +1608,16 @@ compute_and_compare_one <- function(row,
   p_computed <- NA_real_
   decision_error <- FALSE
 
-  if (!is.na(stat) && !is.na(df1)) {
+  if (!is.na(stat)) {
     p_computed <- tryCatch(
       {
-        if (tt == "t") {
+        if (tt == "t" && !is.na(df1)) {
           if (one_tailed) {
             stats::pt(abs(stat), df = df1, lower.tail = FALSE)
           } else {
             2 * stats::pt(abs(stat), df = df1, lower.tail = FALSE)
           }
-        } else if (tt == "F" && !is.na(df2)) {
+        } else if (tt == "F" && !is.na(df1) && !is.na(df2)) {
           stats::pf(stat, df1 = df1, df2 = df2, lower.tail = FALSE)
         } else if (tt == "z") {
           if (one_tailed) {
@@ -1406,8 +1625,42 @@ compute_and_compare_one <- function(row,
           } else {
             2 * stats::pnorm(abs(stat), lower.tail = FALSE)
           }
-        } else if (tt == "chisq") {
+        } else if (tt == "chisq" && !is.na(df1)) {
           stats::pchisq(stat, df = df1, lower.tail = FALSE)
+        } else if (tt == "r" && !is.na(df1)) {
+          # Convert r to t-statistic and compute p-value
+          if (abs(stat) >= 1) {
+            if (abs(stat) > 1) NA_real_ else 0
+          } else {
+            t_from_r <- stat * sqrt(df1 / (1 - stat^2))
+            if (one_tailed) {
+              stats::pt(abs(t_from_r), df = df1, lower.tail = FALSE)
+            } else {
+              2 * stats::pt(abs(t_from_r), df = df1, lower.tail = FALSE)
+            }
+          }
+        } else if (tt == "regression" && !is.na(df1)) {
+          # Regression uses t-distribution (same as t-test)
+          if (one_tailed) {
+            stats::pt(abs(stat), df = df1, lower.tail = FALSE)
+          } else {
+            2 * stats::pt(abs(stat), df = df1, lower.tail = FALSE)
+          }
+        } else if (tt == "H" && !is.na(df1)) {
+          # Kruskal-Wallis H uses chi-square distribution
+          stats::pchisq(stat, df = df1, lower.tail = FALSE)
+        } else if (tt %in% c("U", "W")) {
+          # Use z_auxiliary for p-value if available
+          z_aux <- if ("z_auxiliary" %in% names(row) && length(row$z_auxiliary) > 0) {
+            as.numeric(row$z_auxiliary[1])
+          } else {
+            NA_real_
+          }
+          if (!is.na(z_aux)) {
+            2 * stats::pnorm(abs(z_aux), lower.tail = FALSE)
+          } else {
+            NA_real_
+          }
         } else {
           NA_real_
         }
@@ -1419,7 +1672,29 @@ compute_and_compare_one <- function(row,
   if (!is.na(p_computed) && !is.na(p_reported)) {
     reported_significant <- p_reported < alpha
     computed_significant <- p_computed < alpha
+
+    # P-value inequality awareness:
+    # When p is reported as "< .001", the actual p could be anywhere below .001
+    # Don't flag as decision error if both are on the same side of alpha
+    # and the reported p is an inequality bound
+    p_inequality_consistent <- FALSE
+    if (p_is_inequality) {
+      # "p < X" means actual p is below X
+      # If reported "p < .001" and computed is also < .001, that's consistent
+      if (p_reported <= 0.001 && p_computed < 0.001) {
+        p_inequality_consistent <- TRUE
+      }
+      # If reported "p < .05" and computed is also < .05, consistent
+      if (p_reported <= alpha && p_computed < alpha) {
+        p_inequality_consistent <- TRUE
+      }
+    }
+
     decision_error <- reported_significant != computed_significant
+    # Override: inequality notation makes direction consistent
+    if (p_inequality_consistent) {
+      decision_error <- FALSE
+    }
 
     if (decision_error) {
       if (reported_significant && !computed_significant) {
@@ -1440,6 +1715,61 @@ compute_and_compare_one <- function(row,
         )
       }
       if (status == "PASS") status <- "WARN"
+      if (status == "OK") status <- "WARN"
+      if (status == "NOTE") status <- "WARN"
+    }
+  }
+
+  # ============================================================================
+  # PHASE 9B: Determine OK/NOTE for p-value-only and r-test cases
+  #
+  # After all effect-based checks, if we still have default WARN and there's
+  # no effect to compare, evaluate p-value consistency for OK/NOTE upgrade.
+  # ============================================================================
+
+  if (status == "WARN" && !has_effect_reported) {
+    # No effect size was reported - evaluate based on p-value consistency
+    if (!is.na(p_computed) && !is.na(p_reported)) {
+      p_diff <- abs(p_reported - p_computed)
+      p_directions_match <- (p_reported < alpha) == (p_computed < alpha)
+
+      # Case 1: p reported as inequality (< .001) and computed also satisfies it
+      if (p_is_inequality && p_reported <= 0.001 && p_computed < 0.001) {
+        status <- "OK"
+      # Case 2: p-values very close (within rounding)
+      } else if (p_diff < 0.005) {
+        status <- "OK"
+      # Case 3: p-value inequality with consistent direction
+      } else if (p_is_inequality && p_directions_match) {
+        status <- "OK"
+      # Case 4: Both agree on significance direction, moderate p-diff
+      } else if (p_directions_match && p_diff < 0.05) {
+        status <- "NOTE"
+        uncertainty <- c(uncertainty,
+          sprintf("P-value differs by %.3f but significance direction is consistent", p_diff))
+      # Case 5: Significance direction mismatch -> stays WARN
+      } else if (!p_directions_match) {
+        # Keep as WARN, this is a genuine concern
+      # Case 6: Large p-diff but same direction
+      } else if (p_directions_match) {
+        status <- "NOTE"
+        uncertainty <- c(uncertainty,
+          sprintf("P-value differs by %.3f; significance direction is consistent", p_diff))
+      }
+    } else if (is.na(p_computed) && !is.na(p_reported)) {
+      # P-value reported but couldn't be computed (e.g., U/W tests without z)
+      status <- "NOTE"
+      uncertainty <- c(uncertainty, "P-value could not be independently verified (insufficient data for recomputation)")
+    }
+
+    # Special case: r-test where the stat IS the effect (r-value)
+    # For r-tests, the stat_value is the r-value itself, so the "effect" is verified
+    if (tt == "r" && !is.na(stat) && !is.na(p_computed) && !is.na(p_reported)) {
+      p_directions_match <- (p_reported < alpha) == (p_computed < alpha)
+      if (p_directions_match || (p_is_inequality && p_reported <= 0.001 && p_computed < 0.001)) {
+        # r-test with consistent p-value: the r IS the effect, this is verified
+        if (status != "OK") status <- "OK"
+      }
     }
   }
 
@@ -1632,6 +1962,18 @@ compute_and_compare_one <- function(row,
     cohens_f2 = NA_real_,
     R2 = NA_real_,
 
+    # Nonparametric effect sizes
+    rank_biserial_r = if ("rank_biserial_r" %in% names(computed_variants)) computed_variants$rank_biserial_r$value else NA_real_,
+    cliffs_delta = if ("cliffs_delta" %in% names(computed_variants)) computed_variants$cliffs_delta$value else if ("cliffs_delta" %in% names(alternatives)) alternatives$cliffs_delta$value else NA_real_,
+    epsilon_squared = if ("epsilon_squared" %in% names(computed_variants)) computed_variants$epsilon_squared$value else NA_real_,
+    kendalls_W = if ("kendalls_W" %in% names(computed_variants)) computed_variants$kendalls_W$value else if ("kendalls_W" %in% names(alternatives)) alternatives$kendalls_W$value else NA_real_,
+    z_auxiliary = if ("z_auxiliary" %in% names(row) && length(row$z_auxiliary) > 0) as.numeric(row$z_auxiliary[1]) else NA_real_,
+
+    # Regression coefficients
+    b_coeff = if ("b_coeff" %in% names(row) && length(row$b_coeff) > 0) as.numeric(row$b_coeff[1]) else NA_real_,
+    SE_coeff = if ("SE_coeff" %in% names(row) && length(row$SE_coeff) > 0) as.numeric(row$SE_coeff[1]) else NA_real_,
+    adj_R2 = if ("adj_R2" %in% names(row) && length(row$adj_R2) > 0) as.numeric(row$adj_R2[1]) else NA_real_,
+
     # Comparison results
     closest_method = matched_variant, # Backward compat alias
     delta_effect_abs = delta_effect_abs, # Backward compat alias
@@ -1787,7 +2129,7 @@ compute_and_compare_one <- function(row,
 #' summary(result)
 #' }
 check_text <- function(text,
-                       stats = c("t", "F", "r", "chisq", "z"),
+                       stats = c("t", "F", "r", "chisq", "z", "U", "W", "H", "regression"),
                        ci_level = 0.95,
                        alpha = 0.05,
                        one_tailed = FALSE,
@@ -1915,7 +2257,11 @@ check_text <- function(text,
           phi_ciU = NA_real_, V = NA_real_, eta2 = NA_real_, partial_eta2 = NA_real_,
           generalized_eta2 = NA_real_, omega2 = NA_real_, cohens_f = NA_real_,
           standardized_beta = NA_real_, partial_r = NA_real_, semi_partial_r = NA_real_,
-          cohens_f2 = NA_real_, R2 = NA_real_, closest_method = NA_character_,
+          cohens_f2 = NA_real_, R2 = NA_real_,
+          rank_biserial_r = NA_real_, cliffs_delta = NA_real_,
+          epsilon_squared = NA_real_, kendalls_W = NA_real_, z_auxiliary = NA_real_,
+          b_coeff = NA_real_, SE_coeff = NA_real_, adj_R2 = NA_real_,
+          closest_method = NA_character_,
           delta_effect_abs = NA_real_, ci_match = as.logical(NA),
           ci_delta_lower = NA_real_, ci_delta_upper = NA_real_
         )
@@ -1928,7 +2274,8 @@ check_text <- function(text,
     res,
     is.na(d_ind) & is.na(d_ind_equalN) & is.na(dz) & is.na(r_from_t_or_reported) &
       is.na(phi) & is.na(V) & is.na(eta2) & is.na(partial_eta2) & is.na(omega2) & is.na(cohens_f) &
-      is.na(standardized_beta) & is.na(partial_r) & is.na(cohens_f2) & is.na(R2)
+      is.na(standardized_beta) & is.na(partial_r) & is.na(cohens_f2) & is.na(R2) &
+      is.na(rank_biserial_r) & is.na(epsilon_squared)
   )
 
   res$status[res$insufficient_data & (is.na(res$status) | res$status == "")] <- "INSUFFICIENT_DATA"

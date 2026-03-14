@@ -1,107 +1,71 @@
 # PDF Processing Utilities
 # Functions for extracting text, tables, and OCR from PDFs
 
-#' Extract text from PDF with multiple fallback methods
+#' Extract text from PDF using pdftotext
+#'
+#' Uses the pdftotext command-line tool (from poppler-utils) which correctly
+#' handles two-column academic papers. pdftools is NOT used as a fallback
+#' because it interleaves columns, corrupting statistical expressions.
 #'
 #' @param pdf_path Path to PDF file
 #' @param suppress_warnings Logical, suppress PDF font warnings (default TRUE)
 #' @return Character vector of extracted text
 #' @keywords internal
 extract_pdf_text_robust <- function(pdf_path, suppress_warnings = TRUE) {
-  # Method 1: pdftools (recommended, fastest)
-  if (requireNamespace("pdftools", quietly = TRUE)) {
-    tryCatch(
-      {
-        if (suppress_warnings) {
-          # Capture both warnings and stderr messages (like "PDF error: Invalid Font Weight")
-          # Use sink to redirect stderr to null
-          sink(file = nullfile(), type = "message")
-          on.exit(sink(type = "message"), add = TRUE)
-          text <- suppressWarnings({
-            pdftools::pdf_text(pdf_path)
-          })
-        } else {
-          text <- pdftools::pdf_text(pdf_path)
-        }
-        text_combined <- paste(text, collapse = "\n\n")
-        # Ensure valid UTF-8 encoding
-        if (requireNamespace("stringi", quietly = TRUE)) {
-          text_combined <- suppressWarnings({
-            stringi::stri_enc_toutf8(text_combined, validate = TRUE)
-          })
-        } else if (!validUTF8(text_combined)) {
-          text_combined <- iconv(text_combined, from = "latin1", to = "UTF-8", sub = " ")
-        }
-        return(text_combined)
-      },
-      error = function(e) {
-        # Fall through to next method
-      }
-    )
+  ensure_utf8 <- function(txt) {
+    if (requireNamespace("stringi", quietly = TRUE)) {
+      suppressWarnings(stringi::stri_enc_toutf8(txt, validate = TRUE))
+    } else if (!validUTF8(txt)) {
+      iconv(txt, from = "latin1", to = "UTF-8", sub = " ")
+    } else {
+      txt
+    }
   }
 
-  # Method 2: tm package with xpdf
-  if (requireNamespace("tm", quietly = TRUE)) {
-    tryCatch(
-      {
-        # Suppress stderr messages
-        sink(file = nullfile(), type = "message")
-        on.exit(sink(type = "message"), add = TRUE)
-        text <- tm::readPDF(engine = "xpdf")(elem = list(uri = pdf_path),
-          language = "en", id = "id1")
-        text_combined <- paste(text$content, collapse = "\n\n")
-        if (requireNamespace("stringi", quietly = TRUE)) {
-          text_combined <- suppressWarnings({
-            stringi::stri_enc_toutf8(text_combined, validate = TRUE)
-          })
-        }
-        return(text_combined)
-      },
-      error = function(e) {
-        # Fall through to next method
-      }
-    )
-  }
-
-  # Method 3: pdftotext command-line tool
+  # Require pdftotext (from poppler-utils / Git mingw64)
+  # pdftotext correctly handles two-column academic papers, while pdftools
+  # often interleaves columns causing text corruption like "F smaller. (2, 430)"
   pdftotext_path <- Sys.which("pdftotext")
-  if (pdftotext_path != "") {
-    tryCatch(
-      {
-        temp_txt <- tempfile(fileext = ".txt")
-        on.exit(
-          {
-            if (file.exists(temp_txt)) {
-              tryCatch(unlink(temp_txt), error = function(e) {})
-            }
-          },
-          add = TRUE
-        )
-
-        system2(pdftotext_path,
-          args = c(shQuote(pdf_path), shQuote(temp_txt)),
-          stdout = TRUE, stderr = TRUE
-        )
-
-        if (file.exists(temp_txt)) {
-          text <- readLines(temp_txt, warn = FALSE, encoding = "UTF-8")
-          # cleanup handled by on.exit
-          text_combined <- paste(text, collapse = "\n")
-          if (requireNamespace("stringi", quietly = TRUE)) {
-            text_combined <- suppressWarnings({
-              stringi::stri_enc_toutf8(text_combined, validate = TRUE)
-            })
-          }
-          return(text_combined)
-        }
-      },
-      error = function(e) {
-        # Fall through
-      }
+  if (pdftotext_path == "") {
+    stop(
+      "pdftotext not found on PATH. ",
+      "Install poppler-utils (Linux/Mac) or ensure Git's mingw64/bin is on PATH (Windows). ",
+      "On Windows, start_app.bat adds this automatically. ",
+      "pdftools is not used because it interleaves columns in two-column PDFs."
     )
   }
 
-  stop("No PDF text extraction method available. Install 'pdftools' package.")
+  temp_txt <- tempfile(fileext = ".txt")
+  on.exit(
+    {
+      if (file.exists(temp_txt)) {
+        tryCatch(unlink(temp_txt), error = function(e) {})
+      }
+    },
+    add = TRUE
+  )
+
+  system2(pdftotext_path,
+    args = c(shQuote(pdf_path), shQuote(temp_txt)),
+    stdout = TRUE, stderr = TRUE
+  )
+
+  if (!file.exists(temp_txt)) {
+    stop("pdftotext failed to produce output for: ", basename(pdf_path))
+  }
+
+  text <- readLines(temp_txt, warn = FALSE, encoding = "UTF-8")
+  text_combined <- paste(text, collapse = "\n")
+  text_combined <- ensure_utf8(text_combined)
+
+  if (nchar(trimws(text_combined)) == 0) {
+    stop(
+      "pdftotext produced empty output for: ", basename(pdf_path),
+      ". The PDF may be scanned (image-only) or corrupted."
+    )
+  }
+
+  return(text_combined)
 }
 
 #' Extract tables from PDF
@@ -142,23 +106,16 @@ extract_pdf_tables <- function(pdf_path) {
     )
   }
 
-  # Method 2: pdftools with table detection heuristics
-  if (length(table_texts) == 0 && requireNamespace("pdftools", quietly = TRUE)) {
+  # Method 2: Use pdftotext output for table detection heuristics
+  if (length(table_texts) == 0) {
     tryCatch(
       {
-        text_pages <- suppressWarnings({
-          pdftools::pdf_text(pdf_path)
-        })
-
-        # Look for table-like patterns (multiple spaces, pipes, tabs)
-        for (page_text in text_pages) {
-          lines <- strsplit(page_text, "\n", fixed = TRUE)[[1]]
-          # Identify potential table rows (multiple consecutive spaces or tabs)
-          table_lines <- grep("\\s{3,}|\\t", lines, value = TRUE)
-          if (length(table_lines) > 2) {
-            # Likely a table
-            table_texts <- c(table_texts, paste(table_lines, collapse = "\n"))
-          }
+        text_combined <- extract_pdf_text_robust(pdf_path, suppress_warnings = TRUE)
+        lines <- strsplit(text_combined, "\n", fixed = TRUE)[[1]]
+        # Identify potential table rows (multiple consecutive spaces or tabs)
+        table_lines <- grep("\\s{3,}|\\t", lines, value = TRUE)
+        if (length(table_lines) > 2) {
+          table_texts <- c(table_texts, paste(table_lines, collapse = "\n"))
         }
       },
       error = function(e) {
@@ -182,61 +139,51 @@ extract_pdf_ocr <- function(pdf_path, language = "eng") {
     return(character(0))
   }
 
+  # Use pdftoppm (poppler CLI) to convert PDF pages to images for OCR
+  pdftoppm_path <- Sys.which("pdftoppm")
+  if (pdftoppm_path == "") {
+    return(character(0))
+  }
+
   tryCatch(
     {
-      # Convert PDF pages to images
-      if (requireNamespace("pdftools", quietly = TRUE)) {
-        # Get number of pages
-        pdf_info <- suppressWarnings({
-          pdftools::pdf_info(pdf_path)
-        })
-        n_pages <- pdf_info$pages
+      img_prefix <- tempfile()
+      system2(pdftoppm_path,
+        args = c("-png", "-r", "300", shQuote(pdf_path), shQuote(img_prefix)),
+        stdout = TRUE, stderr = TRUE
+      )
 
-        ocr_text <- character(0)
+      img_files <- sort(Sys.glob(paste0(img_prefix, "*.png")))
+      on.exit(unlink(img_files), add = TRUE)
 
-        # OCR each page
-        for (page in seq_len(n_pages)) {
-          tryCatch(
-            {
-              # Convert page to image
-              img_path <- tempfile(fileext = ".png")
-              suppressWarnings({
-                pdftools::pdf_convert(pdf_path,
-                  pages = page, dpi = 300,
-                  filenames = img_path
-                )
-              })
+      if (length(img_files) == 0) return(character(0))
 
-              if (file.exists(img_path)) {
-                # Read image and perform OCR
-                img <- magick::image_read(img_path)
-                ocr_result <- tesseract::ocr(img, engine = tesseract::tesseract(language))
-                ocr_text <- c(ocr_text, ocr_result)
-                unlink(img_path)
-              }
-            },
-            error = function(e) {
-              # Skip this page
-            }
-          )
-        }
-
-        # Combine and clean OCR text
-        text_combined <- paste(ocr_text, collapse = "\n\n")
-        if (requireNamespace("stringi", quietly = TRUE)) {
-          text_combined <- suppressWarnings({
-            stringi::stri_enc_toutf8(text_combined, validate = TRUE)
-          })
-        }
-        return(text_combined)
+      ocr_text <- character(0)
+      for (img_path in img_files) {
+        tryCatch(
+          {
+            img <- magick::image_read(img_path)
+            ocr_result <- tesseract::ocr(img, engine = tesseract::tesseract(language))
+            ocr_text <- c(ocr_text, ocr_result)
+          },
+          error = function(e) {
+            # Skip this page
+          }
+        )
       }
+
+      text_combined <- paste(ocr_text, collapse = "\n\n")
+      if (requireNamespace("stringi", quietly = TRUE)) {
+        text_combined <- suppressWarnings({
+          stringi::stri_enc_toutf8(text_combined, validate = TRUE)
+        })
+      }
+      return(text_combined)
     },
     error = function(e) {
       return(character(0))
     }
   )
-
-  return(character(0))
 }
 
 #' Comprehensive PDF text extraction with fallbacks
@@ -258,12 +205,15 @@ extract_pdf_comprehensive <- function(pdf_path, try_tables = TRUE, try_ocr = TRU
     method = "none"
   )
 
-  # Step 1: Try regular text extraction
+  # Step 1: Extract text via pdftotext (required)
+  # Let "pdftotext not found" errors propagate — they are not recoverable.
+  # Only catch errors from the extraction itself (e.g., corrupted PDF).
   text_main <- tryCatch(
     {
       extract_pdf_text_robust(pdf_path, suppress_warnings = TRUE)
     },
     error = function(e) {
+      if (grepl("pdftotext not found", e$message, fixed = TRUE)) stop(e)
       character(0)
     }
   )

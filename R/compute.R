@@ -99,14 +99,13 @@ ci_d_ind_noncentral_t <- function(d, n1, n2, level = 0.95) {
   if (requireNamespace("MBESS", quietly = TRUE)) {
     tryCatch(
       {
-        ci_result <- MBESS::ci.sm(
+        ci_result <- MBESS::ci.smd(
           ncp = d * sqrt((n1 * n2) / (n1 + n2)),
-          N = n1 + n2, conf.level = level
+          n.1 = n1, n.2 = n2, conf.level = level
         )
-        # Convert back to d scale
         return(c(
-          ci_result$Lower.Conf.Limit.Standardized.Mean,
-          ci_result$Upper.Conf.Limit.Standardized.Mean
+          ci_result$Lower.Conf.Limit.smd,
+          ci_result$Upper.Conf.Limit.smd
         ))
       },
       error = function(e) {
@@ -166,6 +165,44 @@ ci_d_ind <- function(d, n1, n2, level = 0.95, prefer_noncentral = TRUE) {
   return(ci_result(reason = "No valid CI method available for independent d with given parameters"))
 }
 
+#' Calculate CI for Cohen's dz (paired design)
+#'
+#' Uses the noncentral t approach or large-sample approximation.
+#' SE(dz) = sqrt(1/n + dz^2 / (2*n)) for the normal approximation.
+#'
+#' @param dz Cohen's dz
+#' @param n Sample size (number of pairs)
+#' @param level Confidence level (default 0.95)
+#' @return ci_result list
+#' @keywords internal
+ci_dz <- function(dz, n, level = 0.95) {
+  if (any(is.na(c(dz, n))) || n <= 1) {
+    return(ci_result(reason = "Missing or invalid parameters for dz CI"))
+  }
+
+  # Try noncentral t method first
+  ncp <- dz * sqrt(n)
+  df <- n - 1
+  tryCatch(
+    {
+      alpha <- 1 - level
+      t_lo <- suppressWarnings(stats::qt(1 - alpha / 2, df = df, ncp = ncp))
+      t_hi <- suppressWarnings(stats::qt(alpha / 2, df = df, ncp = ncp))
+      if (!is.na(t_lo) && !is.na(t_hi) && is.finite(t_lo) && is.finite(t_hi)) {
+        bounds <- c(t_hi / sqrt(n), t_lo / sqrt(n))
+        return(ci_result(bounds = bounds, method = "noncentral_t", success = TRUE))
+      }
+    },
+    error = function(e) NULL
+  )
+
+  # Fallback: large-sample normal approximation
+  se_dz <- sqrt(1 / n + dz^2 / (2 * n))
+  z <- stats::qnorm(1 - (1 - level) / 2)
+  bounds <- c(dz - z * se_dz, dz + z * se_dz)
+  ci_result(bounds = bounds, method = "normal_approx", success = TRUE)
+}
+
 #' Calculate Cohen's dz from t-statistic (Paired)
 #'
 #' @param t t-statistic
@@ -202,9 +239,12 @@ drm_from_dz <- function(dz, r = NA_real_) {
   if (is.na(dz)) {
     return(NA_real_)
   }
-  # drm is essentially the same as dz for paired designs
-  # The distinction is subtle and often not made in practice
-  dz
+  # drm (repeated measures d, Morris & DeShon 2002) = dz * sqrt(2*(1-r))
+  # Without correlation, return NA since the conversion is not possible
+  if (is.na(r) || r >= 1) {
+    return(NA_real_)
+  }
+  dz * sqrt(2 * (1 - r))
 }
 
 #' Compute range of plausible dav values
@@ -702,6 +742,66 @@ compute_regression_effects <- function(t = NA_real_, df = NA_real_,
   results
 }
 
+# ---- Regression coefficient verification ----
+
+#' Verify t-statistic from regression coefficient and SE
+#'
+#' Checks if t = b/SE is consistent with the reported t-value.
+#'
+#' @param b Regression coefficient
+#' @param SE Standard error of b
+#' @param reported_t Reported t-value
+#' @param tol Tolerance for matching (default 0.01)
+#' @return List with computed_t, delta, and consistent (logical)
+#' @keywords internal
+verify_t_from_b_SE <- function(b, SE, reported_t, tol = 0.01) {
+  if (any(is.na(c(b, SE, reported_t))) || SE == 0) {
+    return(list(computed_t = NA_real_, delta = NA_real_, consistent = NA))
+  }
+  computed_t <- b / SE
+  delta <- abs(abs(computed_t) - abs(reported_t))
+  list(
+    computed_t = computed_t,
+    delta = delta,
+    consistent = delta <= tol
+  )
+}
+
+#' Compute adjusted R-squared
+#'
+#' @param R2 R-squared value
+#' @param n Sample size
+#' @param p Number of predictors
+#' @return Adjusted R-squared
+#' @keywords internal
+adjusted_R2 <- function(R2, n, p) {
+  if (any(is.na(c(R2, n, p))) || n <= p + 1 || R2 < 0 || R2 > 1) {
+    return(NA_real_)
+  }
+  1 - (1 - R2) * (n - 1) / (n - p - 1)
+}
+
+#' Verify adjusted R-squared consistency
+#'
+#' @param R2 R-squared value
+#' @param adj_R2_reported Reported adjusted R-squared
+#' @param n Sample size
+#' @param p Number of predictors
+#' @param tol Tolerance (default 0.01)
+#' @return List with computed, delta, consistent
+#' @keywords internal
+verify_adj_R2 <- function(R2, adj_R2_reported, n, p, tol = 0.01) {
+  if (any(is.na(c(R2, adj_R2_reported, n, p)))) {
+    return(list(computed = NA_real_, delta = NA_real_, consistent = NA))
+  }
+  computed <- adjusted_R2(R2, n, p)
+  if (is.na(computed)) {
+    return(list(computed = NA_real_, delta = NA_real_, consistent = NA))
+  }
+  delta <- abs(computed - adj_R2_reported)
+  list(computed = computed, delta = delta, consistent = delta <= tol)
+}
+
 # ---- Ratio measures (OR, RR, IRR) ----
 
 # Odds Ratio (OR) - typically reported directly
@@ -916,21 +1016,13 @@ ci_etap2 <- function(F_val, df1, df2, level = 0.95) {
     return(ci_result(reason = "Could not converge on NCP"))
   }
 
-  # Convert lambda to partial eta-squared
-  # eta_p2 = lambda / (lambda + df1 + df2 + 1)
-  # Wait, accurate formula for population estimation is:
-  # eta_p2 = lambda / (lambda + df1 + df2 + 1)
-  # However, Cohen's conversion often uses:
-  # lambda = f^2 * (df1 + df2 + 1) ? No.
-
-  # Standard conversion used in MBESS/psych:
-  # lambda = N_eff * f^2
-  # Let's use the transformation:
-  # eta_p^2 = lambda / (lambda + df1 + df2 + 1)
-  # This formula assumes fixed effects ANOVA logic.
-
+  # Convert noncentrality parameter to partial eta-squared
+  # The standard formula (Steiger 2004, used in MBESS/effectsize):
+  #   eta_p^2 = (F * df1) / (F * df1 + df2)
+  # Since lambda = F * df1, this gives:
+  #   eta_p^2 = lambda / (lambda + df2)
   calc_eta <- function(lam) {
-    lam / (lam + df1 + df2 + 1)
+    lam / (lam + df2)
   }
 
   bounds <- c(calc_eta(lambdas[1]), calc_eta(lambdas[2]))

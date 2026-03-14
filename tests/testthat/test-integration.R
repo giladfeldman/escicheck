@@ -63,7 +63,7 @@ test_that("File reading and checking pipeline", {
   # Or use check_files directly
   result2 <- check_files(test_file)
   expect_true(nrow(result2) > 0)
-  expect_true("file" %in% names(result2))
+  expect_true("source" %in% names(result2))
   
   unlink(test_file)
 })

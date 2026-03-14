@@ -86,10 +86,104 @@ test_that("export_csv handles NA values", {
     d_ind = NA_real_,
     status = "PASS"
   )
-  
+
   out_file <- tempfile(fileext = ".csv")
   result <- export_csv(res, out_file, na = "")
-  
+
   expect_true(file.exists(out_file))
+  unlink(out_file)
+})
+
+# ===========================================================================
+# generate_report() tests
+# ===========================================================================
+
+test_that("generate_report creates self-contained HTML", {
+  res <- check_text("t(28) = 2.21, p = .035, d = 0.80")
+  out_file <- tempfile(fileext = ".html")
+  result <- generate_report(res, out_file)
+
+  expect_true(file.exists(out_file))
+  content <- paste(readLines(out_file, warn = FALSE), collapse = "\n")
+  expect_true(grepl("<!doctype html>", content, ignore.case = TRUE))
+  expect_true(grepl("EffectCheck Report", content))
+  expect_true(grepl("EffectCheck v", content))
+  unlink(out_file)
+})
+
+test_that("generate_report includes executive summary bars", {
+  res <- check_text("t(28) = 2.21, p = .035, d = 0.80")
+  out_file <- tempfile(fileext = ".html")
+  generate_report(res, out_file)
+  content <- paste(readLines(out_file, warn = FALSE), collapse = "\n")
+
+  expect_true(grepl("exec-summary", content))
+  expect_true(grepl("bar-pass", content))
+  expect_true(grepl("bar-ok", content))
+  expect_true(grepl("bar-note", content))
+  expect_true(grepl("bar-warn", content))
+  expect_true(grepl("bar-error", content))
+  unlink(out_file)
+})
+
+test_that("generate_report color-codes rows by status", {
+  res <- check_text("t(28) = 2.21, p = .035, d = 0.80")
+  out_file <- tempfile(fileext = ".html")
+  generate_report(res, out_file)
+  content <- paste(readLines(out_file, warn = FALSE), collapse = "\n")
+
+  expect_true(grepl("row-PASS|row-OK|row-NOTE|row-WARN|row-ERROR", content))
+  unlink(out_file)
+})
+
+test_that("generate_report handles empty results", {
+  res <- tibble::tibble()
+  class(res) <- c("tbl_df", "tbl", "data.frame")
+  out_file <- tempfile(fileext = ".html")
+  generate_report(res, out_file)
+
+  content <- paste(readLines(out_file, warn = FALSE), collapse = "\n")
+  expect_true(grepl("No statistics detected", content))
+  unlink(out_file)
+})
+
+test_that("generate_report includes source_name and author", {
+  res <- check_text("t(28) = 2.21, p = .035, d = 0.80")
+  out_file <- tempfile(fileext = ".html")
+  generate_report(res, out_file, source_name = "test_paper.pdf", author = "Test Author")
+  content <- paste(readLines(out_file, warn = FALSE), collapse = "\n")
+
+  expect_true(grepl("test_paper.pdf", content))
+  expect_true(grepl("Test Author", content))
+  unlink(out_file)
+})
+
+test_that("generate_report includes repro code section", {
+  res <- check_text("t(28) = 2.21, p = .035, d = 0.80")
+  out_file <- tempfile(fileext = ".html")
+  generate_report(res, out_file, include_repro_code = TRUE)
+  content <- paste(readLines(out_file, warn = FALSE), collapse = "\n")
+
+  expect_true(grepl("Reproducible R Code", content))
+  unlink(out_file)
+})
+
+test_that("generate_report omits repro code when disabled", {
+  res <- check_text("t(28) = 2.21, p = .035, d = 0.80")
+  out_file <- tempfile(fileext = ".html")
+  generate_report(res, out_file, include_repro_code = FALSE)
+  content <- paste(readLines(out_file, warn = FALSE), collapse = "\n")
+
+  expect_false(grepl("Collated Reproducible R Code", content))
+  unlink(out_file)
+})
+
+test_that("generate_report with custom title", {
+  res <- check_text("t(28) = 2.21, p = .035, d = 0.80")
+  out_file <- tempfile(fileext = ".html")
+  generate_report(res, out_file, title = "My Custom Report")
+  content <- paste(readLines(out_file, warn = FALSE), collapse = "\n")
+
+  expect_true(grepl("My Custom Report", content))
   unlink(out_file)
 })

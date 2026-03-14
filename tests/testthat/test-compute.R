@@ -24,10 +24,22 @@ test_that("dz_from_t computes correctly", {
 
 test_that("dav_from_dz computes correctly", {
   dz <- 0.5
-  r <- 0.5
-  dav <- effectcheck:::dav_from_dz(dz, r)
-  expect_true(!is.na(dav))
-  expect_true(dav > dz)  # dav should be larger than dz
+  # dav = dz / sqrt(2*(1-r))
+  # When r > 0.5, sqrt(2*(1-r)) < 1, so dav > dz
+  r_high <- 0.7
+  dav_high <- effectcheck:::dav_from_dz(dz, r_high)
+  expect_true(!is.na(dav_high))
+  expect_true(dav_high > dz)
+  expect_equal(dav_high, 0.5 / sqrt(2 * (1 - 0.7)), tolerance = 0.0001)
+
+  # When r = 0.5, dav == dz exactly
+  dav_eq <- effectcheck:::dav_from_dz(0.5, 0.5)
+  expect_equal(dav_eq, 0.5, tolerance = 1e-10)
+
+  # When r < 0.5, dav < dz
+  r_low <- 0.3
+  dav_low <- effectcheck:::dav_from_dz(dz, r_low)
+  expect_true(dav_low < dz)
 })
 
 test_that("fisher_ci_r computes CI for correlation", {

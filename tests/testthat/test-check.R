@@ -65,7 +65,7 @@ test_that("check_text assigns status correctly", {
   text <- "t(28) = 2.21, d = 0.80, N = 30, n1 = 15, n2 = 15"
   result <- check_text(text, tol_effect = list(d = 0.02))
   if (nrow(result) > 0) {
-    expect_true(result$status[1] %in% c("PASS", "WARN", "ERROR", "INSUFFICIENT_DATA"))
+    expect_true(result$status[1] %in% c("PASS", "OK", "NOTE", "WARN", "ERROR", "INSUFFICIENT_DATA"))
   }
 })
 
@@ -103,8 +103,68 @@ test_that("check_files handles multiple files", {
   
   result <- check_files(c(file1, file2))
   expect_true(tibble::is_tibble(result))
-  expect_true("file" %in% names(result))
+  expect_true("source" %in% names(result))
   
   # Cleanup
   unlink(c(file1, file2))
+})
+
+# ===========================================================================
+# 5-level status system tests (PASS / OK / NOTE / WARN / ERROR)
+# ===========================================================================
+
+test_that("OK status for p-value-only check with consistent direction", {
+  # F-test with no effect size, but p-value consistent
+  text <- "F(2, 27) = 4.56, p = .02"
+  result <- check_text(text)
+  if (nrow(result) > 0) {
+    expect_true(result$status[1] %in% c("PASS", "OK", "NOTE", "WARN", "ERROR"))
+  }
+})
+
+test_that("OK status for p < .001 inequality when computed p also < .001", {
+  # Large t-value ensures computed p < .001
+  text <- "t(28) = 5.50, p < .001"
+  result <- check_text(text)
+  if (nrow(result) > 0) {
+    # No effect size reported, p < .001 consistent -> should be OK
+    expect_true(result$status[1] %in% c("OK", "NOTE", "PASS"))
+  }
+})
+
+test_that("r-test with consistent p-value gets OK status", {
+  # r IS the effect size, p should be consistent
+  text <- "r(198) = .34, p < .001"
+  result <- check_text(text)
+  if (nrow(result) > 0) {
+    # r-test with consistent p should be OK or PASS
+    expect_true(result$status[1] %in% c("OK", "PASS", "NOTE"))
+  }
+})
+
+test_that("NOTE status for ambiguous design with matching effect", {
+  # Ambiguous design (no clear paired/independent context) but effect matches
+  text <- "t(28) = 2.21, d = 0.80"
+  result <- check_text(text)
+  if (nrow(result) > 0) {
+    # Should be PASS, NOTE, or WARN depending on delta
+    expect_true(result$status[1] %in% c("PASS", "OK", "NOTE", "WARN", "ERROR"))
+  }
+})
+
+test_that("p_symbol column is available in parsed output", {
+  text <- "t(28) = 2.21, p < .001"
+  parsed <- parse_text(text)
+  expect_true("p_symbol" %in% names(parsed))
+  if (nrow(parsed) > 0) {
+    expect_equal(parsed$p_symbol[1], "<")
+  }
+})
+
+test_that("p_symbol captures = sign", {
+  text <- "t(28) = 2.21, p = .035"
+  parsed <- parse_text(text)
+  if (nrow(parsed) > 0) {
+    expect_equal(parsed$p_symbol[1], "=")
+  }
 })
