@@ -6,7 +6,7 @@
 .onAttach <- function(libname, pkgname) {
   packageStartupMessage(
     "===========================================================================\n",
-    "  effectcheck v", utils::packageVersion("effectcheck"), " - DEVELOPMENT VERSION\n",
+    "  effectcheck v", .effectcheck_version(), " - DEVELOPMENT VERSION\n",
     "===========================================================================\n",
     "  WARNING: This package is under heavy development and has NOT yet been\n",
     "  fully validated. Results should be independently verified before use in\n",

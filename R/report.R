@@ -34,7 +34,7 @@ generate_report <- function(res, out = "effectcheck_report.html",
       "</title></head><body><h1>", htmlEscape(title),
       "</h1><p>No statistics detected.</p>",
       "<footer style='margin-top:40px;padding-top:10px;border-top:1px solid #ccc;color:#999;font-size:12px;'>",
-      "Checked with EffectCheck v", utils::packageVersion("effectcheck"), " on ", Sys.Date(),
+      "Checked with EffectCheck v", .effectcheck_version(), " on ", Sys.Date(),
       "</footer></body></html>"
     )
     writeLines(html, out)
@@ -64,7 +64,7 @@ generate_report <- function(res, out = "effectcheck_report.html",
   meta_parts <- c(
     if (!is.null(source_name)) paste0("Source: ", htmlEscape(source_name)) else NULL,
     paste0("Date: ", Sys.Date()),
-    paste0("Version: ", utils::packageVersion("effectcheck")),
+    paste0("Version: ", .effectcheck_version()),
     paste0("Statistics found: ", total_rows)
   )
   if (!is.null(author)) meta_parts <- c(paste0("Author: ", htmlEscape(author)), meta_parts)
@@ -199,7 +199,7 @@ paste(sprintf("<th>%s</th>", key_cols), collapse = ""),
   }
 
   html <- paste0(html,
-    '<footer>Checked with EffectCheck v', utils::packageVersion("effectcheck"),
+    '<footer>Checked with EffectCheck v', .effectcheck_version(),
     ' on ', Sys.Date(), '</footer>
 </body>
 </html>')

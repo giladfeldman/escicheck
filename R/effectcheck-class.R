@@ -3,6 +3,14 @@
 #' This file defines the effectcheck S3 class and its associated methods
 #' for printing, summarizing, and plotting results.
 
+# Safe version getter - works both as installed package and when source()'d
+.effectcheck_version <- function() {
+  tryCatch(
+    as.character(utils::packageVersion("effectcheck")),
+    error = function(e) "0.2.0"
+  )
+}
+
 #' Create an effectcheck object
 #'
 #' Wraps a tibble of results with the effectcheck S3 class and metadata.
@@ -18,7 +26,7 @@ new_effectcheck <- function(x, call = NULL, settings = list()) {
   structure(
     x,
     class = c("effectcheck", class(x)),
-    effectcheck_version = as.character(utils::packageVersion("effectcheck")),
+    effectcheck_version = .effectcheck_version(),
     call = call,
     settings = settings,
     generated = Sys.time()
@@ -695,9 +703,10 @@ format_variants <- function(x, row_index = 1, include_alternatives = TRUE) {
 #' @examples
 #' get_variant_metadata("d_ind")
 get_variant_metadata <- function(variant_name) {
-  # Access VARIANT_METADATA from check.R
-  if (exists("VARIANT_METADATA", envir = asNamespace("effectcheck"))) {
-    metadata <- get("VARIANT_METADATA", envir = asNamespace("effectcheck"))
+  # Access VARIANT_METADATA from check.R (works as package or source()'d)
+  ns <- tryCatch(asNamespace("effectcheck"), error = function(e) globalenv())
+  if (exists("VARIANT_METADATA", envir = ns)) {
+    metadata <- get("VARIANT_METADATA", envir = ns)
     if (variant_name %in% names(metadata)) {
       return(metadata[[variant_name]])
     }
@@ -722,9 +731,10 @@ get_variant_metadata <- function(variant_name) {
 #' @examples
 #' get_effect_family("d")
 get_effect_family <- function(effect_type) {
-  # Access EFFECT_SIZE_FAMILIES from check.R
-  if (exists("EFFECT_SIZE_FAMILIES", envir = asNamespace("effectcheck"))) {
-    families <- get("EFFECT_SIZE_FAMILIES", envir = asNamespace("effectcheck"))
+  # Access EFFECT_SIZE_FAMILIES from check.R (works as package or source()'d)
+  ns <- tryCatch(asNamespace("effectcheck"), error = function(e) globalenv())
+  if (exists("EFFECT_SIZE_FAMILIES", envir = ns)) {
+    families <- get("EFFECT_SIZE_FAMILIES", envir = ns)
     if (effect_type %in% names(families)) {
       return(families[[effect_type]])
     }
