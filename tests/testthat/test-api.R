@@ -87,15 +87,15 @@ test_that("subsetting preserves effectcheck class", {
   expect_s3_class(subset_result, "effectcheck")
 })
 
-test_that("identify function filters correctly", {
+test_that("ec_identify function filters correctly", {
   text <- "t(28) = 2.21, p = .035, d = 0.80"
   result <- check_text(text)
-  
+
   # Should not error even if no errors exist
-  errors <- identify(result, "errors")
+  errors <- ec_identify(result, "errors")
   expect_s3_class(errors, "effectcheck")
-  
-  warnings <- identify(result, "warnings")
+
+  warnings <- ec_identify(result, "warnings")
   expect_s3_class(warnings, "effectcheck")
 })
 

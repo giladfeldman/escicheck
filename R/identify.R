@@ -25,15 +25,15 @@
 #' results <- check_dir("manuscripts/")
 #' 
 #' # Get only errors
-#' errors <- identify(results, "errors")
+#' errors <- ec_identify(results, "errors")
 #' 
 #' # Get errors and warnings
-#' problems <- identify(results, c("errors", "warnings"))
+#' problems <- ec_identify(results, c("errors", "warnings"))
 #' 
 #' # Get all problematic results
-#' all_problems <- identify(results, "all_problems")
+#' all_problems <- ec_identify(results, "all_problems")
 #' }
-identify <- function(x, what = c("errors", "warnings", "decision_errors", 
+ec_identify <- function(x, what = c("errors", "warnings", "decision_errors", 
                                   "high_uncertainty", "insufficient", "all_problems"),
                      ...) {
   if (!inherits(x, "effectcheck")) {
@@ -96,7 +96,7 @@ identify <- function(x, what = c("errors", "warnings", "decision_errors",
 #' errors <- get_errors(results)
 #' }
 get_errors <- function(x) {
-  identify(x, "errors")
+  ec_identify(x, "errors")
 }
 
 #' Get warnings from effectcheck results
@@ -112,7 +112,7 @@ get_errors <- function(x) {
 #' warnings <- get_warnings(results)
 #' }
 get_warnings <- function(x) {
-  identify(x, "warnings")
+  ec_identify(x, "warnings")
 }
 
 #' Get decision errors from effectcheck results
@@ -129,7 +129,7 @@ get_warnings <- function(x) {
 #' decision_errors <- get_decision_errors(results)
 #' }
 get_decision_errors <- function(x) {
-  identify(x, "decision_errors")
+  ec_identify(x, "decision_errors")
 }
 
 #' Filter results by test type

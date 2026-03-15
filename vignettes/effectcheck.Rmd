@@ -1,0 +1,161 @@
+---
+title: "Introduction to effectcheck"
+output: rmarkdown::html_vignette
+vignette: >
+  %\VignetteIndexEntry{Introduction to effectcheck}
+  %\VignetteEngine{knitr::rmarkdown}
+  %\VignetteEncoding{UTF-8}
+---
+
+```{r, include = FALSE}
+knitr::opts_chunk$set(
+  collapse = TRUE,
+  comment = "#>"
+)
+```
+
+## Overview
+
+**effectcheck** is a conservative, assumption-aware statistical consistency
+checker for APA-style research results. It parses test statistics from text,
+PDF, HTML, and Word documents, recomputes effect sizes and p-values, and flags
+discrepancies.
+
+Key design principles:
+
+- **Conservative**: When the study design is ambiguous (paired vs. independent),
+  effectcheck computes *all* plausible variants and reports the closest match.
+- **Transparent**: Every result includes the assumptions made, the variant
+  chosen, and reproducible R code to verify the computation.
+- **Comprehensive**: Supports t-tests, F-tests/ANOVA, correlations, chi-square,
+  z-tests, regression coefficients, and nonparametric tests (U, W, H).
+
+## Quick start
+
+```{r basic}
+library(effectcheck)
+
+# Check a single APA-style result
+result <- check_text("t(28) = 2.21, p = .035, d = 0.80")
+print(result)
+```
+
+The output shows whether the reported effect size is consistent with what
+effectcheck recomputes from the test statistic and degrees of freedom.
+
+## Checking multiple statistics
+
+effectcheck handles multiple statistics in the same text:
+
+```{r multiple}
+text <- "
+Study 1 found a significant effect, t(45) = 3.12, p = .003, d = 0.91.
+The ANOVA revealed a main effect, F(2, 87) = 5.44, p = .006.
+The correlation was significant, r(48) = .42, p = .003.
+"
+
+results <- check_text(text)
+summary(results)
+```
+
+## Understanding the output
+
+Each row in the results represents one detected statistic. Key columns:
+
+- **test_type**: The type of test (t, F, r, chisq, z, U, W, H, regression)
+- **status**: PASS, WARN, or ERROR based on the discrepancy
+- **effect_size_reported / effect_size_recomputed**: The comparison
+- **delta**: Absolute difference between reported and recomputed values
+- **uncertainty**: How confident effectcheck is in its assumptions
+
+## Working with results
+
+effectcheck returns S3 objects with convenient methods:
+
+```{r filter}
+# Filter by status
+errors <- get_errors(results)
+warnings <- get_warnings(results)
+
+# Filter by test type
+t_tests <- filter_by_test_type(results, "t")
+
+# Get counts
+count_by(results, "test_type")
+```
+
+## Examining variants
+
+When effectcheck cannot determine the study design, it computes multiple
+variants. You can inspect these:
+```{r variants}
+result <- check_text("t(28) = 2.21, p = .035, d = 0.80")
+
+# See all computed variants for the first result
+format_variants(result, 1)
+
+# Get metadata about a specific variant type
+get_variant_metadata("d_ind")
+```
+
+## Checking files
+
+For PDF, HTML, DOCX, or plain text files:
+
+```{r files, eval=FALSE}
+# Single file
+result <- check_file("manuscript.pdf")
+
+# Multiple files
+results <- check_files(c("study1.pdf", "study2.html"))
+
+# Entire directory
+results <- check_dir("manuscripts/")
+```
+
+## Exporting results
+
+```{r export, eval=FALSE}
+results <- check_text("t(28) = 2.21, p = .035, d = 0.80")
+
+# HTML report
+generate_report(results, out = "report.html")
+
+# CSV/JSON export
+export_csv(results, out = "results.csv")
+export_json(results, out = "results.json")
+```
+
+## Comparison with statcheck
+
+If the [statcheck](https://CRAN.R-project.org/package=statcheck) package is
+installed, you can run both tools side-by-side:
+
+```{r statcheck, eval=FALSE}
+comp <- compare_with_statcheck("t(28) = 2.21, p = .035, d = 0.80")
+print(comp)
+```
+
+## Status thresholds
+
+effectcheck uses three status levels:
+
+| Status | Meaning |
+|--------|---------|
+| **PASS** | Delta within tolerance (or APA rounding match) |
+| **WARN** | Delta within 3x tolerance, or ambiguous match |
+| **ERROR** | Delta exceeds 5x tolerance |
+
+## Supported test types
+
+| Type | Example APA format |
+|------|-------------------|
+| t-test | `t(28) = 2.21, p = .035` |
+| F-test | `F(2, 87) = 5.44, p = .006` |
+| Correlation | `r(48) = .42, p = .003` |
+| Chi-square | `chi2(1, N = 100) = 4.50, p = .034` |
+| z-test | `z = 2.33, p = .020` |
+| Mann-Whitney | `U = 145.00, p = .023` |
+| Wilcoxon | `W = 89.00, p = .041` |
+| Kruskal-Wallis | `H(2) = 8.73, p = .013` |
+| Regression | `b = 0.45, SE = 0.12, t(98) = 3.75, p < .001` |

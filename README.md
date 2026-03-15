@@ -33,7 +33,7 @@ This package implements effect size computations following the [Guide to Effect 
 - **Decision error detection** (significance reversals) similar to statcheck
 - **statcheck-compatible API** for batch processing of files and directories
 - **Multiple export formats**: HTML (with expandable sections), CSV, JSON
-- **S3 class with methods**: print, summary, plot, identify, get_variants
+- **S3 class with methods**: print, summary, plot, ec_identify, get_variants
 
 ## Installation
 
@@ -111,8 +111,8 @@ plot(result, type = "uncertainty") # Uncertainty levels
 plot(result, type = "all")         # All plots
 
 # Filter problematic results
-errors <- identify(result, "errors")
-warnings <- identify(result, "warnings")
+errors <- ec_identify(result, "errors")
+warnings <- ec_identify(result, "warnings")
 decision_errors <- get_decision_errors(result)
 high_uncertainty <- filter_by_uncertainty(result, "high")
 
@@ -337,7 +337,7 @@ EffectCheck follows these principles:
 | `print(x)` | Print formatted summary |
 | `summary(x)` | Comprehensive summary statistics |
 | `plot(x, type)` | Visualize results |
-| `identify(x, what)` | Filter problematic results |
+| `ec_identify(x, what)` | Filter problematic results |
 
 ### Filter Functions
 
