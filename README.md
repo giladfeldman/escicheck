@@ -366,7 +366,7 @@ If you use EffectCheck in your research, please cite:
 
 ```
 EffectCheck: Statistical Consistency Checker for APA-Style Results
-Version 0.1.0
+Version 0.2.0
 ```
 
 ## License
