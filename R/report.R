@@ -412,6 +412,9 @@ function toggleDetails(rowId) {
 </head>
 <body>
 <h1>Effect Size Checker Report</h1>
+<div style='background:#fef3c7;border:1px solid #f59e0b;border-radius:6px;padding:10px 14px;margin:10px 0;font-size:13px;color:#92400e;'>
+<strong>Development version.</strong> This tool is under active development and has not been fully validated. Results should be independently verified before use in any consequential context. Use is at your sole responsibility. Report issues at <a href='https://github.com/giladfeldman/escicheck/issues'>github.com/giladfeldman/escicheck</a> or contact <a href='mailto:giladfel@gmail.com'>Gilad Feldman</a>.
+</div>
 <div class='metadata'>Generated: ", as.character(Sys.time()), " | Total Statistics: ", total_rows, "</div>
 
 <div class='summary-grid'>

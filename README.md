@@ -1,5 +1,13 @@
 # effectcheck
 
+> **IMPORTANT: Development Version.** This package is under heavy development
+> and has not yet been fully validated. Results should be independently verified
+> before use in any consequential context (e.g., peer review, retractions,
+> editorial decisions). Use of this package is at the sole responsibility of
+> the user. We welcome contributions, verification reports, and bug reports at
+> <https://github.com/giladfeldman/escicheck/issues> or by contacting
+> Gilad Feldman (<giladfel@gmail.com>).
+
 **EffectCheck** is a conservative, assumption-aware statistical consistency checker for APA-style research results. Unlike tools that silently infer design choices, EffectCheck uses **type-matched comparison** to verify reported effect sizes against computed variants of the **same type**, explicitly flags all assumptions and uncertainty, and validates internal consistency between test statistics, effect sizes, and confidence intervals.
 
 ## Reference

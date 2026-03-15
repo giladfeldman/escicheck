@@ -11,7 +11,9 @@ Description: A conservative, assumption-aware statistical consistency checker fo
     and nonparametric tests. Provides 'statcheck'-compatible API functions for batch
     processing of files and directories. Explicitly tracks all assumptions and
     uncertainty in output. Detects decision errors (significance reversals) similar
-    to 'statcheck'.
+    to 'statcheck'. Note: this package is under active development and results should
+    be independently verified. Use is at the sole responsibility of the user.
+    Contributions and verification reports are welcome.
 License: MIT + file LICENSE
 Encoding: UTF-8
 Roxygen: list(markdown = TRUE)

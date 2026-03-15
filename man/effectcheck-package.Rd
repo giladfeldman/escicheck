@@ -6,7 +6,7 @@
 \alias{effectcheck-package}
 \title{effectcheck: Effect Size Checker for APA-Style Results}
 \description{
-A conservative, assumption-aware statistical consistency checker for APA-style research results. Parses test statistics, effect sizes, and confidence intervals from text, PDF, HTML, and Word documents. Recomputes effect sizes using all plausible variants when design is ambiguous, and validates internal consistency. Supports t-tests, F-tests/ANOVA, correlations, chi-square, z-tests, regression, and nonparametric tests. Provides 'statcheck'-compatible API functions for batch processing of files and directories. Explicitly tracks all assumptions and uncertainty in output. Detects decision errors (significance reversals) similar to 'statcheck'.
+A conservative, assumption-aware statistical consistency checker for APA-style research results. Parses test statistics, effect sizes, and confidence intervals from text, PDF, HTML, and Word documents. Recomputes effect sizes using all plausible variants when design is ambiguous, and validates internal consistency. Supports t-tests, F-tests/ANOVA, correlations, chi-square, z-tests, regression, and nonparametric tests. Provides 'statcheck'-compatible API functions for batch processing of files and directories. Explicitly tracks all assumptions and uncertainty in output. Detects decision errors (significance reversals) similar to 'statcheck'. Note: this package is under active development and results should be independently verified. Use is at the sole responsibility of the user. Contributions and verification reports are welcome.
 }
 \seealso{
 Useful links:
