@@ -17,7 +17,7 @@ Useful links:
 
 }
 \author{
-\strong{Maintainer}: Gilad Feldman \email{giladfel@gmail.com}
+\strong{Maintainer}: Gilad Feldman \email{giladfel@gmail.com} (\href{https://orcid.org/0000-0003-2812-6599}{ORCID})
 
 }
 \keyword{internal}
