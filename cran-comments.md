@@ -2,7 +2,10 @@
 
 0 errors | 0 warnings | 1 note
 
-* This is a new submission.
+* This is a resubmission. Changes from previous submission:
+  - Fixed invalid file URI `../CLAUDE.md` in README.md
+  - Spelled out "APA" (American Psychological Association) in DESCRIPTION to
+    avoid CRAN spelling note
 
 ## Notes
 

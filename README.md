@@ -8,7 +8,7 @@
 > <https://github.com/giladfeldman/escicheck/issues> or by contacting
 > Gilad Feldman (<giladfel@gmail.com>).
 
-**EffectCheck** is a conservative, assumption-aware statistical consistency checker for APA-style research results. Unlike tools that silently infer design choices, EffectCheck uses **type-matched comparison** to verify reported effect sizes against computed variants of the **same type**, explicitly flags all assumptions and uncertainty, and validates internal consistency between test statistics, effect sizes, and confidence intervals.
+**EffectCheck** is a conservative, assumption-aware statistical consistency checker for published research results. It parses statistical results across multiple citation styles (APA, Harvard, Frontiers, PLOS ONE, Scientific Reports, Nature Human Behaviour, PeerJ, eLife, PNAS, and more), uses **type-matched comparison** to verify reported effect sizes against computed variants of the **same type**, explicitly flags all assumptions and uncertainty, and validates internal consistency between test statistics, effect sizes, and confidence intervals.
 
 ## Reference
 
@@ -373,7 +373,7 @@ EffectCheck follows these principles:
 If you use EffectCheck in your research, please cite:
 
 ```
-EffectCheck: Statistical Consistency Checker for APA-Style Results
+EffectCheck: Statistical Consistency Checker for Published Research Results
 Version 0.2.0
 ```
 
@@ -383,7 +383,7 @@ MIT License - see LICENSE file for details
 
 ## Contributing
 
-Contributions welcome! Please see [CLAUDE.md](../CLAUDE.md) for architecture and design principles.
+Contributions welcome! Please open an issue or pull request at <https://github.com/giladfeldman/escicheck>.
 
 ## Related Tools
 
