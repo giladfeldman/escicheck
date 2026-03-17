@@ -27,10 +27,32 @@ read_any_text <- function(path, try_tables = TRUE, try_ocr = FALSE) {
     return(txt)
 
   } else if (ext %in% c("docx")) {
-    # .docx using officer — validate before parsing to prevent C-level segfaults.
-    # officer::read_docx() calls C libraries (libzip/libxml2) that segfault on
-    # corrupted files, bypassing R's tryCatch entirely and killing the process.
+    # .docx extraction — prefer pandoc (cleaner output), fall back to officer.
+    #
+    # Why pandoc over officer:
+    # - officer dumps raw Zotero/Mendeley citation JSON as text (ADDIN CSL_CITATION)
+    # - officer fragments table cells (loses row/column context for stats)
+    # - officer can inflate table-heavy files to millions of chars (memory crash)
+    # - officer's C libraries segfault on corrupted files
+    # - pandoc produces clean plain text, handles footnotes, no field code junk
 
+    pandoc <- Sys.which("pandoc")
+    if (nchar(pandoc) > 0) {
+      txt <- tryCatch({
+        lines <- system2("pandoc", args = c("-t", "plain", "--wrap=none", shQuote(path)),
+                         stdout = TRUE, stderr = TRUE)
+        status <- attr(lines, "status")
+        if (!is.null(status) && status != 0) {
+          stop("pandoc exited with status ", status, ": ", paste(lines, collapse = "\n"))
+        }
+        paste(lines, collapse = "\n")
+      }, error = function(e) NULL)
+
+      if (!is.null(txt) && nchar(txt) > 0) return(txt)
+      # pandoc failed or returned empty — fall through to officer
+    }
+
+    # Fallback: officer with safety validation
     # Step 1: Verify ZIP magic bytes (PK\x03\x04) — pure R, no C calls
     con <- file(path, "rb")
     magic <- readBin(con, "raw", n = 4)
@@ -39,8 +61,7 @@ read_any_text <- function(path, try_tables = TRUE, try_ocr = FALSE) {
       stop("DOCX file is not a valid ZIP archive (bad magic bytes). The file may be corrupted or not a real .docx file.")
     }
 
-    # Step 2: Verify it contains word/document.xml (required for DOCX) using
-    # system unzip which won't crash our R process if the ZIP is malformed
+    # Step 2: Validate ZIP structure via system unzip (won't crash R on bad files)
     zip_check <- suppressWarnings(
       system2("unzip", args = c("-l", shQuote(path)), stdout = TRUE, stderr = TRUE)
     )
@@ -62,7 +83,9 @@ read_any_text <- function(path, try_tables = TRUE, try_ocr = FALSE) {
       error = function(e) stop("Failed to extract text from DOCX: ", e$message)
     )
     if (!"text" %in% names(s)) return("")
-    return(paste(s$text, collapse = "\n"))
+    # Only use paragraph text — table cells fragment stats and inflate output
+    para_text <- s$text[s$content_type == "paragraph"]
+    return(paste(para_text, collapse = "\n"))
 
   } else if (ext == "pdf") {
     # PDF: use comprehensive extraction
