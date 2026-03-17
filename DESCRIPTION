@@ -32,7 +32,6 @@ Imports:
     tibble,
     xml2,
     rvest,
-    officer,
     glue,
     logger,
     graphics,

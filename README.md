@@ -50,7 +50,7 @@ This package implements effect size computations following the [Guide to Effect 
 ```r
 # Install dependencies
 install.packages(c("devtools", "stringr", "stringi", "dplyr", "purrr", 
-                   "tibble", "tidyr", "xml2", "rvest", "officer", 
+                   "tibble", "tidyr", "xml2", "rvest",
                    "DT", "shiny", "shinythemes", "testthat", "jsonlite"))
 
 # Install effectcheck
@@ -287,7 +287,7 @@ EffectCheck automatically detects CI level from text:
 ## File Format Support
 
 - **.pdf**: PDF files (via `pdftotext` from poppler-utils, with optional table extraction and OCR)
-- **.docx**: Microsoft Word documents (via `officer` package)
+- **.docx**: Microsoft Word documents (via `pandoc`; requires pandoc on PATH)
 - **.html**: HTML files (via `rvest` package)
 - **.txt**: Plain text files
 
