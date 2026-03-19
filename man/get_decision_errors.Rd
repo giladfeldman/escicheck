@@ -17,8 +17,6 @@ Extracts results where the significance decision would be reversed
 (i.e., reported as significant when computed is not, or vice versa).
 }
 \examples{
-\dontrun{
-results <- check_dir("manuscripts/")
-decision_errors <- get_decision_errors(results)
-}
+results <- check_text("t(28) = 2.21, p = .035, d = 0.80")
+get_decision_errors(results)
 }

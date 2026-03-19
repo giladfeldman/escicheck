@@ -4,7 +4,7 @@
 \alias{render_report}
 \title{Render an enhanced HTML report}
 \usage{
-render_report(res, out = "effectcheck_report.html")
+render_report(res, out)
 }
 \arguments{
 \item{res}{tibble returned by check_text() / check_files()}

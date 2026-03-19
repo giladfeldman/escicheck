@@ -35,6 +35,7 @@ This function is provided for compatibility with statcheck's checkPDFdir().
 }
 \examples{
 \dontrun{
+# Requires a directory with PDF files
 results <- checkPDFdir("manuscripts/")
 summary(results)
 }

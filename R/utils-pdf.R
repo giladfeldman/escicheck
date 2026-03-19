@@ -201,6 +201,7 @@ extract_pdf_ocr <- function(pdf_path, language = "eng") {
 #' @export
 #' @examples
 #' \dontrun{
+#' # Requires a PDF file and poppler-utils (pdftotext)
 #' result <- extract_pdf_comprehensive("paper.pdf")
 #' cat(result$text)
 #' }

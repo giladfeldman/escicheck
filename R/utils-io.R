@@ -7,8 +7,11 @@
 #' @return character vector of full text
 #' @export
 #' @examples
-#' \dontrun{
-#' text <- read_any_text("paper.pdf")
+#' \donttest{
+#' tmp <- tempfile(fileext = ".txt")
+#' writeLines("t(28) = 2.21, p = .035, d = 0.80", tmp)
+#' text <- read_any_text(tmp)
+#' unlink(tmp)
 #' }
 read_any_text <- function(path, try_tables = TRUE, try_ocr = FALSE) {
   stopifnot(file.exists(path))

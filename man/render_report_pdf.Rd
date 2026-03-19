@@ -6,7 +6,7 @@
 \usage{
 render_report_pdf(
   res,
-  out = "effectcheck_report.pdf",
+  out,
   title = "EffectCheck Report",
   author = NULL,
   source_name = NULL,

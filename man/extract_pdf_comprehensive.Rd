@@ -28,6 +28,7 @@ Tries multiple methods: regular text extraction, table extraction, and OCR.
 }
 \examples{
 \dontrun{
+# Requires a PDF file and poppler-utils (pdftotext)
 result <- extract_pdf_comprehensive("paper.pdf")
 cat(result$text)
 }

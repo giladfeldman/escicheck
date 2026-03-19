@@ -40,9 +40,11 @@ Recursively scans a directory for supported files and checks all
 detected statistics for consistency.
 }
 \examples{
-\dontrun{
-results <- check_dir("manuscripts/")
+\donttest{
+d <- tempdir()
+writeLines("t(28) = 2.21, p = .035, d = 0.80", file.path(d, "test.txt"))
+results <- check_dir(d, pattern = "\\\\.txt$")
 summary(results)
-plot(results, type = "all")
+unlink(file.path(d, "test.txt"))
 }
 }

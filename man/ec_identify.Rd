@@ -39,16 +39,6 @@ Filters effectcheck results to show only problematic cases based on
 specified criteria.
 }
 \examples{
-\dontrun{
-results <- check_dir("manuscripts/")
-
-# Get only errors
+results <- check_text("t(28) = 2.21, p = .035, d = 0.80")
 errors <- ec_identify(results, "errors")
-
-# Get errors and warnings
-problems <- ec_identify(results, c("errors", "warnings"))
-
-# Get all problematic results
-all_problems <- ec_identify(results, "all_problems")
-}
 }

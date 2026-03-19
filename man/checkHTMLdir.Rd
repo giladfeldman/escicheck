@@ -24,6 +24,7 @@ This function is provided for compatibility with statcheck's checkHTMLdir().
 }
 \examples{
 \dontrun{
+# Requires a directory with HTML files
 results <- checkHTMLdir("manuscripts/")
 summary(results)
 }

@@ -449,7 +449,11 @@ compute_and_compare_one <- function(row,
       }
     } else if (tt == "F") {
       # F-tests/ANOVA: eta\u00b2, partial eta\u00b2, omega\u00b2, Cohen's f, R\u00b2
+      # When df1=1, F is equivalent to t\u00b2, so d/g/r are also valid
       valid_types <- c("eta", "eta2", "etap2", "omega2", "cohens_f", "R2", "f2")
+      if (!is.na(df1) && df1 == 1) {
+        valid_types <- c(valid_types, "d", "g", "dz", "dav", "drm", "r")
+      }
       if (!canonical_type %in% valid_types) {
         valid_for_test <- FALSE
         suggestion <- "For F-tests/ANOVA, typical effect sizes are eta-squared (\u03b7\u00b2), partial eta-squared (\u03b7p\u00b2), omega-squared (\u03c9\u00b2), or Cohen's f"
@@ -530,6 +534,10 @@ compute_and_compare_one <- function(row,
     W = c("rank_biserial_r"), # Wilcoxon W
     H = c("epsilon_squared", "kendalls_W") # Kruskal-Wallis H
   )
+  # F(df1=1) is equivalent to t^2: d, g, r are also valid
+  if (!is.na(tt) && tt == "F" && !is.na(df1) && as.numeric(df1[1]) == 1) {
+    valid_effects_for_test[["F"]] <- c(valid_effects_for_test[["F"]], "d", "g", "dz", "dav", "drm", "r")
+  }
 
   # Check compatibility
   effect_test_mismatch <- FALSE
@@ -734,13 +742,14 @@ compute_and_compare_one <- function(row,
       }
     }
 
-    # Store both N values for variant computation if ambiguous
+    # Store both N values for variant computation
+    # Paired N is ALWAYS df+1 (by definition), regardless of inferred design or extracted N
     if (exists("design_inferred") && design_inferred == "ambiguous") {
       if (!exists("N_paired")) N_paired <- df1 + 1
       N_independent <- N
     } else {
       N_independent <- N
-      N_paired <- N
+      N_paired <- if (!is.na(df1) && df1 > 0) df1 + 1 else N
     }
 
     # Add assumptions/uncertainty based on N source (Phase 2C)
@@ -847,12 +856,13 @@ compute_and_compare_one <- function(row,
     }
 
     # ----- Compute PAIRED samples d variants -----
+    # Paired n is ALWAYS df+1 (by definition). Only fall back to N when df is missing.
     n_paired <- NA_real_
-    if (!is.na(N) && N > 0) {
-      n_paired <- N
-    } else if (!is.na(df1) && df1 >= 0) {
+    if (!is.na(df1) && df1 >= 0) {
       n_paired <- df1 + 1
-      assumptions <- c(assumptions, "Assumed paired-sample n = df + 1")
+    } else if (!is.na(N) && N > 0) {
+      n_paired <- N
+      assumptions <- c(assumptions, "Using N for paired computation (df unavailable)")
     }
 
     if (!is.na(n_paired) && n_paired > 0) {
@@ -991,22 +1001,27 @@ compute_and_compare_one <- function(row,
       }
 
       # Compute all ANOVA effect sizes
-      anova_error_msg <- NULL
-      anova_effects <- tryCatch(
+      anova_result <- tryCatch(
         {
-          compute_all_anova_effects(stat, df1, df2, design)
+          list(
+            effects = compute_all_anova_effects(stat, df1, df2, design),
+            error_msg = NULL
+          )
         },
         error = function(e) {
-          anova_error_msg <<- paste0("Error computing ANOVA effects: ", conditionMessage(e))
           list(
-            eta = NA_real_, eta2 = NA_real_, partial_eta2 = NA_real_,
-            generalized_eta2 = NA_real_, omega2 = NA_real_, cohens_f = NA_real_
+            effects = list(
+              eta = NA_real_, eta2 = NA_real_, partial_eta2 = NA_real_,
+              generalized_eta2 = NA_real_, omega2 = NA_real_, cohens_f = NA_real_
+            ),
+            error_msg = paste0("Error computing ANOVA effects: ", conditionMessage(e))
           )
         }
       )
+      anova_effects <- anova_result$effects
 
-      if (!is.null(anova_error_msg)) {
-        uncertainty <- c(uncertainty, anova_error_msg)
+      if (!is.null(anova_result$error_msg)) {
+        uncertainty <- c(uncertainty, anova_result$error_msg)
       }
 
       # Add to computed variants based on reported type
@@ -1032,6 +1047,18 @@ compute_and_compare_one <- function(row,
         computed_variants$generalized_eta2 <- list(
           value = anova_effects$generalized_eta2,
           metadata = VARIANT_METADATA$generalized_eta2
+        )
+      }
+
+      # R² as computed variant when reported type is R² (R² = eta² for single-factor)
+      if (!is.na(canonical_type) && canonical_type == "R2" && !is.na(anova_effects$eta2)) {
+        computed_variants$R2 <- list(
+          value = anova_effects$eta2,
+          metadata = list(
+            name = "R-squared (from F)",
+            assumptions = "R\u00b2 = SS_effect / SS_total = eta\u00b2 for single-factor designs",
+            when_to_use = "Proportion of variance explained"
+          )
         )
       }
 
@@ -1074,34 +1101,75 @@ compute_and_compare_one <- function(row,
         }
       }
 
-      # Add d and r as alternatives for F-tests (helpful for meta-analysis)
+      # F(1, df2) is equivalent to t^2 with df=df2: compute d and r equivalents
       if (df1 == 1) {
-        # Equivalence to t-test: t = sqrt(F)
-        # d = 2*r / sqrt(1-r^2) where r = sqrt(eta2)
-        # Simplified: d = 2 * sqrt(F / df2) approx
-        # r = sqrt(F / (F + df2))
+        t_equiv <- sqrt(stat)
+        n_equiv <- df2 + 2  # Total N assuming equal groups
+        n1_eq <- floor(n_equiv / 2)
+        n2_eq <- n_equiv - n1_eq
 
         r_equiv <- sqrt(stat / (stat + df2))
-        d_equiv <- 2 * sqrt(stat / df2)
+        d_equiv <- tryCatch(d_ind_from_t(t_equiv, n1_eq, n2_eq), error = function(e) 2 * sqrt(stat / df2))
+        dz_equiv <- tryCatch(dz_from_t(t_equiv, df2 + 1), error = function(e) t_equiv / sqrt(df2 + 1))
 
-        alternatives$r <- list(
-          value = r_equiv,
-          metadata = VARIANT_METADATA$r,
-          why_consider = "Correlation equivalent (since df1=1)"
-        )
-        alternatives$d <- list(
-          value = d_equiv,
-          metadata = VARIANT_METADATA$d_ind,
-          why_consider = "Cohen's d equivalent (assuming equal groups)"
-        )
-
-        # Try CIs for these
-        n_equiv <- df1 + df2 + 1 # Approx N
+        # Try CIs
         ci_r_val <- ci_r(r_equiv, n_equiv, ci_level_used)
-        if (ci_r_val$success) alternatives$r$ci <- ci_r_val$bounds
+        ci_d_val <- ci_d_ind_approx(d_equiv, n1_eq, n2_eq, ci_level_used)
 
-        ci_d_val <- ci_d_ind_approx(d_equiv, n_equiv / 2, n_equiv / 2, ci_level_used)
-        if (!any(is.na(ci_d_val))) alternatives$d$ci <- ci_d_val
+        # When reported type is d/g: promote to computed_variants for same-type matching
+        if (!is.na(canonical_type) && canonical_type %in% c("d", "g", "dz", "dav", "drm")) {
+          computed_variants$d_ind_equalN <- list(
+            value = d_equiv,
+            metadata = VARIANT_METADATA$d_ind_equalN
+          )
+          if (!any(is.na(ci_d_val))) computed_variants$d_ind_equalN$ci <- ci_d_val
+
+          computed_variants$dz <- list(
+            value = dz_equiv,
+            metadata = VARIANT_METADATA$dz
+          )
+          dz_ci <- tryCatch(ci_dz(dz_equiv, df2 + 1, ci_level_used), error = function(e) list(success = FALSE))
+          if (isTRUE(dz_ci$success)) computed_variants$dz$ci <- dz_ci$bounds
+
+          # Keep r as alternative
+          alternatives$r <- list(
+            value = r_equiv,
+            metadata = VARIANT_METADATA$r,
+            why_consider = "Correlation equivalent (since df1=1)"
+          )
+          if (ci_r_val$success) alternatives$r$ci <- ci_r_val$bounds
+
+        } else if (!is.na(canonical_type) && canonical_type == "r") {
+          # Promote r to computed_variants
+          computed_variants$r <- list(
+            value = r_equiv,
+            metadata = VARIANT_METADATA$r
+          )
+          if (ci_r_val$success) computed_variants$r$ci <- ci_r_val$bounds
+
+          # Keep d as alternative
+          alternatives$d <- list(
+            value = d_equiv,
+            metadata = VARIANT_METADATA$d_ind,
+            why_consider = "Cohen's d equivalent (assuming equal groups)"
+          )
+          if (!any(is.na(ci_d_val))) alternatives$d$ci <- ci_d_val
+
+        } else {
+          # Default: keep both as alternatives (no cross-type promotion needed)
+          alternatives$r <- list(
+            value = r_equiv,
+            metadata = VARIANT_METADATA$r,
+            why_consider = "Correlation equivalent (since df1=1)"
+          )
+          alternatives$d <- list(
+            value = d_equiv,
+            metadata = VARIANT_METADATA$d_ind,
+            why_consider = "Cohen's d equivalent (assuming equal groups)"
+          )
+          if (ci_r_val$success) alternatives$r$ci <- ci_r_val$bounds
+          if (!any(is.na(ci_d_val))) alternatives$d$ci <- ci_d_val
+        }
       }
 
       # Compute CIs for eta-squared variants
@@ -1600,15 +1668,25 @@ compute_and_compare_one <- function(row,
     if (delta_effect_abs <= tol_eff || is_rounding_match) {
       if (ambiguity_level == "clear" || is_rounding_match) {
         status <- "PASS"
+      } else if (ambiguity_level == "ambiguous") {
+        # Good numerical match overrides design ambiguity (Issue 3 fix)
+        status <- "PASS"
+        uncertainty <- c(uncertainty, "Design ambiguous but closest variant matches well")
       } else {
-        # Good match but ambiguous design -> NOTE instead of WARN
+        # highly_ambiguous (cross-type fallback, unknown type) stays NOTE
         status <- "NOTE"
-        uncertainty <- c(uncertainty, "Match is good but comparison is ambiguous due to unclear design")
+        uncertainty <- c(uncertainty, "Match is good but comparison is highly ambiguous (cross-type or unknown effect type)")
       }
     } else if (delta_effect_abs <= (3 * tol_eff)) {
       status <- "WARN"
     } else if (delta_effect_abs > (5 * tol_eff)) {
-      status <- "ERROR"
+      # Cross-type fallback should not produce ERROR (Issue 1D fix)
+      if (ambiguity_level == "highly_ambiguous" && grepl("No same-type", ambiguity_reason)) {
+        status <- "NOTE"
+        uncertainty <- c(uncertainty, "Cross-type comparison (no same-type variants available) \u2014 delta not meaningful")
+      } else {
+        status <- "ERROR"
+      }
     } else {
       status <- "WARN"
     }
@@ -1621,6 +1699,28 @@ compute_and_compare_one <- function(row,
       "CI bounds mismatch: lower diff=%.3f, upper diff=%.3f",
       ci_delta_lower, ci_delta_upper
     ))
+  }
+
+  # Determine check_type (Issue 4): what drove the status classification
+  check_type <- if (has_effect_reported && !is.na(delta_effect_abs)) {
+    "effect_size"
+  } else if (!is.na(p_reported)) {
+    "p_value"
+  } else {
+    "extraction_only"
+  }
+  # CI mismatch overrides check_type when it downgrades status
+  if (!is.na(ci_match) && !ci_match && status == "NOTE" && has_effect_reported) {
+    check_type <- "ci"
+  }
+
+  # Extreme delta flag (Issue 5): flag likely extraction errors
+  extraction_suspect <- FALSE
+  if (!is.na(delta_effect_abs) && delta_effect_abs > EXTREME_DELTA_THRESHOLD) {
+    extraction_suspect <- TRUE
+    uncertainty <- c(uncertainty,
+      sprintf("Extreme discrepancy (delta=%.2f) likely reflects data extraction error rather than reporting error",
+              delta_effect_abs))
   }
 
   # ============================================================================
@@ -2170,6 +2270,8 @@ compute_and_compare_one <- function(row,
 
     # Status and metadata
     status = status,
+    check_type = check_type,
+    extraction_suspect = extraction_suspect,
     design_ambiguous = (ambiguity_level != "clear"),
     sign_mismatch = FALSE, # TODO: implement sign checking
     design_inferred = design_inferred,
@@ -2321,6 +2423,8 @@ check_text <- function(text,
           ambiguity_reason = paste0("Processing error: ", error_msg),
           all_variants = "{}",
           status = "ERROR",
+          check_type = NA_character_,
+          extraction_suspect = FALSE,
           design_inferred = "unclear",
           variants_tested = "",
           uncertainty_level = "high",
@@ -2376,10 +2480,12 @@ check_text <- function(text,
 #' @return An effectcheck S3 object with consistency check results
 #' @export
 #' @examples
-#' \dontrun{
-#' results <- check_files(c("paper1.pdf", "paper2.docx"))
+#' \donttest{
+#' tmp <- tempfile(fileext = ".txt")
+#' writeLines("t(28) = 2.21, p = .035, d = 0.80", tmp)
+#' results <- check_files(tmp)
 #' print(results)
-#' summary(results)
+#' unlink(tmp)
 #' }
 check_files <- function(paths, try_tables = TRUE, try_ocr = FALSE, messages = TRUE, ...) {
   if (length(paths) == 0) {

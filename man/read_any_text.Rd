@@ -20,7 +20,10 @@ character vector of full text
 Read text from .docx, .html, .txt, or .pdf
 }
 \examples{
-\dontrun{
-text <- read_any_text("paper.pdf")
+\donttest{
+tmp <- tempfile(fileext = ".txt")
+writeLines("t(28) = 2.21, p = .035, d = 0.80", tmp)
+text <- read_any_text(tmp)
+unlink(tmp)
 }
 }

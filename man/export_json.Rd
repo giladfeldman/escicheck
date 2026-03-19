@@ -4,7 +4,7 @@
 \alias{export_json}
 \title{Export results to JSON}
 \usage{
-export_json(res, out = "effectcheck_results.json", pretty = TRUE)
+export_json(res, out, pretty = TRUE)
 }
 \arguments{
 \item{res}{tibble returned by check_text() / check_files()}

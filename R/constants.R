@@ -36,6 +36,9 @@ DEFAULT_TOL_P <- 0.001
 DEFAULT_ALPHA <- 0.05
 DEFAULT_CI_LEVEL <- 0.95
 
+# Extreme Delta Threshold — deltas above this are flagged as likely extraction errors
+EXTREME_DELTA_THRESHOLD <- 1.0
+
 # Resource Limits
 DEFAULT_MAX_TEXT_LENGTH <- 10^7 # 10 MB
 DEFAULT_MAX_STATS_PER_TEXT <- 10000

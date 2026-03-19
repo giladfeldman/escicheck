@@ -1,14 +1,14 @@
 Package: effectcheck
 Type: Package
 Title: Statistical Consistency Checker for Published Research Results
-Version: 0.2.0
+Version: 0.2.2
 Authors@R: c(person(given = "Gilad", family = "Feldman", role = c("aut", "cre"),
     email = "giladfel@gmail.com", comment = c(ORCID = "0000-0003-2812-6599")))
 Description: A conservative, assumption-aware statistical consistency checker for
     published research results. Parses test statistics, effect sizes, and confidence
     intervals from text, PDF, HTML, and Word documents across multiple citation styles
-    including American Psychological Association (APA), Harvard, Frontiers, 'PLOS ONE',
-    Scientific Reports, Nature Human Behaviour, 'PeerJ', 'eLife', 'PNAS', and others.
+    including American Psychological Association (APA), Harvard, Frontiers, PLOS ONE,
+    Scientific Reports, Nature Human Behaviour, PeerJ, eLife, PNAS, and others.
     Recomputes effect sizes using all plausible variants when design is ambiguous, and
     validates internal consistency. Supports t-tests, F-tests/ANOVA, correlations,
     chi-square, z-tests, regression, and nonparametric tests. Provides
@@ -41,7 +41,6 @@ Suggests:
     shiny,
     shinythemes,
     DT,
-    readtext,
     knitr,
     rmarkdown,
     testthat (>= 3.0.0),

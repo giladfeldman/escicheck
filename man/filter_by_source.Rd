@@ -20,13 +20,6 @@ An effectcheck object containing only results from specified files
 Filters effectcheck results to show only results from specific files.
 }
 \examples{
-\dontrun{
-results <- check_dir("manuscripts/")
-
-# Get results from specific file
-paper1 <- filter_by_source(results, "paper1.pdf")
-
-# Get results matching pattern
-recent <- filter_by_source(results, "2024.*\\\\.pdf", pattern = TRUE)
-}
+results <- check_text("t(28) = 2.21, p = .035, d = 0.80")
+filter_by_source(results, "text_input")
 }

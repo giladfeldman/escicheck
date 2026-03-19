@@ -2,7 +2,7 @@
 % Please edit documentation in R/effectcheck-class.R
 \name{new_effectcheck}
 \alias{new_effectcheck}
-\title{EffectCheck S3 Class Definition and Methods}
+\title{Create an effectcheck object}
 \usage{
 new_effectcheck(x, call = NULL, settings = list())
 }
@@ -17,11 +17,6 @@ new_effectcheck(x, call = NULL, settings = list())
 An effectcheck S3 object
 }
 \description{
-This file defines the effectcheck S3 class and its associated methods
-for printing, summarizing, and plotting results.
-Create an effectcheck object
-}
-\details{
 Wraps a tibble of results with the effectcheck S3 class and metadata.
 }
 \keyword{internal}

@@ -16,8 +16,6 @@ An effectcheck object containing only errors
 Convenience function to extract only ERROR status results.
 }
 \examples{
-\dontrun{
-results <- check_dir("manuscripts/")
-errors <- get_errors(results)
-}
+results <- check_text("t(28) = 2.21, p = .035, d = 0.80")
+get_errors(results)
 }

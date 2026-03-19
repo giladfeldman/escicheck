@@ -98,7 +98,7 @@ test_that("export_csv handles NA values", {
 # generate_report() tests
 # ===========================================================================
 
-test_that("generate_report creates self-contained HTML", {
+test_that("generate_report creates self-contained HTML (beginner default)", {
   res <- check_text("t(28) = 2.21, p = .035, d = 0.80")
   out_file <- tempfile(fileext = ".html")
   result <- generate_report(res, out_file)
@@ -108,13 +108,16 @@ test_that("generate_report creates self-contained HTML", {
   expect_true(grepl("<!doctype html>", content, ignore.case = TRUE))
   expect_true(grepl("EffectCheck Report", content))
   expect_true(grepl("EffectCheck v", content))
+  # Beginner format includes narrative
+  expect_true(grepl("Summary", content))
+  expect_true(grepl("Consistent", content))
   unlink(out_file)
 })
 
-test_that("generate_report includes executive summary bars", {
+test_that("generate_report expert style includes executive summary bars", {
   res <- check_text("t(28) = 2.21, p = .035, d = 0.80")
   out_file <- tempfile(fileext = ".html")
-  generate_report(res, out_file)
+  generate_report(res, out_file, style = "expert")
   content <- paste(readLines(out_file, warn = FALSE), collapse = "\n")
 
   expect_true(grepl("exec-summary", content))
@@ -126,10 +129,10 @@ test_that("generate_report includes executive summary bars", {
   unlink(out_file)
 })
 
-test_that("generate_report color-codes rows by status", {
+test_that("generate_report expert style color-codes rows by status", {
   res <- check_text("t(28) = 2.21, p = .035, d = 0.80")
   out_file <- tempfile(fileext = ".html")
-  generate_report(res, out_file)
+  generate_report(res, out_file, style = "expert")
   content <- paste(readLines(out_file, warn = FALSE), collapse = "\n")
 
   expect_true(grepl("row-PASS|row-OK|row-NOTE|row-WARN|row-ERROR", content))
@@ -158,20 +161,20 @@ test_that("generate_report includes source_name and author", {
   unlink(out_file)
 })
 
-test_that("generate_report includes repro code section", {
+test_that("generate_report expert includes repro code section", {
   res <- check_text("t(28) = 2.21, p = .035, d = 0.80")
   out_file <- tempfile(fileext = ".html")
-  generate_report(res, out_file, include_repro_code = TRUE)
+  generate_report(res, out_file, include_repro_code = TRUE, style = "expert")
   content <- paste(readLines(out_file, warn = FALSE), collapse = "\n")
 
   expect_true(grepl("Reproducible R Code", content))
   unlink(out_file)
 })
 
-test_that("generate_report omits repro code when disabled", {
+test_that("generate_report expert omits repro code when disabled", {
   res <- check_text("t(28) = 2.21, p = .035, d = 0.80")
   out_file <- tempfile(fileext = ".html")
-  generate_report(res, out_file, include_repro_code = FALSE)
+  generate_report(res, out_file, include_repro_code = FALSE, style = "expert")
   content <- paste(readLines(out_file, warn = FALSE), collapse = "\n")
 
   expect_false(grepl("Collated Reproducible R Code", content))

@@ -14,10 +14,12 @@
 #' @return An effectcheck object with results
 #' @export
 #' @examples
-#' \dontrun{
-#' result <- check_file("paper.pdf")
+#' \donttest{
+#' tmp <- tempfile(fileext = ".txt")
+#' writeLines("t(28) = 2.21, p = .035, d = 0.80", tmp)
+#' result <- check_file(tmp)
 #' print(result)
-#' summary(result)
+#' unlink(tmp)
 #' }
 check_file <- function(path, try_tables = TRUE, try_ocr = FALSE, ...) {
   if (!file.exists(path)) {
@@ -106,10 +108,12 @@ process_files_internal <- function(files,
 #' @return An effectcheck object with results from all files
 #' @export
 #' @examples
-#' \dontrun{
-#' results <- check_dir("manuscripts/")
+#' \donttest{
+#' d <- tempdir()
+#' writeLines("t(28) = 2.21, p = .035, d = 0.80", file.path(d, "test.txt"))
+#' results <- check_dir(d, pattern = "\\.txt$")
 #' summary(results)
-#' plot(results, type = "all")
+#' unlink(file.path(d, "test.txt"))
 #' }
 check_dir <- function(dir,
                       subdir = TRUE,
@@ -185,6 +189,7 @@ check_dir <- function(dir,
 #' @export
 #' @examples
 #' \dontrun{
+#' # Requires PDF files
 #' results <- checkPDF(c("paper1.pdf", "paper2.pdf"))
 #' summary(results)
 #' }
@@ -246,9 +251,12 @@ checkPDF <- function(files,
 #' @return An effectcheck object with results
 #' @export
 #' @examples
-#' \dontrun{
-#' results <- checkHTML(c("paper1.html", "paper2.html"))
+#' \donttest{
+#' tmp <- tempfile(fileext = ".html")
+#' writeLines("<p>t(28) = 2.21, p = .035, d = 0.80</p>", tmp)
+#' results <- checkHTML(tmp)
 #' summary(results)
+#' unlink(tmp)
 #' }
 checkHTML <- function(files, messages = TRUE, ...) {
   # Validate files exist and are HTML
@@ -308,6 +316,7 @@ checkHTML <- function(files, messages = TRUE, ...) {
 #' @export
 #' @examples
 #' \dontrun{
+#' # Requires a directory with PDF files
 #' results <- checkPDFdir("manuscripts/")
 #' summary(results)
 #' }
@@ -341,6 +350,7 @@ checkPDFdir <- function(dir,
 #' @export
 #' @examples
 #' \dontrun{
+#' # Requires a directory with HTML files
 #' results <- checkHTMLdir("manuscripts/")
 #' summary(results)
 #' }
@@ -371,6 +381,7 @@ checkHTMLdir <- function(dir,
 #' @export
 #' @examples
 #' \dontrun{
+#' # Requires a directory with DOCX files
 #' results <- checkDOCXdir("manuscripts/")
 #' summary(results)
 #' }

@@ -26,6 +26,7 @@ This function is provided for compatibility with statcheck's checkPDF().
 }
 \examples{
 \dontrun{
+# Requires PDF files
 results <- checkPDF(c("paper1.pdf", "paper2.pdf"))
 summary(results)
 }

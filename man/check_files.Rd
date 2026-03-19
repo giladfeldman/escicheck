@@ -24,9 +24,11 @@ An effectcheck S3 object with consistency check results
 Reads one or more files and checks all detected statistics for consistency.
 }
 \examples{
-\dontrun{
-results <- check_files(c("paper1.pdf", "paper2.docx"))
+\donttest{
+tmp <- tempfile(fileext = ".txt")
+writeLines("t(28) = 2.21, p = .035, d = 0.80", tmp)
+results <- check_files(tmp)
 print(results)
-summary(results)
+unlink(tmp)
 }
 }

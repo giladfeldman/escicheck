@@ -18,7 +18,10 @@ A tibble with source column
 Compare effectcheck and statcheck results on a file
 }
 \examples{
-\dontrun{
-comp <- compare_file_with_statcheck("paper.pdf")
+\donttest{
+tmp <- tempfile(fileext = ".txt")
+writeLines("t(28) = 2.21, p = .035, d = 0.80", tmp)
+comp <- compare_file_with_statcheck(tmp)
+unlink(tmp)
 }
 }

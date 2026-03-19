@@ -6,12 +6,13 @@
 \usage{
 generate_report(
   res,
-  out = "effectcheck_report.html",
+  out,
   format = "html",
   title = "EffectCheck Report",
   author = NULL,
   source_name = NULL,
-  include_repro_code = TRUE
+  include_repro_code = TRUE,
+  style = "beginner"
 )
 }
 \arguments{
@@ -28,6 +29,9 @@ generate_report(
 \item{source_name}{Source file name (optional)}
 
 \item{include_repro_code}{Logical, include reproducible R code section (default TRUE)}
+
+\item{style}{Report style: "beginner" for plain English narrative (default),
+"expert" for the traditional technical table format}
 }
 \value{
 Invisible path to the generated report file

@@ -27,9 +27,11 @@ Check a single file for statistical consistency
 Reads a file and checks all detected statistics for consistency.
 }
 \examples{
-\dontrun{
-result <- check_file("paper.pdf")
+\donttest{
+tmp <- tempfile(fileext = ".txt")
+writeLines("t(28) = 2.21, p = .035, d = 0.80", tmp)
+result <- check_file(tmp)
 print(result)
-summary(result)
+unlink(tmp)
 }
 }

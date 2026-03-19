@@ -128,11 +128,11 @@ results <- check_dir("manuscripts/")
 results <- check_text("t(28) = 2.21, p = .035, d = 0.80")
 
 # HTML report
-generate_report(results, out = "report.html")
+generate_report(results, out = file.path(tempdir(), "report.html"))
 
 # CSV/JSON export
-export_csv(results, out = "results.csv")
-export_json(results, out = "results.json")
+export_csv(results, out = file.path(tempdir(), "results.csv"))
+export_json(results, out = file.path(tempdir(), "results.json"))
 ```
 
 ## Comparison with statcheck

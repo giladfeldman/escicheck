@@ -20,13 +20,6 @@ An effectcheck object containing only results within the delta range
 Filters effectcheck results by the magnitude of effect size discrepancy.
 }
 \examples{
-\dontrun{
-results <- check_dir("manuscripts/")
-
-# Get results with large discrepancies (delta > 0.1)
-large_delta <- filter_by_delta(results, min_delta = 0.1)
-
-# Get results with small discrepancies (delta < 0.02)
-small_delta <- filter_by_delta(results, max_delta = 0.02)
-}
+results <- check_text("t(28) = 2.21, p = .035, d = 0.80")
+filter_by_delta(results, min_delta = 0.1)
 }

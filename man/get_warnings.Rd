@@ -16,8 +16,6 @@ An effectcheck object containing only warnings
 Convenience function to extract only WARN status results.
 }
 \examples{
-\dontrun{
-results <- check_dir("manuscripts/")
-warnings <- get_warnings(results)
-}
+results <- check_text("t(28) = 2.21, p = .035, d = 0.80")
+get_warnings(results)
 }

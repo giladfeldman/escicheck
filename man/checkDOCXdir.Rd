@@ -23,6 +23,7 @@ Scans a directory for .docx files and checks all detected statistics.
 }
 \examples{
 \dontrun{
+# Requires a directory with DOCX files
 results <- checkDOCXdir("manuscripts/")
 summary(results)
 }

@@ -18,13 +18,6 @@ An effectcheck object containing only the specified uncertainty levels
 Filters effectcheck results by uncertainty level.
 }
 \examples{
-\dontrun{
-results <- check_dir("manuscripts/")
-
-# Get only high uncertainty results
-high_unc <- filter_by_uncertainty(results, "high")
-
-# Get medium and high uncertainty
-med_high <- filter_by_uncertainty(results, c("medium", "high"))
-}
+results <- check_text("t(28) = 2.21, p = .035, d = 0.80")
+filter_by_uncertainty(results, "high")
 }

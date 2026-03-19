@@ -21,8 +21,11 @@ Checks one or more HTML files for statistical consistency.
 This function is provided for compatibility with statcheck's checkHTML().
 }
 \examples{
-\dontrun{
-results <- checkHTML(c("paper1.html", "paper2.html"))
+\donttest{
+tmp <- tempfile(fileext = ".html")
+writeLines("<p>t(28) = 2.21, p = .035, d = 0.80</p>", tmp)
+results <- checkHTML(tmp)
 summary(results)
+unlink(tmp)
 }
 }

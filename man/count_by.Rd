@@ -19,13 +19,7 @@ A data frame with counts
 Provides counts of statistics grouped by various categories.
 }
 \examples{
-\dontrun{
-results <- check_dir("manuscripts/")
-
-# Count by status
+results <- check_text("t(28) = 2.21, p = .035. F(1, 50) = 4.03, p = .049")
 count_by(results, "status")
-
-# Count by test type
 count_by(results, "test_type")
-}
 }

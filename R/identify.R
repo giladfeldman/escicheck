@@ -21,18 +21,8 @@
 #' @return An effectcheck object containing only the identified results
 #' @export
 #' @examples
-#' \dontrun{
-#' results <- check_dir("manuscripts/")
-#' 
-#' # Get only errors
+#' results <- check_text("t(28) = 2.21, p = .035, d = 0.80")
 #' errors <- ec_identify(results, "errors")
-#' 
-#' # Get errors and warnings
-#' problems <- ec_identify(results, c("errors", "warnings"))
-#' 
-#' # Get all problematic results
-#' all_problems <- ec_identify(results, "all_problems")
-#' }
 ec_identify <- function(x, what = c("errors", "warnings", "decision_errors", 
                                   "high_uncertainty", "insufficient", "all_problems"),
                      ...) {
@@ -91,10 +81,8 @@ ec_identify <- function(x, what = c("errors", "warnings", "decision_errors",
 #' @return An effectcheck object containing only errors
 #' @export
 #' @examples
-#' \dontrun{
-#' results <- check_dir("manuscripts/")
-#' errors <- get_errors(results)
-#' }
+#' results <- check_text("t(28) = 2.21, p = .035, d = 0.80")
+#' get_errors(results)
 get_errors <- function(x) {
   ec_identify(x, "errors")
 }
@@ -107,10 +95,8 @@ get_errors <- function(x) {
 #' @return An effectcheck object containing only warnings
 #' @export
 #' @examples
-#' \dontrun{
-#' results <- check_dir("manuscripts/")
-#' warnings <- get_warnings(results)
-#' }
+#' results <- check_text("t(28) = 2.21, p = .035, d = 0.80")
+#' get_warnings(results)
 get_warnings <- function(x) {
   ec_identify(x, "warnings")
 }
@@ -124,10 +110,8 @@ get_warnings <- function(x) {
 #' @return An effectcheck object containing only decision errors
 #' @export
 #' @examples
-#' \dontrun{
-#' results <- check_dir("manuscripts/")
-#' decision_errors <- get_decision_errors(results)
-#' }
+#' results <- check_text("t(28) = 2.21, p = .035, d = 0.80")
+#' get_decision_errors(results)
 get_decision_errors <- function(x) {
   ec_identify(x, "decision_errors")
 }
@@ -141,15 +125,8 @@ get_decision_errors <- function(x) {
 #' @return An effectcheck object containing only the specified test types
 #' @export
 #' @examples
-#' \dontrun{
-#' results <- check_dir("manuscripts/")
-#' 
-#' # Get only t-tests
-#' t_tests <- filter_by_test_type(results, "t")
-#' 
-#' # Get t-tests and F-tests
-#' t_and_F <- filter_by_test_type(results, c("t", "F"))
-#' }
+#' results <- check_text("t(28) = 2.21, p = .035. F(1, 50) = 4.03, p = .049")
+#' filter_by_test_type(results, "t")
 filter_by_test_type <- function(x, types) {
   if (!inherits(x, "effectcheck")) {
     stop("x must be an effectcheck object")
@@ -173,15 +150,8 @@ filter_by_test_type <- function(x, types) {
 #' @return An effectcheck object containing only the specified uncertainty levels
 #' @export
 #' @examples
-#' \dontrun{
-#' results <- check_dir("manuscripts/")
-#' 
-#' # Get only high uncertainty results
-#' high_unc <- filter_by_uncertainty(results, "high")
-#' 
-#' # Get medium and high uncertainty
-#' med_high <- filter_by_uncertainty(results, c("medium", "high"))
-#' }
+#' results <- check_text("t(28) = 2.21, p = .035, d = 0.80")
+#' filter_by_uncertainty(results, "high")
 filter_by_uncertainty <- function(x, levels) {
   if (!inherits(x, "effectcheck")) {
     stop("x must be an effectcheck object")
@@ -206,15 +176,8 @@ filter_by_uncertainty <- function(x, levels) {
 #' @return An effectcheck object containing only results from specified files
 #' @export
 #' @examples
-#' \dontrun{
-#' results <- check_dir("manuscripts/")
-#' 
-#' # Get results from specific file
-#' paper1 <- filter_by_source(results, "paper1.pdf")
-#' 
-#' # Get results matching pattern
-#' recent <- filter_by_source(results, "2024.*\\.pdf", pattern = TRUE)
-#' }
+#' results <- check_text("t(28) = 2.21, p = .035, d = 0.80")
+#' filter_by_source(results, "text_input")
 filter_by_source <- function(x, files, pattern = FALSE) {
   if (!inherits(x, "effectcheck")) {
     stop("x must be an effectcheck object")
@@ -249,15 +212,8 @@ filter_by_source <- function(x, files, pattern = FALSE) {
 #' @return An effectcheck object containing only results within the delta range
 #' @export
 #' @examples
-#' \dontrun{
-#' results <- check_dir("manuscripts/")
-#' 
-#' # Get results with large discrepancies (delta > 0.1)
-#' large_delta <- filter_by_delta(results, min_delta = 0.1)
-#' 
-#' # Get results with small discrepancies (delta < 0.02)
-#' small_delta <- filter_by_delta(results, max_delta = 0.02)
-#' }
+#' results <- check_text("t(28) = 2.21, p = .035, d = 0.80")
+#' filter_by_delta(results, min_delta = 0.1)
 filter_by_delta <- function(x, min_delta = 0, max_delta = Inf) {
   if (!inherits(x, "effectcheck")) {
     stop("x must be an effectcheck object")
@@ -283,15 +239,9 @@ filter_by_delta <- function(x, min_delta = 0, max_delta = Inf) {
 #' @return A data frame with counts
 #' @export
 #' @examples
-#' \dontrun{
-#' results <- check_dir("manuscripts/")
-#' 
-#' # Count by status
+#' results <- check_text("t(28) = 2.21, p = .035. F(1, 50) = 4.03, p = .049")
 #' count_by(results, "status")
-#' 
-#' # Count by test type
 #' count_by(results, "test_type")
-#' }
 count_by <- function(x, by = c("status", "test_type", "uncertainty", "design", "source")) {
   if (!inherits(x, "effectcheck")) {
     stop("x must be an effectcheck object")

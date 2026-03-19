@@ -4,7 +4,7 @@
 \alias{export_csv}
 \title{Export results to CSV}
 \usage{
-export_csv(res, out = "effectcheck_results.csv", na = "", row.names = FALSE)
+export_csv(res, out, na = "", row.names = FALSE)
 }
 \arguments{
 \item{res}{tibble returned by check_text() / check_files()}

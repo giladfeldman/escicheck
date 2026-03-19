@@ -4,9 +4,9 @@
 \name{effectcheck-package}
 \alias{effectcheck}
 \alias{effectcheck-package}
-\title{effectcheck: Effect Size Checker for APA-Style Results}
+\title{effectcheck: Statistical Consistency Checker for Published Research Results}
 \description{
-A conservative, assumption-aware statistical consistency checker for APA-style research results. Parses test statistics, effect sizes, and confidence intervals from text, PDF, HTML, and Word documents. Recomputes effect sizes using all plausible variants when design is ambiguous, and validates internal consistency. Supports t-tests, F-tests/ANOVA, correlations, chi-square, z-tests, regression, and nonparametric tests. Provides 'statcheck'-compatible API functions for batch processing of files and directories. Explicitly tracks all assumptions and uncertainty in output. Detects decision errors (significance reversals) similar to 'statcheck'. Note: this package is under active development and results should be independently verified. Use is at the sole responsibility of the user. Contributions and verification reports are welcome.
+A conservative, assumption-aware statistical consistency checker for published research results. Parses test statistics, effect sizes, and confidence intervals from text, PDF, HTML, and Word documents across multiple citation styles including American Psychological Association (APA), Harvard, Frontiers, PLOS ONE, Scientific Reports, Nature Human Behaviour, PeerJ, eLife, PNAS, and others. Recomputes effect sizes using all plausible variants when design is ambiguous, and validates internal consistency. Supports t-tests, F-tests/ANOVA, correlations, chi-square, z-tests, regression, and nonparametric tests. Provides 'statcheck'-compatible API functions for batch processing of files and directories. Explicitly tracks all assumptions and uncertainty in output. Detects decision errors (significance reversals) similar to 'statcheck'. Note: this package is under active development and results should be independently verified. Use is at the sole responsibility of the user. Contributions and verification reports are welcome.
 }
 \seealso{
 Useful links:

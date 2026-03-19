@@ -18,13 +18,6 @@ An effectcheck object containing only the specified test types
 Filters effectcheck results to show only specific test types.
 }
 \examples{
-\dontrun{
-results <- check_dir("manuscripts/")
-
-# Get only t-tests
-t_tests <- filter_by_test_type(results, "t")
-
-# Get t-tests and F-tests
-t_and_F <- filter_by_test_type(results, c("t", "F"))
-}
+results <- check_text("t(28) = 2.21, p = .035. F(1, 50) = 4.03, p = .049")
+filter_by_test_type(results, "t")
 }
