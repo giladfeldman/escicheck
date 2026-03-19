@@ -579,62 +579,121 @@ compute_and_compare_one <- function(row,
       assumptions <- c(assumptions, "Welch's t-test assumed (unequal variances)")
     }
 
-    # Validate reported N against df (if both available and not Welch's)
-    if (!is.na(N) && !is.na(df1) && df1 > 0 && !is_welch) {
-      # Expected ranges:
-      # - Paired/one-sample: N = df + 1
-      # - Independent: N = df + 2
-      min_expected_N <- df1 + 1
-      max_expected_N <- df1 + 2
+    # Fix 2: Minimum N guard — reject implausibly small N for any t-test
+    # Any t-test requires at least 2 observations; N < df+1 is impossible
+    if (!is.na(N) && !is.na(df1) && df1 > 0 && N < round(df1) + 1) {
+      uncertainty <- c(uncertainty,
+        sprintf("Extracted N=%d is implausibly small for df=%.1f (minimum %d). Likely parsing error.",
+                as.integer(N), df1, as.integer(round(df1) + 1)))
+      N <- NA_real_ # Force re-inference from df below
+    }
 
-      if (N < min_expected_N - 0.5) {
-        # N is too small - likely error
-        uncertainty <- c(
-          uncertainty,
-          sprintf(
-            "Reported N (%d) is less than expected minimum (%.0f) for df=%.0f",
-            as.integer(N), min_expected_N, df1
-          )
-        )
-
-        # Re-infer based on effect type
-        N_original <- N
-        N <- if (!is.na(canonical_type) && canonical_type %in% c("dz", "dav", "drm")) {
-          df1 + 1
-        } else {
-          df1 + 2
+    # Validate reported N against df
+    if (!is.na(N) && !is.na(df1) && df1 > 0) {
+      if (is_welch) {
+        # Fix 3: Welch validation — N >= round(df) + 2 guaranteed by
+        # Welch-Satterthwaite equation (df_w <= n1+n2-2, so N >= df_w+2)
+        min_N_welch <- round(df1) + 2
+        if (N < min_N_welch) {
+          N_original <- N
+          N <- NA_real_ # Force re-inference below
+          uncertainty <- c(uncertainty,
+            sprintf("N=%d below Welch minimum (df+2=%d). Will re-estimate.",
+                    as.integer(N_original), as.integer(min_N_welch)))
+        } else if ("N_source" %in% names(row) && !is.na(row$N_source[1]) &&
+                    row$N_source[1] == "global_text" &&
+                    N > 1.5 * min_N_welch &&
+                    !is.na(effect_reported) && abs(effect_reported) > 0.001 &&
+                    !is.na(canonical_type) && canonical_type %in% c("d", "g")) {
+          # Global N is much larger than df+2 — likely from a different study.
+          # Cross-validate: back-compute N from reported d (equal-n assumption)
+          N_from_d <- round(4 * stat^2 / effect_reported^2)
+          # Allow small tolerance: back-computation assumes equal groups, which
+          # may underestimate N slightly relative to df+2
+          if (N_from_d >= (min_N_welch - 5) && N_from_d < N) {
+            N_original <- N
+            N <- N_from_d
+            assumptions <- c(assumptions,
+              sprintf("Welch: global N=%d likely from different study; used N=%d from reported d",
+                      as.integer(N_original), as.integer(N)))
+            uncertainty <- c(uncertainty,
+              "Global sample size overridden by back-computation from reported effect size")
+          }
         }
-        assumptions <- c(
-          assumptions,
-          sprintf(
-            "Replaced N=%d with inferred N=%.0f from df",
-            as.integer(N_original), N
+      } else {
+        # Original non-Welch validation
+        # Expected ranges:
+        # - Paired/one-sample: N = df + 1
+        # - Independent: N = df + 2
+        min_expected_N <- df1 + 1
+        max_expected_N <- df1 + 2
+
+        if (N < min_expected_N - 0.5) {
+          # N is too small - likely error
+          uncertainty <- c(
+            uncertainty,
+            sprintf(
+              "Reported N (%d) is less than expected minimum (%.0f) for df=%.0f",
+              as.integer(N), min_expected_N, df1
+            )
           )
-        )
-      } else if (N > max_expected_N + 10) {
-        # N is much larger than expected - flag it but don't override
-        uncertainty <- c(
-          uncertainty,
-          sprintf(
-            "Reported N (%d) is larger than expected (%.0f-%.0f) for df=%.0f",
-            as.integer(N), min_expected_N, max_expected_N, df1
+
+          # Re-infer based on effect type
+          N_original <- N
+          N <- if (!is.na(canonical_type) && canonical_type %in% c("dz", "dav", "drm")) {
+            df1 + 1
+          } else {
+            df1 + 2
+          }
+          assumptions <- c(
+            assumptions,
+            sprintf(
+              "Replaced N=%d with inferred N=%.0f from df",
+              as.integer(N_original), N
+            )
           )
-        )
+        } else if (N > max_expected_N + 10) {
+          # N is much larger than expected - flag it but don't override
+          uncertainty <- c(
+            uncertainty,
+            sprintf(
+              "Reported N (%d) is larger than expected (%.0f-%.0f) for df=%.0f",
+              as.integer(N), min_expected_N, max_expected_N, df1
+            )
+          )
+        }
       }
     }
 
     # Infer N when not reported (or if replaced above)
     if (is.na(N) && !is.na(df1) && df1 > 0) {
       if (is_welch) {
-        # For Welch's, use conservative estimate
-        N <- round(df1 + 2)
-        assumptions <- c(
-          assumptions,
-          sprintf("Welch's t-test: conservatively estimated N \u2248 %.0f (actual N uncertain)", N)
-        )
-        uncertainty <- c(
-          uncertainty,
-          "Sample size estimation uncertain for Welch's test - computed plausible variants"
+        # Fix 4: Enhanced Welch N estimation
+        # Primary: N >= round(df+2) from Welch-Satterthwaite lower bound
+        N_from_df <- round(df1 + 2)
+
+        # Secondary: back-compute N from reported d (equal-n assumption)
+        # d = t * sqrt(1/n1 + 1/n2); with n1=n2=N/2: d = 2t/sqrt(N), so N = 4t^2/d^2
+        N_from_d <- NA_real_
+        if (!is.na(effect_reported) && abs(effect_reported) > 0.001 &&
+            !is.na(canonical_type) && canonical_type %in% c("d", "g")) {
+          N_from_d <- round(4 * stat^2 / effect_reported^2)
+          # Cross-validate: N from d must be >= df+2 lower bound
+          if (N_from_d < N_from_df) N_from_d <- NA_real_
+        }
+
+        if (!is.na(N_from_d)) {
+          N <- N_from_d
+          assumptions <- c(assumptions,
+            sprintf("Welch: estimated N=%d from reported d (validated against df+2=%d)",
+                    as.integer(N), as.integer(N_from_df)))
+        } else {
+          N <- N_from_df
+          assumptions <- c(assumptions,
+            sprintf("Welch: estimated N~%d (df+2 lower bound)", as.integer(N)))
+        }
+        uncertainty <- c(uncertainty,
+          "Sample size uncertain for Welch's test - actual N may be larger"
         )
       } else {
         # Use reported effect type to infer design if available
@@ -701,6 +760,13 @@ compute_and_compare_one <- function(row,
           "Sample size may not apply to this specific comparison - found distant from statistic"
         )
       }
+    }
+
+    # Fix 5A: Final N sanity check — if N is still < 2 after all inference,
+    # mark as unreliable rather than computing garbage effect sizes
+    if (!is.na(N) && N < 2) {
+      N <- NA_real_
+      assumptions <- c(assumptions, "Could not determine a valid sample size (N >= 2)")
     }
 
     # ----- Compute INDEPENDENT samples d variants -----
@@ -866,6 +932,13 @@ compute_and_compare_one <- function(row,
         alternatives$dz$why_consider <- "If this is actually a paired/within-subjects design"
       }
     }
+    # Fix 5B: Graceful failure — when N is unknown and no variants computed,
+    # set explicit message rather than showing garbage downstream
+    if (tt == "t" && length(computed_variants) == 0 && is.na(N) && (is.na(n1) || is.na(n2))) {
+      uncertainty <- c(uncertainty,
+        "Cannot verify effect size: sample size could not be determined from reported information")
+    }
+
   } else if (tt == "r") {
     # ------ CORRELATION COMPUTATIONS ------
     r_value <- stat # For r tests, the statistic IS the effect size
@@ -1492,6 +1565,14 @@ compute_and_compare_one <- function(row,
 
   status <- "WARN"
   has_effect_reported <- !is.na(effect_reported)
+
+  # Fix 5C: Graceful failure — if no variant could be computed and N is unknown,
+  # don't flag as ERROR with misleading delta; report as NOTE
+  if (is.na(matched_value) && is.na(N) && has_effect_reported) {
+    status <- "NOTE"
+    uncertainty <- c(uncertainty,
+      "Effect size verification not possible without sample size information")
+  }
 
   # Get tolerance for this effect size type
   tol_eff <- tol_effect[[canonical_type]]

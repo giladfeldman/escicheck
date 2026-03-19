@@ -21,12 +21,40 @@ test_that("normalize_text converts decimal commas to dots", {
   expect_true(grepl("0\\.12", normalized))
 })
 
-test_that("normalize_text preserves thousands separators", {
+test_that("normalize_text strips thousands separators in N context", {
+  # Comma in N context is always a thousands separator (sample sizes are integers)
   text <- "N = 1,234 participants"
   normalized <- effectcheck:::normalize_text(text)
-  # Should preserve the comma in "1,234" (thousands separator)
-  # This is a heuristic - may need adjustment based on context
-  expect_true(grepl("1,234", normalized) || grepl("1\\.234", normalized))
+  expect_true(grepl("N = 1234", normalized))
+  expect_false(grepl("1,234", normalized))
+  expect_false(grepl("1\\.234", normalized))
+})
+
+test_that("normalize_text handles large N with multiple commas", {
+  text <- "N = 12,345,678 total"
+  normalized <- effectcheck:::normalize_text(text)
+  expect_true(grepl("N = 12345678", normalized))
+})
+
+test_that("normalize_text handles lowercase n with thousands separator", {
+  text <- "n = 1,341 participants"
+  normalized <- effectcheck:::normalize_text(text)
+  expect_true(grepl("n = 1341", normalized))
+})
+
+test_that("normalize_text handles n1/n2 with thousands separator", {
+  text <- "n1 = 2,500 and n2 = 3,200"
+  normalized <- effectcheck:::normalize_text(text)
+  expect_true(grepl("n1 = 2500", normalized))
+  expect_true(grepl("n2 = 3200", normalized))
+})
+
+test_that("normalize_text: N thousands and decimal comma coexist", {
+  # The N comma should be stripped; the effect size comma should become a dot
+  text <- "d = 0,45, N = 1,182"
+  normalized <- effectcheck:::normalize_text(text)
+  expect_true(grepl("N = 1182", normalized))
+  expect_true(grepl("0\\.45", normalized))
 })
 
 test_that("normalize_text harmonizes CI delimiters", {

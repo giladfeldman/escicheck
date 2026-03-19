@@ -168,3 +168,69 @@ test_that("p_symbol captures = sign", {
     expect_equal(parsed$p_symbol[1], "=")
   }
 })
+
+# ===========================================================================
+# Welch t-test and thousands-separator bug fixes
+# ===========================================================================
+
+test_that("thousands-separator N is parsed correctly (not truncated)", {
+  # Bug: "N = 1,182" was parsed as N=1 due to decimal comma conversion
+  text <- "N = 1,182. t(403.8) = -3.15, p < .001, d = -.31"
+  result <- check_text(text)
+  expect_true(nrow(result) >= 1)
+  # N should be 1182, NOT 1
+  expect_equal(result$N[1], 1182)
+  # d_ind should NOT be garbage (-3.15 from N=1); with N=1182 it's ~-0.18
+  if (!is.na(result$d_ind_equalN[1])) {
+    expect_true(abs(result$d_ind_equalN[1]) < 1)  # Not garbage
+    expect_true(abs(result$d_ind_equalN[1]) > 0.05) # Not degenerate
+  }
+})
+
+test_that("Welch t-test with correct N gives PASS", {
+  # Use the actual correct N for this t-test
+  text <- "N = 406. t(403.8) = -3.15, p < .001, d = -.31"
+  result <- check_text(text)
+  expect_true(nrow(result) >= 1)
+  if (!is.na(result$d_ind_equalN[1])) {
+    expect_true(abs(result$d_ind_equalN[1] - (-0.31)) < 0.05)
+  }
+  expect_true(result$status[1] %in% c("PASS", "NOTE"))
+})
+
+test_that("Welch t-test infers N from df when N missing", {
+  text <- "t(403.8) = -3.15, p < .001, d = -.31"
+  result <- check_text(text)
+  expect_true(nrow(result) >= 1)
+  # Should infer N ~ 406-413 from df=403.8 and/or reported d
+  if (!is.na(result$N[1])) {
+    expect_true(result$N[1] >= 400 && result$N[1] <= 420)
+  }
+})
+
+test_that("Welch t-test back-computes N from reported d", {
+  # t=-3.15, d=-0.31 -> N = 4*9.9225/0.0961 ~ 413
+  text <- "t(403.8) = -3.15, p = .001, d = -.31"
+  result <- check_text(text)
+  expect_true(nrow(result) >= 1)
+  # Should get reasonable effect size match
+  if (!is.na(result$d_ind_equalN[1])) {
+    expect_true(abs(abs(result$d_ind_equalN[1]) - 0.31) < 0.05)
+  }
+})
+
+test_that("parse_text correctly extracts N with thousands separator", {
+  text <- "N = 1,182 participants were tested. t(403.8) = -3.15, p < .001, d = -.31"
+  result <- parse_text(text)
+  expect_true(nrow(result) >= 1)
+  # N should be 1182, NOT 1
+  expect_equal(result$N[1], 1182)
+})
+
+test_that("dz_from_t returns NA for n < 2", {
+  expect_true(is.na(effectcheck:::dz_from_t(2.5, 1)))
+  expect_true(is.na(effectcheck:::dz_from_t(2.5, 0)))
+  expect_true(is.na(effectcheck:::dz_from_t(2.5, -1)))
+  # n=2 should still work
+  expect_equal(effectcheck:::dz_from_t(2.0, 2), 2.0 / sqrt(2), tolerance = 1e-7)
+})

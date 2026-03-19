@@ -157,6 +157,17 @@ normalize_text <- function(x) {
              "\\1chi-square(\\2) =", x, perl = TRUE)
 
   # ============================================================================
+  # Pre-strip thousands-separator commas in sample size contexts
+  # Must run BEFORE decimal comma conversion to prevent N = 1,182 -> N = 1.182
+  # Safe: sample sizes are always integers, so digit,3-digits in N/n context
+  # is unambiguously a thousands separator (not a European decimal comma)
+  # Handles: N = 1,182 | n = 1,341 | n1 = 2,500 | N = 12,345,678
+  # ============================================================================
+  for (.i in 1:3) { # Iterative: handles multi-comma numbers (e.g., 12,345,678)
+    x <- gsub("(\\b[Nn]\\d?\\s*=\\s*\\d+),(\\d{3}\\b)", "\\1\\2", x, perl = TRUE)
+  }
+
+  # ============================================================================
   # Decimal separator normalization (locale-aware) - uses Perl regex
   # ============================================================================
   # Strategy: Convert comma to dot only when it appears between digits
@@ -280,6 +291,19 @@ normalize_text <- function(x) {
 #' @keywords internal
 numify <- function(x) {
   suppressWarnings(as.numeric(x))
+}
+
+#' Convert string to integer, stripping thousands-separator commas
+#'
+#' Used ONLY for sample size values (N, n1, n2) where commas are always
+#' thousands separators, never decimal commas.
+#'
+#' @param x String or vector
+#' @return Integer value(s)
+#' @keywords internal
+numify_int <- function(x) {
+  x <- gsub(",", "", x)
+  suppressWarnings(as.integer(x))
 }
 
 #' Extract context window around a sentence
@@ -492,9 +516,10 @@ parse_text <- function(text, context_window_size = 2) {
   # Scientific notation p-values: p < 10^-15, p < 10-12 (PDF strips ^ in exponent)
   pat_p_sci <- "\\b[pP]\\s*([<=>]{1,2})\\s*10\\s*\\^?\\s*[-\u2212](\\d+)"
   # N regex: restrict to word boundary and look for nearby equals
-  pat_N <- "\\bN\\s*=\\s*(\\d+)"
-  pat_n1 <- "\\bn1\\s*=\\s*(\\d+)"
-  pat_n2 <- "\\bn2\\s*=\\s*(\\d+)"
+  # Belt-and-suspenders: also capture comma-thousands in case any slip through normalization
+  pat_N  <- "\\bN\\s*=\\s*(\\d[\\d,]*\\d|\\d+)"
+  pat_n1 <- "\\bn1\\s*=\\s*(\\d[\\d,]*\\d|\\d+)"
+  pat_n2 <- "\\bn2\\s*=\\s*(\\d[\\d,]*\\d|\\d+)"
   pat_dims <- "(\\d+)\\s*[x\u00d7]\\s*(\\d+)"
 
   # Patterns for effect sizes
@@ -549,8 +574,8 @@ parse_text <- function(text, context_window_size = 2) {
   # ============================================================================
   global_N_matches <- stringr::str_match_all(text_normalized, pat_N)
   global_N <- if (length(global_N_matches[[1]]) > 0) {
-    # Extract all N values found in text
-    ns <- as.numeric(global_N_matches[[1]][, 2])
+    # Extract all N values found in text (strip commas from thousands separators)
+    ns <- as.numeric(gsub(",", "", global_N_matches[[1]][, 2]))
     ns <- ns[!is.na(ns) & ns > 0]
 
     if (length(ns) > 0) {
@@ -602,14 +627,14 @@ parse_text <- function(text, context_window_size = 2) {
     # Enhanced N extraction with extended context and global fallback (Phase 2C)
     # Priority: local context > extended context > global
     m_N_local <- stringr::str_match(context, pat_N)
-    N_value <- if (!all(is.na(m_N_local))) numify(m_N_local[2]) else NA_real_
+    N_value <- if (!all(is.na(m_N_local))) numify_int(m_N_local[2]) else NA_real_
     N_source <- if (!is.na(N_value)) "local_context" else NA_character_
 
     # Try extended context if local failed
     if (is.na(N_value)) {
       context_extended <- extract_context(chunks, i, context_window_size, extended = TRUE)
       m_N_extended <- stringr::str_match(context_extended, pat_N)
-      N_value <- if (!all(is.na(m_N_extended))) numify(m_N_extended[2]) else NA_real_
+      N_value <- if (!all(is.na(m_N_extended))) numify_int(m_N_extended[2]) else NA_real_
       if (!is.na(N_value)) N_source <- "extended_context"
     }
 
@@ -964,8 +989,8 @@ parse_text <- function(text, context_window_size = 2) {
       },
       N = N_value, # From enhanced extraction above
       N_source = N_source, # NEW: Track where N came from
-      n1 = if (!all(is.na(m_n1))) numify(m_n1[2]) else NA_real_,
-      n2 = if (!all(is.na(m_n2))) numify(m_n2[2]) else NA_real_,
+      n1 = if (!all(is.na(m_n1))) numify_int(m_n1[2]) else NA_real_,
+      n2 = if (!all(is.na(m_n2))) numify_int(m_n2[2]) else NA_real_,
       table_r = if (!all(is.na(m_dim))) numify(m_dim[2]) else NA_real_,
       table_c = if (!all(is.na(m_dim))) numify(m_dim[3]) else NA_real_,
       effect_reported_name = effect_name,

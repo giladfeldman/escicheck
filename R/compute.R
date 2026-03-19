@@ -210,7 +210,7 @@ ci_dz <- function(dz, n, level = 0.95) {
 #' @return Cohen's dz
 #' @keywords internal
 dz_from_t <- function(t, n) {
-  if (any(is.na(c(t, n))) || n <= 0) {
+  if (any(is.na(c(t, n))) || n < 2) {
     return(NA_real_)
   }
   t / sqrt(n)
