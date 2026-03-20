@@ -1348,6 +1348,27 @@ compute_and_compare_one <- function(row,
       }
     }
 
+    # Back-calculate N from reported effect size when N is missing
+    if (is.na(N) && !is.na(effect_reported) && !is.na(stat) && stat > 0) {
+      if (!is.na(canonical_type) && canonical_type == "phi" && abs(effect_reported) > 0) {
+        N_back <- round(stat / (effect_reported^2))
+        if (N_back >= 4 && N_back <= 1e6) {
+          N <- N_back
+          assumptions <- c(assumptions,
+            sprintf("N=%d back-calculated from reported phi=%.2f and chi2=%.2f", as.integer(N), effect_reported, stat))
+        }
+      } else if (!is.na(canonical_type) && canonical_type == "V" && abs(effect_reported) > 0) {
+        # V = sqrt(chi2 / (N * m)), so N = chi2 / (V^2 * m)
+        m_val <- if (!is.na(df1)) df1 else 1  # df1 = min(r-1, c-1) for df1=1 tables
+        N_back <- round(stat / (effect_reported^2 * m_val))
+        if (N_back >= 4 && N_back <= 1e6) {
+          N <- N_back
+          assumptions <- c(assumptions,
+            sprintf("N=%d back-calculated from reported V=%.2f and chi2=%.2f", as.integer(N), effect_reported, stat))
+        }
+      }
+    }
+
     if (!is.na(N) && N > 0) {
       phi_val <- tryCatch(phi_from_chisq(stat, N), error = function(e) NA_real_)
       if (!is.na(phi_val)) {
@@ -2022,6 +2043,24 @@ compute_and_compare_one <- function(row,
       uncertainty <- c(uncertainty,
         sprintf("Decision error: reported as 'not significant' but computed p=%.4f (p < %.2f)", p_computed, alpha))
       # status stays WARN
+    }
+  }
+
+  # Handle implicit non-significance context: "absent", "no effect", "did not differ", etc.
+  # when p-value is missing and computed p confirms non-significance
+  if (status == "WARN" && !p_ns && is.na(p_reported) && !is.na(p_computed) &&
+      "context_window" %in% names(row) && !is.na(row$context_window[1])) {
+    ctx_lower <- tolower(as.character(row$context_window[1]))
+    nonsig_phrases <- c("was absent", "were absent", "no effect", "no difference",
+                        "did not differ", "did not reach significance",
+                        "not significant", "non-significant", "nonsignificant",
+                        "no significant", "no reliable", "failed to reach")
+    has_nonsig_context <- any(sapply(nonsig_phrases, function(ph) grepl(ph, ctx_lower, fixed = TRUE)))
+    if (has_nonsig_context && p_computed > alpha) {
+      status <- "OK"
+      uncertainty <- c(uncertainty,
+        sprintf("No p-value reported but context implies non-significance; computed p=%.4f confirms (p > %.2f)",
+                p_computed, alpha))
     }
   }
 

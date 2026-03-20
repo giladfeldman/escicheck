@@ -143,8 +143,8 @@ normalize_text <- function(x) {
     x <- gsub("(F\\s*\\([0-9]+\\s*,\\s*\\d*)(\\d)\\s+(\\d)", "\\1\\2\\3", x, perl = TRUE)
   }
 
-  # Fix eta2p / etap2 / eta_p^2 notation -> partial eta-squared = value
-  x <- gsub("(?:eta2p|\u03b72p|etap2|\u03b7p2)\\s*=", "partial eta-squared =", x, perl = TRUE)
+  # Fix eta2p / etap2 / eta_p^2 / eta_p2 notation -> partial eta-squared = value
+  x <- gsub("(?:eta2p|\u03b72p|etap2|\u03b7p2|eta_p2|eta_p\\^2|\u03b7_p2|\u03b7_p\\^2)\\s*=", "partial eta-squared =", x, perl = TRUE)
   # Also handle n2p (PDF corruption of eta2p) but only if followed by = and a number
   x <- gsub("(?<![a-zA-Z])n2p\\s*=\\s*(\\d)", "partial eta-squared = \\1", x, perl = TRUE)
   # Superscript 2 (U+00B2) to caret notation (e.g., chi squared, eta squared)
