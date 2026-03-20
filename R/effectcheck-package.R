@@ -1,5 +1,5 @@
 #' @importFrom dplyr %>%
-#' @importFrom stats median qnorm sd
+#' @importFrom stats median na.omit qnorm sd
 #' @keywords internal
 "_PACKAGE"
 

@@ -13,7 +13,11 @@ compute_and_compare_one(
   assume_equal_ns_when_missing = TRUE,
   tol_effect = list(d = 0.02, r = 0.005, phi = 0.02, V = 0.02),
   tol_ci = 0.02,
-  tol_p = 0.001
+  tol_p = 0.001,
+  cross_type_action = "NOTE",
+  ci_affects_status = TRUE,
+  plausibility_filter = TRUE,
+  sign_sensitive = FALSE
 )
 }
 \arguments{
@@ -34,6 +38,14 @@ compute_and_compare_one(
 \item{tol_ci}{Tolerance for CI bounds}
 
 \item{tol_p}{Tolerance for p-values}
+
+\item{cross_type_action}{Action when cross-type match found ("NOTE", "WARN", or "ERROR")}
+
+\item{ci_affects_status}{Whether CI mismatches affect status (default TRUE)}
+
+\item{plausibility_filter}{Whether to apply plausibility bounds filter (default TRUE)}
+
+\item{sign_sensitive}{Whether sign differences affect status (default FALSE)}
 }
 \value{
 A tibble with comparison results

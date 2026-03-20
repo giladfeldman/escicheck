@@ -332,6 +332,10 @@ VARIANT_METADATA <- list(
 #' @param tol_effect List of tolerances by effect type
 #' @param tol_ci Tolerance for CI bounds
 #' @param tol_p Tolerance for p-values
+#' @param cross_type_action Action when cross-type match found ("NOTE", "WARN", or "ERROR")
+#' @param ci_affects_status Whether CI mismatches affect status (default TRUE)
+#' @param plausibility_filter Whether to apply plausibility bounds filter (default TRUE)
+#' @param sign_sensitive Whether sign differences affect status (default FALSE)
 #' @return A tibble with comparison results
 #' @keywords internal
 compute_and_compare_one <- function(row,
@@ -2599,6 +2603,10 @@ compute_and_compare_one <- function(row,
 #' @param messages Logical, show progress messages (default FALSE)
 #' @param max_text_length Maximum total text length in characters (default 10^7)
 #' @param max_stats_per_text Maximum number of stats to process per text (default 10000)
+#' @param cross_type_action Action when cross-type match found ("NOTE", "WARN", or "ERROR"; default "NOTE")
+#' @param ci_affects_status Whether CI mismatches affect status (default TRUE)
+#' @param plausibility_filter Whether to apply plausibility bounds filter (default TRUE)
+#' @param sign_sensitive Whether sign differences affect status (default FALSE)
 #' @return An effectcheck S3 object with consistency check results
 #' @export
 #' @examples

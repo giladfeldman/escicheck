@@ -19,7 +19,11 @@ check_text(
   tol_p = 0.001,
   messages = FALSE,
   max_text_length = 10^7,
-  max_stats_per_text = 10000
+  max_stats_per_text = 10000,
+  cross_type_action = "NOTE",
+  ci_affects_status = TRUE,
+  plausibility_filter = TRUE,
+  sign_sensitive = FALSE
 )
 }
 \arguments{
@@ -52,6 +56,14 @@ check_text(
 \item{max_text_length}{Maximum total text length in characters (default 10^7)}
 
 \item{max_stats_per_text}{Maximum number of stats to process per text (default 10000)}
+
+\item{cross_type_action}{Action when cross-type match found ("NOTE", "WARN", or "ERROR"; default "NOTE")}
+
+\item{ci_affects_status}{Whether CI mismatches affect status (default TRUE)}
+
+\item{plausibility_filter}{Whether to apply plausibility bounds filter (default TRUE)}
+
+\item{sign_sensitive}{Whether sign differences affect status (default FALSE)}
 }
 \value{
 An effectcheck S3 object with consistency check results
