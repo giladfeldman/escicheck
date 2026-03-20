@@ -76,6 +76,9 @@
     if (has_effect && nzchar(delta)) return(sprintf("Inconsistency: the reported %s of %s differs from our calculation by %s. This is a large discrepancy.", effect_name, row$effect_reported, delta))
     return("Large inconsistency detected between the reported and computed values.")
   }
+  if (status == "SKIP") {
+    return("Extracted but could not be verified -- no p-value or effect size was reported alongside this statistic.")
+  }
   ""
 }
 
@@ -167,6 +170,7 @@ generate_report <- function(res, out,
   note_count <- if ("NOTE" %in% names(status_counts)) as.integer(status_counts["NOTE"]) else 0L
   warn_count <- if ("WARN" %in% names(status_counts)) as.integer(status_counts["WARN"]) else 0L
   error_count <- if ("ERROR" %in% names(status_counts)) as.integer(status_counts["ERROR"]) else 0L
+  skip_count <- if ("SKIP" %in% names(status_counts)) as.integer(status_counts["SKIP"]) else 0L
 
   all_cols <- names(res)
   key_cols <- c("location", "test_type", "stat_value", "df1", "df2", "effect_reported_name",
@@ -210,6 +214,7 @@ h2{color:#34495e;margin-top:32px;border-bottom:1px solid #eee;padding-bottom:6px
 .bar-note{background:#e2e3e5;color:#383d41}
 .bar-warn{background:#fff3cd;color:#856404}
 .bar-error{background:#f8d7da;color:#721c24}
+.bar-skip{background:#f1f5f9;color:#64748b}
 table{border-collapse:collapse;width:100%;margin:16px 0;font-size:13px}
 th,td{border:1px solid #dee2e6;padding:6px 10px;text-align:left}
 th{background:#f1f3f5;font-weight:600;color:#495057;position:sticky;top:0}
@@ -244,6 +249,7 @@ function toggleDetail(id){var r=document.getElementById("detail-"+id);r.classLis
   <div class="exec-bar bar-note"><span class="count">', note_count, '</span><span class="label">Note</span></div>
   <div class="exec-bar bar-warn"><span class="count">', warn_count, '</span><span class="label">Warning</span></div>
   <div class="exec-bar bar-error"><span class="count">', error_count, '</span><span class="label">Error</span></div>
+  <div class="exec-bar bar-skip"><span class="count">', skip_count, '</span><span class="label">Skip</span></div>
 </div>
 
 <h2>Test Type Distribution</h2>
@@ -327,6 +333,7 @@ paste(sprintf("<th>%s</th>", key_cols), collapse = ""),
   consistent_count <- sum(res$status %in% c("PASS", "OK"), na.rm = TRUE)
   caveat_count <- sum(res$status == "NOTE", na.rm = TRUE)
   review_count <- sum(res$status %in% c("WARN", "ERROR"), na.rm = TRUE)
+  skip_count <- sum(res$status == "SKIP", na.rm = TRUE)
   consistent_pct <- round(consistent_count / total_rows * 100)
   caveat_pct <- round(caveat_count / total_rows * 100)
   review_pct <- round(review_count / total_rows * 100)
@@ -368,7 +375,7 @@ h2{color:#34495e;margin-top:32px;border-bottom:1px solid #eee;padding-bottom:6px
 .overall{font-style:italic;color:#495057;margin-top:12px;padding-top:10px;border-top:1px solid #dde6f0}
 .stacked-bar{display:flex;height:20px;border-radius:10px;overflow:hidden;margin:16px 0;background:#e9ecef}
 .stacked-bar div{height:100%}
-.bar-g{background:#28a745}.bar-c{background:#17a2b8}.bar-n{background:#adb5bd}.bar-w{background:#ffc107}.bar-r{background:#dc3545}
+.bar-g{background:#28a745}.bar-c{background:#17a2b8}.bar-n{background:#adb5bd}.bar-w{background:#ffc107}.bar-r{background:#dc3545}.bar-s{background:#94a3b8}
 .result-card{border:1px solid #dee2e6;border-radius:10px;margin:16px 0;overflow:hidden}
 .result-card .card-header{padding:14px 18px;display:flex;align-items:center;gap:12px;cursor:pointer}
 .result-card .card-header:hover{filter:brightness(0.97)}
@@ -377,9 +384,10 @@ h2{color:#34495e;margin-top:32px;border-bottom:1px solid #eee;padding-bottom:6px
 .card-NOTE .card-header{background:#e2e3e5;border-left:5px solid #adb5bd}
 .card-WARN .card-header{background:#fff3cd;border-left:5px solid #ffc107}
 .card-ERROR .card-header{background:#f8d7da;border-left:5px solid #dc3545}
+.card-SKIP .card-header{background:#f1f5f9;border-left:5px solid #94a3b8}
 .badge{display:inline-block;padding:2px 10px;border-radius:12px;font-size:11px;font-weight:bold;color:white}
 .badge-PASS{background:#28a745}.badge-OK{background:#17a2b8}.badge-NOTE{background:#6c757d}
-.badge-WARN{background:#e6a800}.badge-ERROR{background:#dc3545}
+.badge-WARN{background:#e6a800}.badge-ERROR{background:#dc3545}.badge-SKIP{background:#94a3b8}
 .stat-ref{font-family:monospace;font-size:13px;color:#495057}
 .card-body{padding:14px 18px;font-size:14px;line-height:1.7}
 .card-body .verdict{font-weight:500;margin-bottom:8px}
@@ -393,7 +401,7 @@ h2{color:#34495e;margin-top:32px;border-bottom:1px solid #eee;padding-bottom:6px
 .legend-item strong{display:block;margin-bottom:2px}
 .legend-PASS{background:#d4edda;color:#155724}.legend-OK{background:#d1ecf1;color:#0c5460}
 .legend-NOTE{background:#e2e3e5;color:#383d41}.legend-WARN{background:#fff3cd;color:#856404}
-.legend-ERROR{background:#f8d7da;color:#721c24}
+.legend-ERROR{background:#f8d7da;color:#721c24}.legend-SKIP{background:#f1f5f9;color:#64748b}
 footer{margin-top:40px;padding-top:12px;border-top:1px solid #dee2e6;color:#999;font-size:12px;text-align:center}
 </style>
 <script>
@@ -413,6 +421,7 @@ function toggleCard(id){var d=document.getElementById("card-details-"+id);d.clas
   if (consistent_count > 0) paste0('<li class="good"><strong>', consistent_count, ' result', if (consistent_count != 1) "s" else "", ' (', consistent_pct, '%)</strong> ', if (consistent_count != 1) "are" else "is", ' consistent &mdash; the reported numbers match our calculations.</li>') else "",
   if (caveat_count > 0) paste0('<li class="caveat"><strong>', caveat_count, ' result', if (caveat_count != 1) "s" else "", ' (', caveat_pct, '%)</strong> ', if (caveat_count != 1) "have" else "has", ' minor caveats or could not be fully verified.</li>') else "",
   if (review_count > 0) paste0('<li class="problem"><strong>', review_count, ' result', if (review_count != 1) "s" else "", ' (', review_pct, '%)</strong> ', if (review_count != 1) "show" else "shows", ' discrepancies that should be reviewed.</li>') else "",
+  if (skip_count > 0) paste0('<li style="color:#64748b"><strong>', skip_count, ' result', if (skip_count != 1) "s" else "", '</strong> ', if (skip_count != 1) "were" else "was", ' extracted but could not be verified (no p-value or effect size reported).</li>') else "",
 '</ul>
 <p class="overall">', htmlEscape(.overall_verdict(res)), '</p>
 </div>
@@ -423,6 +432,7 @@ function toggleCard(id){var d=document.getElementById("card-details-"+id);d.clas
   if (caveat_count > 0) paste0('<div class="bar-n" style="width:', round(caveat_count/total_rows*100), '%" title="Minor caveat"></div>') else "",
   if (sum(res$status=="WARN",na.rm=TRUE) > 0) paste0('<div class="bar-w" style="width:', round(sum(res$status=="WARN",na.rm=TRUE)/total_rows*100), '%" title="Needs review"></div>') else "",
   if (sum(res$status=="ERROR",na.rm=TRUE) > 0) paste0('<div class="bar-r" style="width:', round(sum(res$status=="ERROR",na.rm=TRUE)/total_rows*100), '%" title="Inconsistency"></div>') else "",
+  if (sum(res$status=="SKIP",na.rm=TRUE) > 0) paste0('<div class="bar-s" style="width:', round(sum(res$status=="SKIP",na.rm=TRUE)/total_rows*100), '%" title="Not analyzed"></div>') else "",
 '</div>
 
 <h2>What the Categories Mean</h2>
@@ -432,6 +442,7 @@ function toggleCard(id){var d=document.getElementById("card-details-"+id);d.clas
 <div class="legend-item legend-NOTE"><strong>Minor Caveat</strong>Likely correct, but with a small caveat.</div>
 <div class="legend-item legend-WARN"><strong>Needs Review</strong>Something looks off &mdash; worth double-checking.</div>
 <div class="legend-item legend-ERROR"><strong>Inconsistency</strong>The numbers don\'t add up.</div>
+<div class="legend-item legend-SKIP"><strong>Not Analyzed</strong>Extracted but could not be verified.</div>
 </div>
 
 <h2>Detailed Results</h2>')
@@ -558,7 +569,8 @@ render_report_pdf <- function(res, out,
     "- **OK:** ", sum(res$status == "OK", na.rm = TRUE), "\n",
     "- **NOTE:** ", sum(res$status == "NOTE", na.rm = TRUE), "\n",
     "- **WARN:** ", sum(res$status == "WARN", na.rm = TRUE), "\n",
-    "- **ERROR:** ", sum(res$status == "ERROR", na.rm = TRUE), "\n\n",
+    "- **ERROR:** ", sum(res$status == "ERROR", na.rm = TRUE), "\n",
+    "- **SKIP:** ", sum(res$status == "SKIP", na.rm = TRUE), "\n\n",
     "```{r}\nknitr::kable(res[, c('location','test_type','stat_value','status','delta_effect_abs')])\n```\n"
   )
 
@@ -611,8 +623,9 @@ render_report <- function(res, out) {
   note_count <- if ("NOTE" %in% names(status_counts)) status_counts["NOTE"] else 0
   warn_count <- if ("WARN" %in% names(status_counts)) status_counts["WARN"] else 0
   error_count <- if ("ERROR" %in% names(status_counts)) status_counts["ERROR"] else 0
+  skip_count <- if ("SKIP" %in% names(status_counts)) status_counts["SKIP"] else 0
   insufficient_count <- if (any(res$insufficient_data, na.rm = TRUE)) sum(res$insufficient_data, na.rm = TRUE) else 0
-  
+
   # Get all column names dynamically
   all_cols <- names(res)
   key_cols <- c("location", "test_type", "stat_value", "df1", "df2", "effect_reported_name",

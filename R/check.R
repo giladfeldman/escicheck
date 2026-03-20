@@ -393,6 +393,11 @@ compute_and_compare_one <- function(row,
                           length(row$one_tailed_detected) > 0)
     isTRUE(row$one_tailed_detected[1]) else FALSE
 
+  # Flag: two-tailed test explicitly detected from text near this result
+  two_tailed_local <- if ("two_tailed_detected" %in% names(row) &&
+                          length(row$two_tailed_detected) > 0)
+    isTRUE(row$two_tailed_detected[1]) else FALSE
+
   # Add uncertainty if p-value was out of range
   if ("p_out_of_range" %in% names(row) && isTRUE(row$p_out_of_range[1])) {
     uncertainty <- c(uncertainty, "Reported p-value could not be parsed or is out of valid range [0,1]")
@@ -995,7 +1000,35 @@ compute_and_compare_one <- function(row,
     # ------ CORRELATION COMPUTATIONS ------
 
     # Derive df from N for Pearson r (df = N - 2)
+    # When multiple N values were found in context, try each to find best p-match
     if (is.na(df1) && !is.na(N) && N > 2) {
+      if (!is.na(p_reported) && "N_candidates_str" %in% names(row) &&
+          !is.na(row$N_candidates_str[1])) {
+        N_alts <- as.numeric(unlist(strsplit(as.character(row$N_candidates_str[1]), ";")))
+        N_alts <- N_alts[!is.na(N_alts) & N_alts > 2]
+        if (length(N_alts) > 1) {
+          best_N <- N
+          best_p_diff <- Inf
+          for (N_try in N_alts) {
+            df_try <- N_try - 2
+            if (abs(stat) < 1 && df_try > 0) {
+              t_try <- stat * sqrt(df_try / (1 - stat^2))
+              p_try <- 2 * stats::pt(abs(t_try), df = df_try, lower.tail = FALSE)
+              p_diff <- abs(p_try - p_reported)
+              if (p_diff < best_p_diff) {
+                best_p_diff <- p_diff
+                best_N <- N_try
+              }
+            }
+          }
+          if (best_N != N) {
+            N <- best_N
+            assumptions <- c(assumptions,
+              sprintf("Multiple sample sizes found in context (N=%s); N=%d selected as best p-value match - please verify this is the correct sample for this correlation",
+                      paste(N_alts, collapse = ", "), as.integer(N)))
+          }
+        }
+      }
       df1 <- N - 2
       assumptions <- c(assumptions,
         sprintf("df=%d inferred from N=%d (Pearson r: df = N - 2)",
@@ -1949,13 +1982,20 @@ compute_and_compare_one <- function(row,
     }
   }
 
-  use_one_tailed <- one_tailed || one_tailed_local
+  # Determine primary tail interpretation:
+  # - If two-tailed explicitly detected in chunk: two-tailed
+  # - If one-tailed explicitly detected in chunk (and not two-tailed): one-tailed
+  # - Otherwise: use global one_tailed parameter (default FALSE = two-tailed)
+  primary_one_tailed <- if (two_tailed_local) FALSE
+                        else if (one_tailed_local) TRUE
+                        else one_tailed  # global param, default FALSE
 
-  if (!is.na(stat)) {
-    p_computed <- tryCatch(
+  # Helper: compute p-value for a given one-tailed flag
+  compute_p_for_tail <- function(use_ot) {
+    tryCatch(
       {
         if (tt == "t" && !is.na(df1)) {
-          if (use_one_tailed) {
+          if (use_ot) {
             p_upper <- stats::pt(abs(stat), df = df1, lower.tail = FALSE)
             match_one_tailed_p(p_upper, p_reported)
           } else {
@@ -1964,7 +2004,7 @@ compute_and_compare_one <- function(row,
         } else if (tt == "F" && !is.na(df1) && !is.na(df2)) {
           stats::pf(stat, df1 = df1, df2 = df2, lower.tail = FALSE)
         } else if (tt == "z") {
-          if (use_one_tailed) {
+          if (use_ot) {
             p_upper <- stats::pnorm(abs(stat), lower.tail = FALSE)
             match_one_tailed_p(p_upper, p_reported)
           } else {
@@ -1973,12 +2013,11 @@ compute_and_compare_one <- function(row,
         } else if (tt == "chisq" && !is.na(df1)) {
           stats::pchisq(stat, df = df1, lower.tail = FALSE)
         } else if (tt == "r" && !is.na(df1)) {
-          # Convert r to t-statistic and compute p-value
           if (abs(stat) >= 1) {
             if (abs(stat) > 1) NA_real_ else 0
           } else {
             t_from_r <- stat * sqrt(df1 / (1 - stat^2))
-            if (use_one_tailed) {
+            if (use_ot) {
               p_upper <- stats::pt(abs(t_from_r), df = df1, lower.tail = FALSE)
               match_one_tailed_p(p_upper, p_reported)
             } else {
@@ -1986,18 +2025,15 @@ compute_and_compare_one <- function(row,
             }
           }
         } else if (tt == "regression" && !is.na(df1)) {
-          # Regression uses t-distribution (same as t-test)
-          if (use_one_tailed) {
+          if (use_ot) {
             p_upper <- stats::pt(abs(stat), df = df1, lower.tail = FALSE)
             match_one_tailed_p(p_upper, p_reported)
           } else {
             2 * stats::pt(abs(stat), df = df1, lower.tail = FALSE)
           }
         } else if (tt == "H" && !is.na(df1)) {
-          # Kruskal-Wallis H uses chi-square distribution
           stats::pchisq(stat, df = df1, lower.tail = FALSE)
         } else if (tt %in% c("U", "W")) {
-          # Use z_auxiliary for p-value if available
           z_aux <- if ("z_auxiliary" %in% names(row) && length(row$z_auxiliary) > 0) {
             as.numeric(row$z_auxiliary[1])
           } else {
@@ -2016,6 +2052,11 @@ compute_and_compare_one <- function(row,
     )
   }
 
+  # Primary p-value computation
+  if (!is.na(stat)) {
+    p_computed <- compute_p_for_tail(primary_one_tailed)
+  }
+
   if (!is.na(p_computed) && !is.na(p_reported)) {
     reported_significant <- p_reported < alpha
     computed_significant <- p_computed < alpha
@@ -2026,21 +2067,59 @@ compute_and_compare_one <- function(row,
     # and the reported p is an inequality bound
     p_inequality_consistent <- FALSE
     if (p_is_inequality) {
-      # "p < X" means actual p is below X
-      # If reported "p < .001" and computed is also < .001, that's consistent
       if (p_reported <= 0.001 && p_computed < 0.001) {
         p_inequality_consistent <- TRUE
       }
-      # If reported "p < .05" and computed is also < .05, consistent
       if (p_reported <= alpha && p_computed < alpha) {
         p_inequality_consistent <- TRUE
       }
     }
 
     decision_error <- reported_significant != computed_significant
-    # Override: inequality notation makes direction consistent
     if (p_inequality_consistent) {
       decision_error <- FALSE
+    }
+
+    # Universal one-tailed/two-tailed fallback:
+    # If there's a decision error, try the OTHER tail interpretation
+    # Only for test types that support one/two-tailed (not F, chisq, H)
+    if (decision_error && tt %in% c("t", "z", "r", "regression")) {
+      alt_one_tailed <- !primary_one_tailed
+      p_alt <- compute_p_for_tail(alt_one_tailed)
+      if (!is.na(p_alt)) {
+        alt_computed_sig <- p_alt < alpha
+        # Also check inequality consistency for fallback
+        alt_ineq_consistent <- FALSE
+        if (p_is_inequality) {
+          if (p_reported <= 0.001 && p_alt < 0.001) alt_ineq_consistent <- TRUE
+          if (p_reported <= alpha && p_alt < alpha) alt_ineq_consistent <- TRUE
+        }
+        alt_decision_error <- reported_significant != alt_computed_sig
+        if (alt_ineq_consistent) alt_decision_error <- FALSE
+
+        if (!alt_decision_error) {
+          # Fallback resolves the mismatch
+          p_computed <- p_alt
+          decision_error <- FALSE
+          tail_note <- if (alt_one_tailed) "one-tailed" else "two-tailed"
+          uncertainty <- c(uncertainty,
+            sprintf("P-value is consistent if interpreted as %s test (p_computed=%.4f)",
+                    tail_note, p_alt))
+          # Downgrade to NOTE: decision error cleared, but caveat about interpretation
+          if (status %in% c("PASS", "OK", "WARN")) status <- "NOTE"
+        }
+      }
+    }
+
+    # Method-context detection: suppress decision_error for p-curve, equivalence tests, etc.
+    method_context <- if ("method_context_detected" %in% names(row) &&
+                          length(row$method_context_detected) > 0)
+      isTRUE(row$method_context_detected[1]) else FALSE
+    if (method_context && decision_error) {
+      decision_error <- FALSE
+      uncertainty <- c(uncertainty,
+        "Decision error suppressed: statistic appears in methodological context (p-curve, equivalence test, etc.)")
+      if (status == "WARN") status <- "NOTE"
     }
 
     if (decision_error) {
@@ -2150,6 +2229,12 @@ compute_and_compare_one <- function(row,
         if (status != "OK") status <- "OK"
       }
     }
+  }
+
+  # Extraction-only results: nothing was checked → SKIP (not analyzed)
+  # Exclude p_ns cases: "ns"/"n.s." IS a form of p-value reporting that was verified
+  if (check_type == "extraction_only" && !decision_error && !p_ns) {
+    status <- "SKIP"
   }
 
   # ============================================================================

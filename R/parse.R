@@ -359,8 +359,11 @@ parse_text <- function(text, context_window_size = 2) {
       p_valid = logical(0),
       p_out_of_range = logical(0),
       one_tailed_detected = logical(0),
+      two_tailed_detected = logical(0),
+      method_context_detected = logical(0),
       N = numeric(0),
       N_source = character(0),
+      N_candidates_str = character(0),
       n1 = numeric(0),
       n2 = numeric(0),
       table_r = numeric(0),
@@ -459,8 +462,11 @@ parse_text <- function(text, context_window_size = 2) {
       p_valid = logical(0),
       p_out_of_range = logical(0),
       one_tailed_detected = logical(0),
+      two_tailed_detected = logical(0),
+      method_context_detected = logical(0),
       N = numeric(0),
       N_source = character(0),
+      N_candidates_str = character(0),
       n1 = numeric(0),
       n2 = numeric(0),
       table_r = numeric(0),
@@ -640,24 +646,51 @@ parse_text <- function(text, context_window_size = 2) {
       p_ns_flag <- grepl(pat_p_ns, s, perl = TRUE)
     }
 
-    # Detect one-tailed test from local text or context
+    # Detect one-tailed test from local chunk only (not context, to prevent bleeding)
     one_tailed_detected <- grepl(
       "\\b(?:one[- ]?tailed|one[- ]?tail|1[- ]?tailed)\\b",
+      s, ignore.case = TRUE, perl = TRUE
+    )
+    # Detect two-tailed test from local chunk
+    two_tailed_detected <- grepl(
+      "\\b(?:two[- ]?tailed|two[- ]?tail|2[- ]?tailed)\\b",
+      s, ignore.case = TRUE, perl = TRUE
+    )
+    if (two_tailed_detected) one_tailed_detected <- FALSE
+
+    # Detect methodological context (p-curve, equivalence test, etc.)
+    method_context_detected <- grepl(
+      "\\b(?:p[- ]?curve|equivalence test|TOST|power analysis|simulation|meta-analy|sensitivity analy|bootstrap|applet)\\b",
       paste(s, context), ignore.case = TRUE, perl = TRUE
     )
 
     # Enhanced N extraction with extended context and global fallback (Phase 2C)
     # Priority: local context > extended context > global
-    m_N_local <- stringr::str_match(context, pat_N)
-    N_value <- if (!all(is.na(m_N_local))) numify_int(m_N_local[2]) else NA_real_
+    # Extract ALL N values from local context (not just first) for candidate selection
+    m_N_all_local <- stringr::str_match_all(context, pat_N)[[1]]
+    N_candidates <- if (nrow(m_N_all_local) > 0) {
+      unique(na.omit(sapply(m_N_all_local[, 2], numify_int)))
+    } else {
+      numeric(0)
+    }
+    N_value <- if (length(N_candidates) > 0) N_candidates[1] else NA_real_
     N_source <- if (!is.na(N_value)) "local_context" else NA_character_
 
     # Try extended context if local failed
     if (is.na(N_value)) {
       context_extended <- extract_context(chunks, i, context_window_size, extended = TRUE)
-      m_N_extended <- stringr::str_match(context_extended, pat_N)
-      N_value <- if (!all(is.na(m_N_extended))) numify_int(m_N_extended[2]) else NA_real_
-      if (!is.na(N_value)) N_source <- "extended_context"
+      m_N_all_ext <- stringr::str_match_all(context_extended, pat_N)[[1]]
+      ext_candidates <- if (nrow(m_N_all_ext) > 0) {
+        unique(na.omit(sapply(m_N_all_ext[, 2], numify_int)))
+      } else {
+        numeric(0)
+      }
+      if (length(ext_candidates) > 0) {
+        N_value <- ext_candidates[1]
+        N_source <- "extended_context"
+        # Merge extended candidates with local (for N_candidates_str)
+        N_candidates <- unique(c(N_candidates, ext_candidates))
+      }
     }
 
     # Fall back to global N if both failed
@@ -1019,8 +1052,11 @@ parse_text <- function(text, context_window_size = 2) {
       },
       p_ns = p_ns_flag,
       one_tailed_detected = one_tailed_detected,
+      two_tailed_detected = two_tailed_detected,
+      method_context_detected = method_context_detected,
       N = N_value, # From enhanced extraction above
       N_source = N_source, # NEW: Track where N came from
+      N_candidates_str = if (length(N_candidates) > 1) paste(N_candidates, collapse = ";") else NA_character_,
       n1 = if (!all(is.na(m_n1))) numify_int(m_n1[2]) else NA_real_,
       n2 = if (!all(is.na(m_n2))) numify_int(m_n2[2]) else NA_real_,
       table_r = if (!all(is.na(m_dim))) numify(m_dim[2]) else NA_real_,
@@ -1056,8 +1092,11 @@ parse_text <- function(text, context_window_size = 2) {
       p_valid = logical(0),
       p_out_of_range = logical(0),
       one_tailed_detected = logical(0),
+      two_tailed_detected = logical(0),
+      method_context_detected = logical(0),
       N = numeric(0),
       N_source = character(0),
+      N_candidates_str = character(0),
       n1 = numeric(0),
       n2 = numeric(0),
       table_r = numeric(0),

@@ -359,3 +359,176 @@ test_that("one_tailed_detected is FALSE for standard text", {
     expect_false(parsed$one_tailed_detected[1])
   }
 })
+
+# ===========================================================================
+# Round 3: SKIP status for extraction-only results
+# ===========================================================================
+
+test_that("extraction-only results get SKIP status", {
+  res <- check_text("z = 9.47")
+  expect_equal(nrow(res), 1)
+  expect_equal(res$status[1], "SKIP")
+  expect_equal(res$check_type[1], "extraction_only")
+})
+
+test_that("results with p-value do NOT get SKIP", {
+  res <- check_text("t(50) = 2.00, p = .05")
+  expect_equal(nrow(res), 1)
+  expect_true(res$status[1] != "SKIP")
+})
+
+test_that("results with effect size do NOT get SKIP", {
+  res <- check_text("t(50) = 2.00, d = 0.50")
+  expect_equal(nrow(res), 1)
+  expect_true(res$status[1] != "SKIP")
+})
+
+test_that("ns (not significant) notation does NOT get SKIP", {
+  res <- check_text("F(1, 50) = 0.50, ns")
+  expect_equal(nrow(res), 1)
+  expect_equal(res$status[1], "OK")
+})
+
+# ===========================================================================
+# Round 3: Two-tailed detection and universal fallback
+# ===========================================================================
+
+test_that("two_tailed_detected is TRUE when 'two-tailed' appears in chunk", {
+  parsed <- effectcheck:::parse_text("t(69) = 0.65, two-tailed p = .52")
+  expect_true("two_tailed_detected" %in% names(parsed))
+  if (nrow(parsed) > 0) {
+    expect_true(parsed$two_tailed_detected[1])
+    expect_false(parsed$one_tailed_detected[1])
+  }
+})
+
+test_that("explicit two-tailed p-value is computed correctly", {
+  res <- check_text("t(69) = 0.65, two-tailed p = .52")
+  expect_equal(nrow(res), 1)
+  expect_equal(res$status[1], "OK")
+  expect_equal(round(res$p_computed[1], 3), round(2 * pt(0.65, 69, lower.tail = FALSE), 3))
+})
+
+test_that("one-tailed detection only searches chunk, not context", {
+  # "one-tailed" in first sentence should NOT bleed to the second result
+  res <- check_text("one-tailed, t(52) = -0.60, p = .73. t(69) = 0.65, p = .52")
+  expect_equal(nrow(res), 2)
+  # Second result should NOT have one_tailed_detected
+  parsed <- effectcheck:::parse_text("one-tailed, t(52) = -0.60, p = .73. t(69) = 0.65, p = .52")
+  if (nrow(parsed) >= 2) {
+    expect_true(parsed$one_tailed_detected[1])
+    expect_false(parsed$one_tailed_detected[2])
+  }
+})
+
+test_that("two-tailed default: no fallback when p-values match", {
+  # t(69) = 0.65, p = .52 → two-tailed p ≈ 0.518, both > .05, no decision error
+  res <- check_text("t(69) = 0.65, p = .52")
+  expect_equal(nrow(res), 1)
+  expect_false(res$decision_error[1])
+  # Should be OK, not NOTE (no fallback needed)
+  expect_equal(res$status[1], "OK")
+})
+
+test_that("fallback to one-tailed resolves decision error with NOTE", {
+  # t(30) = 1.80, p = .04: two-tailed p ≈ 0.082 (not sig), but one-tailed ≈ 0.041 (sig)
+  # Reported p = .04 is significant. Two-tailed says not sig → decision error
+  # Fallback: one-tailed ≈ 0.041 (sig) matches → NOTE
+  res <- check_text("t(30) = 1.80, p = .04")
+  expect_equal(nrow(res), 1)
+  expect_false(res$decision_error[1])
+  expect_equal(res$status[1], "NOTE")
+  expect_true(grepl("one-tailed", res$uncertainty_reasons[1]))
+})
+
+test_that("fallback to two-tailed resolves decision error with NOTE", {
+  # When one_tailed is set globally but two-tailed matches better
+  # t(30) = 2.10, p = .044: one-tailed p ≈ 0.022 (sig), two-tailed p ≈ 0.044 (sig)
+  # Actually both are significant here. Let me find a case where they disagree.
+  # t(30) = 1.70, p = .10: one-tailed p ≈ 0.050 (borderline), two-tailed p ≈ 0.099
+  # With one_tailed=TRUE: primary=one-tailed ≈ 0.050, reported 0.10 not sig, computed borderline
+  # Actually let's use a clear case:
+  # t(30) = 1.50, p = .14: one-tailed ≈ 0.072 (sig at 0.05? no), two-tailed ≈ 0.144
+  # reported p=.14, two-tailed p≈0.144, both not sig → OK
+  # But with one_tailed=TRUE: primary one-tailed ≈ 0.072, reported 0.14 not sig, computed not sig → same dir
+  # Need: one-tailed sig but two-tailed not sig, reported not sig
+  # t(30) = 1.75, p = .09: one-tailed ≈ 0.045 (sig!), two-tailed ≈ 0.090 (not sig)
+  # With one_tailed=TRUE: primary = one-tailed 0.045 (sig), reported 0.09 (not sig) → decision error
+  # Fallback: two-tailed 0.090, both not sig → resolves → NOTE
+  res <- check_text("t(30) = 1.75, p = .09", one_tailed = TRUE)
+  expect_equal(nrow(res), 1)
+  expect_false(res$decision_error[1])
+  expect_equal(res$status[1], "NOTE")
+  expect_true(grepl("two-tailed", res$uncertainty_reasons[1]))
+})
+
+# ===========================================================================
+# Round 3: Method-context detection
+# ===========================================================================
+
+test_that("method_context_detected is TRUE for p-curve text", {
+  parsed <- effectcheck:::parse_text("in the p-curve applet, F(1, 221) = 6.20, p = .875")
+  expect_true("method_context_detected" %in% names(parsed))
+  if (nrow(parsed) > 0) {
+    expect_true(parsed$method_context_detected[1])
+  }
+})
+
+test_that("method_context_detected is TRUE for equivalence test", {
+  parsed <- effectcheck:::parse_text("equivalence test: t(50) = 1.20, p = .23")
+  if (nrow(parsed) > 0) {
+    expect_true(parsed$method_context_detected[1])
+  }
+})
+
+test_that("method_context_detected is FALSE for normal text", {
+  parsed <- effectcheck:::parse_text("t(50) = 2.00, p = .05")
+  if (nrow(parsed) > 0) {
+    expect_false(parsed$method_context_detected[1])
+  }
+})
+
+test_that("method context suppresses decision_error", {
+  res <- check_text("in the p-curve applet, F(1, 221) = 6.20, p = .875")
+  expect_equal(nrow(res), 1)
+  expect_false(res$decision_error[1])
+  expect_true(grepl("methodological context", res$uncertainty_reasons[1]))
+})
+
+test_that("method context does NOT suppress decision_error for normal text", {
+  # F(1, 50) = 0.50, p = .001 → computed p ≈ 0.483, decision error
+  res <- check_text("F(1, 50) = 0.50, p = .001")
+  expect_equal(nrow(res), 1)
+  expect_true(res$decision_error[1])
+})
+
+# ===========================================================================
+# Round 3: N candidates for r-tests
+# ===========================================================================
+
+test_that("N_candidates_str stores multiple N values from context", {
+  parsed <- effectcheck:::parse_text("N = 32. N = 959. r = .25, p < .001")
+  expect_true("N_candidates_str" %in% names(parsed))
+  if (nrow(parsed) > 0) {
+    expect_true(grepl("32", parsed$N_candidates_str[1]))
+    expect_true(grepl("959", parsed$N_candidates_str[1]))
+  }
+})
+
+test_that("r-test selects best N from candidates via p-value match", {
+  res <- check_text("N = 32. N = 959. r = .25, p < .001")
+  expect_equal(nrow(res), 1)
+  expect_equal(res$status[1], "OK")
+  # p_computed should be very small (consistent with N=959)
+  expect_true(res$p_computed[1] < 0.001)
+  # Assumption note should mention multiple sample sizes
+  expect_true(grepl("Multiple sample sizes", res$assumptions_used[1]))
+  expect_true(grepl("N=959", res$assumptions_used[1]))
+})
+
+test_that("single N in context does NOT trigger N candidate selection", {
+  parsed <- effectcheck:::parse_text("N = 100. r = .30, p = .002")
+  if (nrow(parsed) > 0) {
+    expect_true(is.na(parsed$N_candidates_str[1]))
+  }
+})
