@@ -9,8 +9,8 @@ EFFECT_SIZE_FAMILIES <- list(
   # Cohen's d family (standardized mean differences)
   d = list(
     family = "d",
-    variants = c("d_ind", "d_ind_equalN", "d_ind_min", "d_ind_max", "dz", "dav", "drm"),
-    alternatives = c("g_ind"),
+    variants = c("d_ind", "d_ind_equalN", "d_ind_min", "d_ind_max", "dz", "dav", "drm", "g_ind"),
+    alternatives = character(0),
     description = "Cohen's d - standardized mean difference"
   ),
   g = list(
@@ -345,7 +345,8 @@ compute_and_compare_one <- function(row,
                                     tol_p = 0.001,
                                     cross_type_action = "NOTE",
                                     ci_affects_status = TRUE,
-                                    plausibility_filter = TRUE) {
+                                    plausibility_filter = TRUE,
+                                    sign_sensitive = FALSE) {
   # ============================================================================
   # PHASE 1: Extract and validate input data
   # ============================================================================
@@ -386,6 +387,11 @@ compute_and_compare_one <- function(row,
 
   # Flag: p was reported as "ns" / "n.s." (not significant)
   p_ns <- if ("p_ns" %in% names(row) && length(row$p_ns) > 0) isTRUE(row$p_ns[1]) else FALSE
+
+  # Flag: one-tailed test detected from text near this result
+  one_tailed_local <- if ("one_tailed_detected" %in% names(row) &&
+                          length(row$one_tailed_detected) > 0)
+    isTRUE(row$one_tailed_detected[1]) else FALSE
 
   # Add uncertainty if p-value was out of range
   if ("p_out_of_range" %in% names(row) && isTRUE(row$p_out_of_range[1])) {
@@ -987,6 +993,15 @@ compute_and_compare_one <- function(row,
 
   } else if (tt == "r") {
     # ------ CORRELATION COMPUTATIONS ------
+
+    # Derive df from N for Pearson r (df = N - 2)
+    if (is.na(df1) && !is.na(N) && N > 2) {
+      df1 <- N - 2
+      assumptions <- c(assumptions,
+        sprintf("df=%d inferred from N=%d (Pearson r: df = N - 2)",
+                as.integer(df1), as.integer(N)))
+    }
+
     r_value <- stat # For r tests, the statistic IS the effect size
 
     if (!is.na(r_value)) {
@@ -1359,12 +1374,22 @@ compute_and_compare_one <- function(row,
         }
       } else if (!is.na(canonical_type) && canonical_type == "V" && abs(effect_reported) > 0) {
         # V = sqrt(chi2 / (N * m)), so N = chi2 / (V^2 * m)
-        m_val <- if (!is.na(df1)) df1 else 1  # df1 = min(r-1, c-1) for df1=1 tables
+        # m = min(r-1, c-1); must match the m used downstream for V computation
+        # (enumerate_m_from_df at line ~1404). Using df1 directly is WRONG for df>1.
+        m_val <- if (!is.na(table_r) && !is.na(table_c)) {
+          min(table_r - 1, table_c - 1)
+        } else if (!is.na(df1)) {
+          m_cands <- enumerate_m_from_df(df1)
+          if (length(m_cands) > 0) m_cands[1] else 1
+        } else {
+          1
+        }
         N_back <- round(stat / (effect_reported^2 * m_val))
         if (N_back >= 4 && N_back <= 1e6) {
           N <- N_back
           assumptions <- c(assumptions,
-            sprintf("N=%d back-calculated from reported V=%.2f and chi2=%.2f", as.integer(N), effect_reported, stat))
+            sprintf("N=%d back-calculated from reported V=%.2f and chi2=%.2f (m=%d)",
+                    as.integer(N), effect_reported, stat, as.integer(m_val)))
         }
       }
     }
@@ -1913,20 +1938,35 @@ compute_and_compare_one <- function(row,
   p_computed <- NA_real_
   decision_error <- FALSE
 
+  # Helper: for one-tailed tests, compute both tails and match the reported p.
+  # This handles the case where a negative t-statistic has an upper-tail p > 0.5.
+  match_one_tailed_p <- function(p_upper, p_rep) {
+    p_lower <- 1 - p_upper
+    if (!is.na(p_rep) && abs(p_lower - p_rep) < abs(p_upper - p_rep)) {
+      p_lower
+    } else {
+      p_upper
+    }
+  }
+
+  use_one_tailed <- one_tailed || one_tailed_local
+
   if (!is.na(stat)) {
     p_computed <- tryCatch(
       {
         if (tt == "t" && !is.na(df1)) {
-          if (one_tailed) {
-            stats::pt(abs(stat), df = df1, lower.tail = FALSE)
+          if (use_one_tailed) {
+            p_upper <- stats::pt(abs(stat), df = df1, lower.tail = FALSE)
+            match_one_tailed_p(p_upper, p_reported)
           } else {
             2 * stats::pt(abs(stat), df = df1, lower.tail = FALSE)
           }
         } else if (tt == "F" && !is.na(df1) && !is.na(df2)) {
           stats::pf(stat, df1 = df1, df2 = df2, lower.tail = FALSE)
         } else if (tt == "z") {
-          if (one_tailed) {
-            stats::pnorm(abs(stat), lower.tail = FALSE)
+          if (use_one_tailed) {
+            p_upper <- stats::pnorm(abs(stat), lower.tail = FALSE)
+            match_one_tailed_p(p_upper, p_reported)
           } else {
             2 * stats::pnorm(abs(stat), lower.tail = FALSE)
           }
@@ -1938,16 +1978,18 @@ compute_and_compare_one <- function(row,
             if (abs(stat) > 1) NA_real_ else 0
           } else {
             t_from_r <- stat * sqrt(df1 / (1 - stat^2))
-            if (one_tailed) {
-              stats::pt(abs(t_from_r), df = df1, lower.tail = FALSE)
+            if (use_one_tailed) {
+              p_upper <- stats::pt(abs(t_from_r), df = df1, lower.tail = FALSE)
+              match_one_tailed_p(p_upper, p_reported)
             } else {
               2 * stats::pt(abs(t_from_r), df = df1, lower.tail = FALSE)
             }
           }
         } else if (tt == "regression" && !is.na(df1)) {
           # Regression uses t-distribution (same as t-test)
-          if (one_tailed) {
-            stats::pt(abs(stat), df = df1, lower.tail = FALSE)
+          if (use_one_tailed) {
+            p_upper <- stats::pt(abs(stat), df = df1, lower.tail = FALSE)
+            match_one_tailed_p(p_upper, p_reported)
           } else {
             2 * stats::pt(abs(stat), df = df1, lower.tail = FALSE)
           }
@@ -2430,7 +2472,9 @@ compute_and_compare_one <- function(row,
     check_type = check_type,
     extraction_suspect = extraction_suspect,
     design_ambiguous = (ambiguity_level != "clear"),
-    sign_mismatch = FALSE, # TODO: implement sign checking
+    sign_mismatch = if (!is.na(effect_reported) && !is.na(matched_value) &&
+                        effect_reported != 0 && matched_value != 0)
+                     sign(effect_reported) != sign(matched_value) else FALSE,
     design_inferred = design_inferred,
     variants_tested = variants_tested_str,
     uncertainty_level = uncertainty_level,
@@ -2484,7 +2528,8 @@ check_text <- function(text,
                        max_stats_per_text = 10000,
                        cross_type_action = "NOTE",
                        ci_affects_status = TRUE,
-                       plausibility_filter = TRUE) {
+                       plausibility_filter = TRUE,
+                       sign_sensitive = FALSE) {
   # Resource Limit Check: Text Length
   if (sum(nchar(text)) > max_text_length) {
     stop("Text too long. Maximum total length: ", max_text_length, " characters")
@@ -2507,7 +2552,8 @@ check_text <- function(text,
     max_stats_per_text = max_stats_per_text,
     cross_type_action = cross_type_action,
     ci_affects_status = ci_affects_status,
-    plausibility_filter = plausibility_filter
+    plausibility_filter = plausibility_filter,
+    sign_sensitive = sign_sensitive
   )
 
   parsed <- parse_text(text)
@@ -2555,7 +2601,8 @@ check_text <- function(text,
           tol_p = tol_p,
           cross_type_action = cross_type_action,
           ci_affects_status = ci_affects_status,
-          plausibility_filter = plausibility_filter
+          plausibility_filter = plausibility_filter,
+          sign_sensitive = sign_sensitive
         )
       },
       error = function(e) {

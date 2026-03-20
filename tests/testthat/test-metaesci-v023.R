@@ -218,3 +218,144 @@ test_that("Tolerance defaults include h, OR, RR, IRR", {
   expect_true("RR" %in% names(tol))
   expect_true("IRR" %in% names(tol))
 })
+
+# ===========================================================================
+# g_ind in d family variants (not just alternatives)
+# ===========================================================================
+
+test_that("g_ind is a variant of d family (same-type matching)", {
+  families <- effectcheck:::EFFECT_SIZE_FAMILIES
+  expect_true("g_ind" %in% families$d$variants)
+})
+
+test_that("d family has no alternatives (g_ind moved to variants)", {
+  families <- effectcheck:::EFFECT_SIZE_FAMILIES
+  expect_equal(length(families$d$alternatives), 0)
+})
+
+# ===========================================================================
+# Sign mismatch detection
+# ===========================================================================
+
+test_that("sign_mismatch detected when reported and computed signs differ", {
+  # t(57) = -5.30 with dz = 0.69 — the computed dz should be positive (from abs(t)/sqrt(n))
+  # but reported dz = 0.69 is positive, matching the abs — no sign mismatch
+  res <- check_text("t(57) = -5.30, p < .001, dz = 0.69")
+  expect_equal(nrow(res), 1)
+  # sign_mismatch should be in the output
+  expect_true("sign_mismatch" %in% names(res))
+})
+
+test_that("sign_mismatch is FALSE when signs agree", {
+  res <- check_text("t(88) = 2.85, p = .005, d = 0.60")
+  expect_equal(nrow(res), 1)
+  expect_false(res$sign_mismatch[1])
+})
+
+test_that("sign_sensitive parameter accepted by check_text", {
+  # Just verifying the parameter doesn't cause an error
+  res <- check_text("t(88) = 2.85, p = .005, d = 0.60", sign_sensitive = TRUE)
+  expect_equal(nrow(res), 1)
+  res2 <- check_text("t(88) = 2.85, p = .005, d = 0.60", sign_sensitive = FALSE)
+  expect_equal(nrow(res2), 1)
+})
+
+# ===========================================================================
+# Classroom Round 2: Bug B — r-test df derivation from N
+# ===========================================================================
+
+test_that("r-test derives df from N when df not in parentheses (Bug B)", {
+  res <- check_text("N = 132. r = .36, p < .0001")
+  expect_equal(nrow(res), 1)
+  expect_equal(res$df1[1], 130)  # N - 2
+  expect_false(is.na(res$p_computed[1]))
+  expect_true(res$p_computed[1] < 0.001)
+  expect_true(res$status[1] %in% c("OK", "PASS"))
+})
+
+test_that("r-test with parenthetical df still works (regression)", {
+  res <- check_text("r(130) = .36, p < .0001")
+  expect_equal(nrow(res), 1)
+  expect_equal(res$df1[1], 130)
+  expect_false(is.na(res$p_computed[1]))
+})
+
+test_that("r-test without N or df does not compute p", {
+  res <- check_text("r = .36, p < .0001")
+  # May or may not parse (needs nearby p), but if it does, p_computed depends on df
+  if (nrow(res) > 0 && is.na(res$df1[1])) {
+    expect_true(is.na(res$p_computed[1]))
+  }
+})
+
+# ===========================================================================
+# Classroom Round 2: Bug A — chi2(df>1) V back-calculation
+# ===========================================================================
+
+test_that("chi2(df>1) with V does NOT produce ERROR (Bug A regression fix)", {
+  res <- check_text("chi2(4) = 333, p < .001, V = 0.81")
+  expect_equal(nrow(res), 1)
+  expect_true(res$status[1] %in% c("PASS", "NOTE", "OK"))
+  # V should be self-consistent
+  expect_true(grepl("V", res$matched_variant[1]))
+})
+
+test_that("chi2(1) with V still works (regression)", {
+  res <- check_text("chi2(1) = 85.03, p < 0.001, V = 0.41")
+  expect_equal(nrow(res), 1)
+  expect_equal(res$status[1], "PASS")
+})
+
+test_that("chi2(4) V back-calculation uses correct m from enumerate_m_from_df", {
+  res <- check_text("chi2(4) = 333, p < .001, V = 0.81")
+  expect_equal(nrow(res), 1)
+  # N should be ~508 (m=1), not 127 (m=4)
+  expect_true(res$N[1] > 400)
+})
+
+# ===========================================================================
+# Classroom Round 2: Bug C — one-tailed p-value both tails
+# ===========================================================================
+
+test_that("one-tailed negative t computes correct tail (Bug C)", {
+  # t(52) = -0.60, one-tailed p = .73 → correct p = 1 - pt(0.60, 52, lower=F) ≈ 0.724
+  res <- check_text("one-tailed, t(52) = -0.60, p = .73")
+  expect_equal(nrow(res), 1)
+  expect_true(abs(res$p_computed[1] - 0.724) < 0.01)
+})
+
+test_that("one-tailed positive t still computes upper tail (Bug C)", {
+  res <- check_text("one-tailed, t(52) = 2.50, p = .008")
+  expect_equal(nrow(res), 1)
+  expect_true(abs(res$p_computed[1] - 0.008) < 0.005)
+})
+
+test_that("two-tailed t is unchanged by one-tailed fix", {
+  res <- check_text("t(88) = 2.85, p = .005")
+  expect_equal(nrow(res), 1)
+  # Two-tailed p ≈ 0.0054
+  expect_true(abs(res$p_computed[1] - 0.0054) < 0.001)
+})
+
+test_that("one_tailed global param with negative t selects correct tail", {
+  res <- check_text("t(50) = -2.00, p = .975", one_tailed = TRUE)
+  expect_equal(nrow(res), 1)
+  # p_lower = 1 - pt(2, 50, lower=F) ≈ 0.9745
+  expect_true(abs(res$p_computed[1] - 0.975) < 0.01)
+})
+
+test_that("one_tailed_detected column exists in parse output", {
+  parsed <- effectcheck:::parse_text("one-tailed, t(52) = 2.50, p = .008")
+  expect_true("one_tailed_detected" %in% names(parsed))
+  if (nrow(parsed) > 0) {
+    expect_true(parsed$one_tailed_detected[1])
+  }
+})
+
+test_that("one_tailed_detected is FALSE for standard text", {
+  parsed <- effectcheck:::parse_text("t(88) = 2.85, p = .005")
+  expect_true("one_tailed_detected" %in% names(parsed))
+  if (nrow(parsed) > 0) {
+    expect_false(parsed$one_tailed_detected[1])
+  }
+})

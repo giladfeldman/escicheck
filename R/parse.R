@@ -358,6 +358,7 @@ parse_text <- function(text, context_window_size = 2) {
       p_symbol = character(0),
       p_valid = logical(0),
       p_out_of_range = logical(0),
+      one_tailed_detected = logical(0),
       N = numeric(0),
       N_source = character(0),
       n1 = numeric(0),
@@ -457,6 +458,7 @@ parse_text <- function(text, context_window_size = 2) {
       p_symbol = character(0),
       p_valid = logical(0),
       p_out_of_range = logical(0),
+      one_tailed_detected = logical(0),
       N = numeric(0),
       N_source = character(0),
       n1 = numeric(0),
@@ -637,6 +639,12 @@ parse_text <- function(text, context_window_size = 2) {
     if (all(is.na(m_p))) {
       p_ns_flag <- grepl(pat_p_ns, s, perl = TRUE)
     }
+
+    # Detect one-tailed test from local text or context
+    one_tailed_detected <- grepl(
+      "\\b(?:one[- ]?tailed|one[- ]?tail|1[- ]?tailed)\\b",
+      paste(s, context), ignore.case = TRUE, perl = TRUE
+    )
 
     # Enhanced N extraction with extended context and global fallback (Phase 2C)
     # Priority: local context > extended context > global
@@ -1010,6 +1018,7 @@ parse_text <- function(text, context_window_size = 2) {
         !is.na(p_char) && is.na(p_reported)
       },
       p_ns = p_ns_flag,
+      one_tailed_detected = one_tailed_detected,
       N = N_value, # From enhanced extraction above
       N_source = N_source, # NEW: Track where N came from
       n1 = if (!all(is.na(m_n1))) numify_int(m_n1[2]) else NA_real_,
@@ -1046,6 +1055,7 @@ parse_text <- function(text, context_window_size = 2) {
       p_symbol = character(0),
       p_valid = logical(0),
       p_out_of_range = logical(0),
+      one_tailed_detected = logical(0),
       N = numeric(0),
       N_source = character(0),
       n1 = numeric(0),
