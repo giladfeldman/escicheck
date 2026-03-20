@@ -355,6 +355,9 @@ compute_and_compare_one <- function(row,
   # Flag: p was reported as inequality (e.g., "p < .001")
   p_is_inequality <- !is.na(p_sym) && grepl("<", p_sym)
 
+  # Flag: p was reported as "ns" / "n.s." (not significant)
+  p_ns <- if ("p_ns" %in% names(row) && length(row$p_ns) > 0) isTRUE(row$p_ns[1]) else FALSE
+
   # Add uncertainty if p-value was out of range
   if ("p_out_of_range" %in% names(row) && isTRUE(row$p_out_of_range[1])) {
     uncertainty <- c(uncertainty, "Reported p-value could not be parsed or is out of valid range [0,1]")
@@ -1908,6 +1911,20 @@ compute_and_compare_one <- function(row,
   # no effect to compare, evaluate p-value consistency for OK/NOTE upgrade.
   # ============================================================================
 
+  # Handle "ns" (not significant) p-value notation
+  if (status == "WARN" && p_ns && !has_effect_reported && !is.na(p_computed)) {
+    if (p_computed > alpha) {
+      status <- "OK"
+      uncertainty <- c(uncertainty,
+        sprintf("Reported as 'not significant'; computed p=%.4f confirms (p > %.2f)", p_computed, alpha))
+    } else {
+      decision_error <- TRUE
+      uncertainty <- c(uncertainty,
+        sprintf("Decision error: reported as 'not significant' but computed p=%.4f (p < %.2f)", p_computed, alpha))
+      # status stays WARN
+    }
+  }
+
   if (status == "WARN" && !has_effect_reported) {
     # No effect size was reported - evaluate based on p-value consistency
     if (!is.na(p_computed) && !is.na(p_reported)) {
@@ -2098,6 +2115,7 @@ compute_and_compare_one <- function(row,
     # Phase 2 new columns (from parse.R)
     p_symbol = if ("p_symbol" %in% names(row)) row$p_symbol else NA_character_,
     p_valid = if ("p_valid" %in% names(row)) row$p_valid else NA,
+    p_ns = if ("p_ns" %in% names(row)) row$p_ns else FALSE,
     p_out_of_range = if ("p_out_of_range" %in% names(row)) row$p_out_of_range else NA,
     N_source = if ("N_source" %in% names(row)) row$N_source else NA_character_,
     effect_fallback = if ("effect_fallback" %in% names(row)) row$effect_fallback else NA,

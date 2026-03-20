@@ -234,11 +234,16 @@ normalize_text <- function(x) {
   # Fix obvious cases: hyphen at end of line followed by word on next line
   x <- gsub("-\\s*\\n\\s*([a-z])", "\\1", x, perl = TRUE)
 
+  # Strip section numbers at start of lines (e.g., "3.3." or "3.3.1.") to prevent
+  # them from being captured as p-values when joined across line breaks
+  x <- gsub("(^|\\n)([ \\t]*)\\d+(\\.\\d+)+\\.?[ \\t]+", "\\1\\2", x, perl = TRUE)
+
   # Fix line breaks in the middle of statistics
   # Pattern: "p = " or "p<" or "p>" followed by newline and optional text, then a number
   # This fixes cases like "p = \n0.837" or "p = on social distance\n0.837" -> "p = 0.837"
   # Allow up to 50 chars of text between p= and the number (to handle OCR errors)
-  x <- gsub("(p\\s*[<=>]\\s*)[^\\n]{0,50}\\n\\s*([.\\d]+)", "\\1\\2", x, perl = TRUE)
+  # Guard: if there's already a number right after p= (valid p-value), don't replace
+  x <- gsub("(p\\s*[<=>]\\s*)(?![.0]?\\d)([^\\n]{0,50})\\n\\s*([.\\d]+)", "\\1\\3", x, perl = TRUE)
 
   # Fix line breaks between test statistic and p-value
   # Pattern: "t(df) = value,\n p = value" -> "t(df) = value, p = value"
@@ -494,7 +499,7 @@ parse_text <- function(text, context_window_size = 2) {
   # Chi-square: chi-square(df) = value, \u03c7\u00b2(df) = value, Chi-square(df)=value
   # Also match: \u03c72, chi2, X2, X\u00b2
   # APA format includes optional N inside parens: \u03c7\u00b2(2, N = 150) = 8.73
-  pat_chi <- "(?:chi-?square|\u03c7\\s*\\^?2|\u03c7\u00b2|Chi-?square|chi2|X\\s*\\^?2|X\u00b2)\\s*\\(\\s*(\\d+(?:\\.\\d+)?)\\s*(?:,\\s*[Nn]\\s*=\\s*[\\d,]+)?\\s*\\)\\s*=\\s*([-+]?\\d*\\.?\\d+)"
+  pat_chi <- "(?:chi-?square|\u03c7\\s*\\^?2|\u03c7\u00b2|Chi-?square|chi2|X\\s*\\^?2|X\u00b2)\\s*\\(\\s*(\\d+(?:\\.\\d+)?)\\s*(?:,\\s*[Nn]\\s*=\\s*([\\d,]+))?\\s*\\)\\s*=\\s*([-+]?\\d*\\.?\\d+)"
   # Chi-square without parenthesized df: chi2 = 27.04, df = 1 (or chi2(N = 100) = 5.03)
   pat_chi_nodf <- "(?:chi-?square|\u03c7\\s*\\^?2|\u03c7\u00b2|Chi-?square|chi2|X\\s*\\^?2|X\u00b2)\\s*=\\s*([-+]?\\d*\\.?\\d+)"
 
@@ -516,6 +521,8 @@ parse_text <- function(text, context_window_size = 2) {
   pat_p <- "\\b[pP]\\s*([<=>]{1,2})\\s*(0?\\.[0-9]+|[01]\\.[0-9]+|[01])"
   # Scientific notation p-values: p < 10^-15, p < 10-12 (PDF strips ^ in exponent)
   pat_p_sci <- "\\b[pP]\\s*([<=>]{1,2})\\s*10\\s*\\^?\\s*[-\u2212](\\d+)"
+  # "Not significant" notation: "ns", "n.s.", "NS" (only after comma/semicolon)
+  pat_p_ns <- "[,;]\\s*(?:ns\\.?|n\\.s\\.?|NS|N\\.S\\.?)(?=[\\s.,;)]|$)"
   # N regex: restrict to word boundary and look for nearby equals
   # Belt-and-suspenders: also capture comma-thousands in case any slip through normalization
   pat_N  <- "\\bN\\s*=\\s*(\\d[\\d,]*\\d|\\d+)"
@@ -625,6 +632,12 @@ parse_text <- function(text, context_window_size = 2) {
       m_p <- matrix(c(m_p_sci[1], m_p_sci[2], sci_val), nrow = 1)
     }
 
+    # Check for "ns" (not significant) notation when no numeric p-value found
+    p_ns_flag <- FALSE
+    if (all(is.na(m_p))) {
+      p_ns_flag <- grepl(pat_p_ns, s, perl = TRUE)
+    }
+
     # Enhanced N extraction with extended context and global fallback (Phase 2C)
     # Priority: local context > extended context > global
     m_N_local <- stringr::str_match(context, pat_N)
@@ -693,6 +706,7 @@ parse_text <- function(text, context_window_size = 2) {
     df1 <- NA_real_
     df2 <- NA_real_
     stat_value <- NA_real_
+    chi_inline_N <- NA_real_
 
     if (!all(is.na(m_t))) {
       test_type <- "t"
@@ -725,7 +739,8 @@ parse_text <- function(text, context_window_size = 2) {
     } else if (!all(is.na(m_chi))) {
       test_type <- "chisq"
       df1 <- numify(m_chi[2])
-      stat_value <- numify(m_chi[3])
+      chi_inline_N <- if (!is.na(m_chi[3])) numify_int(m_chi[3]) else NA_real_
+      stat_value <- numify(m_chi[4])
     } else if (!all(is.na(m_chi_nodf))) {
       # Chi-square without parenthesized df (e.g., "chi2 = 27.04, df = 1")
       # Only match if there's also a p-value or df stated nearby to avoid false positives
@@ -782,6 +797,12 @@ parse_text <- function(text, context_window_size = 2) {
       if (!all(is.na(m_z_aux))) {
         z_auxiliary <- numify(m_z_aux[2])
       }
+    }
+
+    # For chi-square, prefer inline N from parentheses over context/global
+    if (test_type == "chisq" && !is.na(chi_inline_N)) {
+      N_value <- chi_inline_N
+      N_source <- "chi_inline"
     }
 
     # Extract regression coefficients
@@ -988,6 +1009,7 @@ parse_text <- function(text, context_window_size = 2) {
         p_char <- if (!all(is.na(m_p))) m_p[3] else NA_character_
         !is.na(p_char) && is.na(p_reported)
       },
+      p_ns = p_ns_flag,
       N = N_value, # From enhanced extraction above
       N_source = N_source, # NEW: Track where N came from
       n1 = if (!all(is.na(m_n1))) numify_int(m_n1[2]) else NA_real_,
