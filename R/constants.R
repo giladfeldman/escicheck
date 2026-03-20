@@ -25,7 +25,11 @@ DEFAULT_TOL_EFFECT <- list(
     rank_biserial_r = 0.02,
     cliffs_delta = 0.02,
     epsilon_squared = 0.01,
-    kendalls_W = 0.01
+    kendalls_W = 0.01,
+    h = 0.02,
+    OR = 0.5,
+    RR = 0.5,
+    IRR = 0.5
 )
 
 # Other Tolerances
@@ -38,6 +42,21 @@ DEFAULT_CI_LEVEL <- 0.95
 
 # Extreme Delta Threshold — deltas above this are flagged as likely extraction errors
 EXTREME_DELTA_THRESHOLD <- 1.0
+
+# Plausibility Bounds — effect sizes above these are flagged as likely extraction errors
+EFFECT_PLAUSIBILITY <- list(
+    d = 10, g = 10, dz = 10, dav = 10, drm = 10,
+    r = 1, phi = 1, V = 1,
+    eta2 = 1, etap2 = 1, omega2 = 1,
+    cohens_f = 10, f2 = 100,
+    beta = 10, R2 = 1,
+    OR = 100, RR = 100, IRR = 100, h = 3.15,
+    rank_biserial_r = 1, cliffs_delta = 1,
+    epsilon_squared = 1, kendalls_W = 1
+)
+
+# Default cross-type action — status when no same-type variant can be computed
+DEFAULT_CROSS_TYPE_ACTION <- "NOTE"
 
 # Resource Limits
 DEFAULT_MAX_TEXT_LENGTH <- 10^7 # 10 MB

@@ -131,6 +131,32 @@ EFFECT_SIZE_FAMILIES <- list(
     variants = c("kendalls_W"),
     alternatives = c("epsilon_squared"),
     description = "Kendall's W coefficient of concordance"
+  ),
+  # Odds/Risk ratio family (parsed but not yet computable from test statistics)
+  OR = list(
+    family = "OR",
+    variants = character(0),
+    alternatives = c("RR"),
+    description = "Odds ratio"
+  ),
+  RR = list(
+    family = "RR",
+    variants = character(0),
+    alternatives = c("OR"),
+    description = "Risk ratio"
+  ),
+  IRR = list(
+    family = "IRR",
+    variants = character(0),
+    alternatives = character(0),
+    description = "Incidence rate ratio"
+  ),
+  # Cohen's h (proportion-based effect size)
+  h = list(
+    family = "h",
+    variants = character(0),
+    alternatives = c("phi"),
+    description = "Cohen's h - effect size for comparing proportions"
   )
 )
 
@@ -316,7 +342,10 @@ compute_and_compare_one <- function(row,
                                     assume_equal_ns_when_missing = TRUE,
                                     tol_effect = list(d = 0.02, r = 0.005, phi = 0.02, V = 0.02),
                                     tol_ci = 0.02,
-                                    tol_p = 0.001) {
+                                    tol_p = 0.001,
+                                    cross_type_action = "NOTE",
+                                    ci_affects_status = TRUE,
+                                    plausibility_filter = TRUE) {
   # ============================================================================
   # PHASE 1: Extract and validate input data
   # ============================================================================
@@ -409,7 +438,11 @@ compute_and_compare_one <- function(row,
     "rank_biserial_r" = "rank_biserial_r", "rank biserial r" = "rank_biserial_r",
     "cliffs_delta" = "cliffs_delta", "cliff's delta" = "cliffs_delta",
     "epsilon_squared" = "epsilon_squared", "epsilon squared" = "epsilon_squared",
-    "kendalls_w" = "kendalls_W", "kendall's w" = "kendalls_W"
+    "kendalls_w" = "kendalls_W", "kendall's w" = "kendalls_W",
+    "or" = "OR", "odds ratio" = "OR",
+    "rr" = "RR", "risk ratio" = "RR",
+    "irr" = "IRR", "incidence rate ratio" = "IRR",
+    "h" = "h", "cohen's h" = "h", "cohens h" = "h"
   )
 
   canonical_type <- if (length(reported_type) > 0 && !is.na(reported_type) && reported_type %in% names(type_mapping)) {
@@ -462,25 +495,25 @@ compute_and_compare_one <- function(row,
         suggestion <- "For F-tests/ANOVA, typical effect sizes are eta-squared (\u03b7\u00b2), partial eta-squared (\u03b7p\u00b2), omega-squared (\u03c9\u00b2), or Cohen's f"
       }
     } else if (tt == "r") {
-      # Correlation: r or R\u00b2
-      valid_types <- c("r", "R2")
+      # Correlation: r, R\u00b2, or f\u00b2
+      valid_types <- c("r", "R2", "f2")
       if (!canonical_type %in% valid_types) {
         valid_for_test <- FALSE
-        suggestion <- "For correlations, typical effect sizes are Pearson's r or R-squared"
+        suggestion <- "For correlations, typical effect sizes are Pearson's r, R-squared, or Cohen's f\u00b2"
       }
     } else if (tt == "chisq") {
-      # Chi-square: phi (2\u00d72), Cramer's V (larger tables)
-      valid_types <- c("phi", "V")
+      # Chi-square: phi (2\u00d72), Cramer's V (larger tables), OR, RR, h
+      valid_types <- c("phi", "V", "OR", "RR", "IRR", "h")
       if (!canonical_type %in% valid_types) {
         valid_for_test <- FALSE
-        suggestion <- "For chi-square tests, typical effect sizes are phi (\u03c6) for 2\u00d72 tables or Cramer's V for larger tables"
+        suggestion <- "For chi-square tests, typical effect sizes are phi (\u03c6), Cramer's V, OR, RR, or Cohen's h"
       }
     } else if (tt == "z") {
-      # z-tests: similar to t-tests
-      valid_types <- c("d", "g", "r", "R2")
+      # z-tests: similar to t-tests, plus OR/RR/h
+      valid_types <- c("d", "g", "r", "R2", "OR", "RR", "IRR", "h")
       if (!canonical_type %in% valid_types) {
         valid_for_test <- FALSE
-        suggestion <- "For z-tests, typical effect sizes are Cohen's d, Hedges' g, or correlation r"
+        suggestion <- "For z-tests, typical effect sizes are Cohen's d, Hedges' g, correlation r, OR, RR, or Cohen's h"
       }
     }
 
@@ -982,6 +1015,32 @@ compute_and_compare_one <- function(row,
         ),
         why_consider = "Variance explained interpretation"
       )
+
+      # Add Cohen's f\u00b2 as alternative (f\u00b2 = r\u00b2 / (1 - r\u00b2))
+      r_sq <- r_value^2
+      if (r_sq < 1) {
+        f2_val <- r_sq / (1 - r_sq)
+        if (!is.na(canonical_type) && canonical_type == "f2") {
+          computed_variants$cohens_f2 <- list(
+            value = f2_val,
+            metadata = list(
+              name = "Cohen's f\u00b2 (from r)",
+              assumptions = "Derived from correlation",
+              when_to_use = "Effect size for regression/correlation"
+            )
+          )
+        } else {
+          alternatives$cohens_f2 <- list(
+            value = f2_val,
+            metadata = list(
+              name = "Cohen's f\u00b2 (from r)",
+              assumptions = "Derived from correlation",
+              when_to_use = "Effect size for regression/correlation"
+            ),
+            why_consider = "Alternative effect size measure for correlations"
+          )
+        }
+      }
     }
   } else if (tt == "F") {
     # ------ ANOVA F-TEST COMPUTATIONS ------
@@ -1126,6 +1185,32 @@ compute_and_compare_one <- function(row,
             metadata = VARIANT_METADATA$d_ind_equalN
           )
           if (!any(is.na(ci_d_val))) computed_variants$d_ind_equalN$ci <- ci_d_val
+
+          # Hedges' g (bias-corrected d) — Issue A fix
+          J_factor <- 1 - 3 / (4 * df2 - 1)
+          g_equiv <- d_equiv * J_factor
+          computed_variants$g_ind <- list(
+            value = g_equiv,
+            metadata = VARIANT_METADATA$g_ind
+          )
+
+          # d_ind_min and d_ind_max when actual N is known
+          if (!is.na(N) && N > 2) {
+            d_min <- tryCatch(d_ind_from_t(t_equiv, 1, N - 1), error = function(e) NA_real_)
+            d_max <- tryCatch(d_ind_from_t(t_equiv, N - 1, 1), error = function(e) NA_real_)
+            if (!is.na(d_min)) {
+              computed_variants$d_ind_min <- list(
+                value = d_min,
+                metadata = VARIANT_METADATA$d_ind_min
+              )
+            }
+            if (!is.na(d_max)) {
+              computed_variants$d_ind_max <- list(
+                value = d_max,
+                metadata = VARIANT_METADATA$d_ind_max
+              )
+            }
+          }
 
           computed_variants$dz <- list(
             value = dz_equiv,
@@ -1676,16 +1761,16 @@ compute_and_compare_one <- function(row,
         status <- "PASS"
         uncertainty <- c(uncertainty, "Design ambiguous but closest variant matches well")
       } else {
-        # highly_ambiguous (cross-type fallback, unknown type) stays NOTE
-        status <- "NOTE"
+        # highly_ambiguous (cross-type fallback, unknown type) — use cross_type_action param
+        status <- cross_type_action
         uncertainty <- c(uncertainty, "Match is good but comparison is highly ambiguous (cross-type or unknown effect type)")
       }
     } else if (delta_effect_abs <= (3 * tol_eff)) {
       status <- "WARN"
     } else if (delta_effect_abs > (5 * tol_eff)) {
-      # Cross-type fallback should not produce ERROR (Issue 1D fix)
+      # Cross-type fallback should not produce ERROR — use cross_type_action (Issue 1D fix)
       if (ambiguity_level == "highly_ambiguous" && grepl("No same-type", ambiguity_reason)) {
-        status <- "NOTE"
+        status <- cross_type_action
         uncertainty <- c(uncertainty, "Cross-type comparison (no same-type variants available) \u2014 delta not meaningful")
       } else {
         status <- "ERROR"
@@ -1695,9 +1780,9 @@ compute_and_compare_one <- function(row,
     }
   }
 
-  # CI affects status
+  # CI affects status (controlled by ci_affects_status parameter)
   if (!is.na(ci_match) && !ci_match) {
-    if (status == "PASS") status <- "NOTE"
+    if (ci_affects_status && status == "PASS") status <- "NOTE"
     uncertainty <- c(uncertainty, sprintf(
       "CI bounds mismatch: lower diff=%.3f, upper diff=%.3f",
       ci_delta_lower, ci_delta_upper
@@ -1713,7 +1798,7 @@ compute_and_compare_one <- function(row,
     "extraction_only"
   }
   # CI mismatch overrides check_type when it downgrades status
-  if (!is.na(ci_match) && !ci_match && status == "NOTE" && has_effect_reported) {
+  if (ci_affects_status && !is.na(ci_match) && !ci_match && status == "NOTE" && has_effect_reported) {
     check_type <- "ci"
   }
 
@@ -1724,6 +1809,21 @@ compute_and_compare_one <- function(row,
     uncertainty <- c(uncertainty,
       sprintf("Extreme discrepancy (delta=%.2f) likely reflects data extraction error rather than reporting error",
               delta_effect_abs))
+  }
+
+  # Plausibility filter (Issue C): flag implausibly large effect sizes
+  if (plausibility_filter && !is.na(effect_reported) && !is.na(canonical_type)) {
+    bound <- EFFECT_PLAUSIBILITY[[canonical_type]]
+    if (!is.null(bound) && abs(effect_reported) > bound) {
+      extraction_suspect <- TRUE
+      uncertainty <- c(uncertainty,
+        sprintf("Reported effect size |%s| = %.2f exceeds plausibility bound (%.1f) \u2014 likely extraction error",
+                canonical_type, abs(effect_reported), bound))
+      # Downgrade ERROR to NOTE for implausible extractions
+      if (status == "ERROR") {
+        status <- "NOTE"
+      }
+    }
   }
 
   # ============================================================================
@@ -2342,7 +2442,10 @@ check_text <- function(text,
                        tol_p = 0.001,
                        messages = FALSE,
                        max_text_length = 10^7,
-                       max_stats_per_text = 10000) {
+                       max_stats_per_text = 10000,
+                       cross_type_action = "NOTE",
+                       ci_affects_status = TRUE,
+                       plausibility_filter = TRUE) {
   # Resource Limit Check: Text Length
   if (sum(nchar(text)) > max_text_length) {
     stop("Text too long. Maximum total length: ", max_text_length, " characters")
@@ -2362,7 +2465,10 @@ check_text <- function(text,
     tol_ci = tol_ci,
     tol_p = tol_p,
     max_text_length = max_text_length,
-    max_stats_per_text = max_stats_per_text
+    max_stats_per_text = max_stats_per_text,
+    cross_type_action = cross_type_action,
+    ci_affects_status = ci_affects_status,
+    plausibility_filter = plausibility_filter
   )
 
   parsed <- parse_text(text)
@@ -2407,7 +2513,10 @@ check_text <- function(text,
           assume_equal_ns_when_missing = assume_equal_ns_when_missing,
           tol_effect = tol_effect,
           tol_ci = tol_ci,
-          tol_p = tol_p
+          tol_p = tol_p,
+          cross_type_action = cross_type_action,
+          ci_affects_status = ci_affects_status,
+          plausibility_filter = plausibility_filter
         )
       },
       error = function(e) {
