@@ -1905,6 +1905,15 @@ compute_and_compare_one <- function(row,
     }
   }
 
+  # Garbled p-value detection: "p < X" where X > 0.5 is nonsensical
+  # (you wouldn't write "p < 0.645" — this is a PDF extraction artifact)
+  if (p_is_inequality && !is.na(p_reported) && p_reported > 0.5) {
+    extraction_suspect <- TRUE
+    uncertainty <- c(uncertainty,
+      sprintf("Suspicious p-value: 'p < %.3f' is likely a PDF extraction artifact (no standard threshold > 0.5 uses '<')",
+              p_reported))
+  }
+
   # ============================================================================
   # PHASE 8: Design inference
   # ============================================================================

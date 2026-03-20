@@ -532,3 +532,26 @@ test_that("single N in context does NOT trigger N candidate selection", {
     expect_true(is.na(parsed$N_candidates_str[1]))
   }
 })
+
+# ===========================================================================
+# Round 3 follow-up: Garbled p-value detection
+# ===========================================================================
+
+test_that("garbled p-value 'p < 0.645' is flagged as extraction_suspect", {
+  res <- check_text("t(50) = 2.00, p < .645")
+  expect_equal(nrow(res), 1)
+  expect_true(res$extraction_suspect[1])
+  expect_true(grepl("extraction artifact", res$uncertainty_reasons[1]))
+})
+
+test_that("legitimate 'p < .05' is NOT flagged as garbled", {
+  res <- check_text("t(50) = 2.00, p < .05")
+  expect_equal(nrow(res), 1)
+  expect_false(res$extraction_suspect[1])
+})
+
+test_that("legitimate 'p < .001' is NOT flagged as garbled", {
+  res <- check_text("t(50) = 2.00, p < .001")
+  expect_equal(nrow(res), 1)
+  expect_false(res$extraction_suspect[1])
+})
