@@ -17,7 +17,8 @@ compute_and_compare_one(
   cross_type_action = "NOTE",
   ci_affects_status = TRUE,
   plausibility_filter = TRUE,
-  sign_sensitive = FALSE
+  sign_sensitive = FALSE,
+  method_context_action = "NOTE"
 )
 }
 \arguments{
@@ -46,6 +47,8 @@ compute_and_compare_one(
 \item{plausibility_filter}{Whether to apply plausibility bounds filter (default TRUE)}
 
 \item{sign_sensitive}{Whether sign differences affect status (default FALSE)}
+
+\item{method_context_action}{Action when method context detected in chunk ("NOTE", "WARN", "SKIP")}
 }
 \value{
 A tibble with comparison results

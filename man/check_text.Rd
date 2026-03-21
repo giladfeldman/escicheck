@@ -23,7 +23,9 @@ check_text(
   cross_type_action = "NOTE",
   ci_affects_status = TRUE,
   plausibility_filter = TRUE,
-  sign_sensitive = FALSE
+  sign_sensitive = FALSE,
+  method_context_action = "NOTE",
+  min_confidence = 0L
 )
 }
 \arguments{
@@ -64,6 +66,10 @@ check_text(
 \item{plausibility_filter}{Whether to apply plausibility bounds filter (default TRUE)}
 
 \item{sign_sensitive}{Whether sign differences affect status (default FALSE)}
+
+\item{method_context_action}{Action when method context detected in chunk ("NOTE", "WARN", or "SKIP"; default "NOTE")}
+
+\item{min_confidence}{Minimum confidence score (0-10) for results to be included in output (default 0)}
 }
 \value{
 An effectcheck S3 object with consistency check results

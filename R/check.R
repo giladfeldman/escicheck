@@ -2828,6 +2828,8 @@ compute_and_compare_one <- function(row,
 #' @param ci_affects_status Whether CI mismatches affect status (default TRUE)
 #' @param plausibility_filter Whether to apply plausibility bounds filter (default TRUE)
 #' @param sign_sensitive Whether sign differences affect status (default FALSE)
+#' @param method_context_action Action when method context detected in chunk ("NOTE", "WARN", or "SKIP"; default "NOTE")
+#' @param min_confidence Minimum confidence score (0-10) for results to be included in output (default 0)
 #' @return An effectcheck S3 object with consistency check results
 #' @export
 #' @examples
