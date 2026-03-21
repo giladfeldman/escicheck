@@ -45,7 +45,7 @@ EXTREME_DELTA_THRESHOLD <- 1.0
 
 # Plausibility Bounds — effect sizes above these are flagged as likely extraction errors
 EFFECT_PLAUSIBILITY <- list(
-    d = 10, g = 10, dz = 10, dav = 10, drm = 10,
+    d = 5, g = 5, dz = 5, dav = 5, drm = 5,
     r = 1, phi = 1, V = 1,
     eta2 = 1, etap2 = 1, omega2 = 1,
     cohens_f = 10, f2 = 100,

@@ -238,6 +238,15 @@ normalize_text <- function(x) {
   # them from being captured as p-values when joined across line breaks
   x <- gsub("(^|\\n)([ \\t]*)\\d+(\\.\\d+)+\\.?[ \\t]+", "\\1\\2", x, perl = TRUE)
 
+  # General line-break joining for statistical expressions (v0.2.5)
+  # When a line ends with = < > and the next line starts with a digit or minus,
+  # join them. This catches edge cases that the stat-specific patterns below miss.
+  # E.g., "F(1, 30) =\n4.425" -> "F(1, 30) = 4.425"
+  x <- gsub("([=<>])\\s*\\n\\s*([-+]?[.\\d])", "\\1 \\2", x, perl = TRUE)
+  # Join lines where ( is followed by a line break then a digit (df broken at line break)
+  # E.g., "F(\n1, 30)" -> "F(1, 30)"
+  x <- gsub("\\(\\s*\\n\\s*(\\d)", "(\\1", x, perl = TRUE)
+
   # Fix line breaks in the middle of statistics
   # Pattern: "p = " or "p<" or "p>" followed by newline and optional text, then a number
   # This fixes cases like "p = \n0.837" or "p = on social distance\n0.837" -> "p = 0.837"
@@ -270,6 +279,30 @@ normalize_text <- function(x) {
   # General mid-sentence line-break joining (lowercase to lowercase across newlines)
   # Runs after stat-specific joins so those get priority
   x <- gsub("([a-z,;])\\s*\\n\\s*([a-z])", "\\1 \\2", x, perl = TRUE)
+
+  # ============================================================================
+  # Dropped decimal fixes (v0.2.5)
+  # PDF extraction sometimes drops the leading "0." from decimal values at page
+  # boundaries, producing e.g. "p = 484" instead of "p = .484"
+  # ============================================================================
+
+  # Fix "p < 001" -> "p < .001" (missing dot before 001)
+  # This is always an artifact — "001" is never a valid p-value representation
+  x <- gsub("(p\\s*<\\s*)001\\b", "\\1.001", x, perl = TRUE)
+
+  # Fix "p = NNN" where NNN has 3+ digits -> "p = .NNN"
+  # Valid p-values are in [0,1], so any integer >= 100 is always a dropped decimal.
+  # Requires trailing whitespace or punctuation to avoid matching mid-number.
+  # Flag: adds [decimal_corrected] marker for downstream tracking
+  x <- gsub("(p\\s*=\\s*)(\\d{3,})(\\s|,|;|$)", "\\1.\\2\\3 [decimal_corrected]", x, perl = TRUE)
+
+  # Remove standalone page numbers (lines containing only 1-3 digits)
+  # These are page numbers from PDF extraction, never meaningful statistical content
+  lines_split <- strsplit(x, "\n", fixed = TRUE)
+  lines_split <- lapply(lines_split, function(ll) {
+    ll[!grepl("^\\s*\\d{1,3}\\s*$", ll)]
+  })
+  x <- vapply(lines_split, function(ll) paste(ll, collapse = "\n"), character(1))
 
   # Fix ligature issues (common in PDFs) - simple replacements
   # ff, fi, fl, ffi, ffl ligatures
@@ -358,9 +391,11 @@ parse_text <- function(text, context_window_size = 2) {
       p_symbol = character(0),
       p_valid = logical(0),
       p_out_of_range = logical(0),
+      p_decimal_corrected = logical(0),
       one_tailed_detected = logical(0),
       two_tailed_detected = logical(0),
       method_context_detected = logical(0),
+      method_context_in_chunk = logical(0),
       N = numeric(0),
       N_source = character(0),
       N_candidates_str = character(0),
@@ -461,9 +496,11 @@ parse_text <- function(text, context_window_size = 2) {
       p_symbol = character(0),
       p_valid = logical(0),
       p_out_of_range = logical(0),
+      p_decimal_corrected = logical(0),
       one_tailed_detected = logical(0),
       two_tailed_detected = logical(0),
       method_context_detected = logical(0),
+      method_context_in_chunk = logical(0),
       N = numeric(0),
       N_source = character(0),
       N_candidates_str = character(0),
@@ -615,6 +652,12 @@ parse_text <- function(text, context_window_size = 2) {
     s <- chunks[[i]]
     context <- extract_context(chunks, i, context_window_size)
 
+    # Detect and strip [decimal_corrected] marker (v0.2.5)
+    # This marker was inserted by normalize_text() when a dropped decimal in
+    # a p-value was corrected (e.g., "p = 484" -> "p = .484 [decimal_corrected]")
+    p_decimal_corrected <- grepl("\\[decimal_corrected\\]", s, perl = TRUE)
+    s <- gsub("\\s*\\[decimal_corrected\\]", "", s, perl = TRUE)
+
     # Match test statistics
     m_t <- stringr::str_match(s, pat_t)
     m_t_nodf <- stringr::str_match(s, pat_t_nodf)
@@ -659,10 +702,10 @@ parse_text <- function(text, context_window_size = 2) {
     if (two_tailed_detected) one_tailed_detected <- FALSE
 
     # Detect methodological context (p-curve, equivalence test, etc.)
-    method_context_detected <- grepl(
-      "\\b(?:p[- ]?curve|equivalence test|TOST|power analysis|simulation|meta-analy|sensitivity analy|bootstrap|applet)\\b",
-      paste(s, context), ignore.case = TRUE, perl = TRUE
-    )
+    # v0.2.4: Separate in-chunk (high confidence) vs nearby (lower confidence) detection
+    method_kw <- "\\b(?:p[- ]?curve|equivalence test|TOST|power analysis|simulation|meta-analy|sensitivity analy|bootstrap|applet|sample size calculation|a priori power|post[- ]?hoc power)\\b"
+    method_context_in_chunk <- grepl(method_kw, s, ignore.case = TRUE, perl = TRUE)
+    method_context_detected <- grepl(method_kw, paste(s, context), ignore.case = TRUE, perl = TRUE)
 
     # Enhanced N extraction with extended context and global fallback (Phase 2C)
     # Priority: local context > extended context > global
@@ -954,6 +997,44 @@ parse_text <- function(text, context_window_size = 2) {
       effect_fallback <- TRUE # NEW: Flag this as fallback match for uncertainty tracking
     }
 
+    # ========================================================================
+    # PARSE-TIME PLAUSIBILITY GUARD (v0.2.4)
+    # Reject mathematically impossible or highly implausible effect sizes
+    # before they enter the pipeline. This prevents false ERRORs from
+    # garbled PDF extractions like R2=52.2, V=173.5, d=8.
+    # ========================================================================
+    if (!is.na(effect_reported) && !is.na(effect_name)) {
+      # Hard-bounded effect sizes: reject values outside mathematical bounds [0, 1]
+      bounded_at_one <- c("R2", "r", "phi", "V", "eta2", "etap2", "omega2",
+                          "rank_biserial_r", "cliffs_delta", "epsilon_squared", "kendalls_W")
+      if (effect_name %in% bounded_at_one && abs(effect_reported) > 1.0) {
+        effect_name <- NA_character_
+        effect_reported <- NA_real_
+      }
+
+      # Round-integer d/g > 2 without decimal point: likely "Study 1", "d = 8 ms", etc.
+      # Reject if abs > 5 regardless; if 2 < abs <= 5, reject only with spurious context
+      if (!is.na(effect_reported) && !is.na(effect_name) &&
+          effect_name %in% c("d", "g") &&
+          effect_reported == floor(effect_reported) && abs(effect_reported) > 2) {
+        if (abs(effect_reported) > 5) {
+          # d=6, d=8, d=24 etc. — virtually never a real effect size
+          effect_name <- NA_character_
+          effect_reported <- NA_real_
+        } else {
+          # d=3, d=4, d=5 — check context for spurious patterns
+          context_lower <- tolower(s)
+          spurious <- c("study\\s+\\d", "experiment\\s+\\d", "table\\s+\\d",
+                        "figure\\s+\\d", "\\bms\\b", "\\bsec\\b", "\\bmin\\b",
+                        "\\bday", "\\bhour", "\\byear", "condition\\s+\\d")
+          if (any(sapply(spurious, function(p) grepl(p, context_lower, perl = TRUE)))) {
+            effect_name <- NA_character_
+            effect_reported <- NA_real_
+          }
+        }
+      }
+    }
+
     # Validate effect size is appropriate for test type (DEPRECATED: let check.R handle it)
     # Cohen's f, eta2, etap2, omega2 are for F-tests/ANOVA only, not t-tests
 
@@ -1050,10 +1131,12 @@ parse_text <- function(text, context_window_size = 2) {
         p_char <- if (!all(is.na(m_p))) m_p[3] else NA_character_
         !is.na(p_char) && is.na(p_reported)
       },
+      p_decimal_corrected = p_decimal_corrected,
       p_ns = p_ns_flag,
       one_tailed_detected = one_tailed_detected,
       two_tailed_detected = two_tailed_detected,
       method_context_detected = method_context_detected,
+      method_context_in_chunk = method_context_in_chunk,
       N = N_value, # From enhanced extraction above
       N_source = N_source, # NEW: Track where N came from
       N_candidates_str = if (length(N_candidates) > 1) paste(N_candidates, collapse = ";") else NA_character_,
@@ -1091,9 +1174,11 @@ parse_text <- function(text, context_window_size = 2) {
       p_symbol = character(0),
       p_valid = logical(0),
       p_out_of_range = logical(0),
+      p_decimal_corrected = logical(0),
       one_tailed_detected = logical(0),
       two_tailed_detected = logical(0),
       method_context_detected = logical(0),
+      method_context_in_chunk = logical(0),
       N = numeric(0),
       N_source = character(0),
       N_candidates_str = character(0),

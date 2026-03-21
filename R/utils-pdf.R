@@ -1,6 +1,39 @@
 # PDF Processing Utilities
 # Functions for extracting text, tables, and OCR from PDFs
 
+#' Strip repeated headers and footers from PDF text
+#'
+#' Detects lines that appear 5+ times in the text (likely headers/footers
+#' from page boundaries) and removes them. Only targets lines between 15-120
+#' characters to avoid removing common short phrases or long paragraphs.
+#'
+#' @param text Character string of PDF text with newlines
+#' @param min_occurrences Minimum times a line must appear to be considered header/footer (default 5)
+#' @param min_chars Minimum character count for a line to be considered (default 15)
+#' @param max_chars Maximum character count for a line to be considered (default 120)
+#' @return Character string with headers/footers removed
+#' @keywords internal
+strip_headers_footers <- function(text, min_occurrences = 5, min_chars = 15, max_chars = 120) {
+  lines <- strsplit(text, "\n", fixed = TRUE)[[1]]
+  trimmed <- trimws(lines)
+
+  # Count frequency of each non-empty trimmed line
+  non_empty <- trimmed[nchar(trimmed) > 0]
+  if (length(non_empty) == 0) return(text)
+
+  freq <- table(non_empty)
+
+  # Identify repeated lines within the character length bounds
+  repeated <- names(freq[freq >= min_occurrences])
+  headers <- repeated[nchar(repeated) >= min_chars & nchar(repeated) <= max_chars]
+
+  if (length(headers) == 0) return(text)
+
+  # Remove matching lines
+  keep <- !trimmed %in% headers
+  paste(lines[keep], collapse = "\n")
+}
+
 #' Extract text from PDF using pdftotext
 #'
 #' Uses the pdftotext command-line tool (from poppler-utils) which correctly
@@ -57,6 +90,10 @@ extract_pdf_text_robust <- function(pdf_path, suppress_warnings = TRUE) {
   text <- readLines(temp_txt, warn = FALSE, encoding = "UTF-8")
   text_combined <- paste(text, collapse = "\n")
   text_combined <- ensure_utf8(text_combined)
+
+  # Strip repeated headers/footers (e.g., "Downloaded from journal.org on Jan 1, 2024")
+  # These cause page numbers and other artifacts to merge with statistical expressions
+  text_combined <- strip_headers_footers(text_combined)
 
   if (nchar(trimws(text_combined)) == 0) {
     stop(

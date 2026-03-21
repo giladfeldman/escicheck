@@ -1,3 +1,177 @@
+# effectcheck 0.2.5
+
+## PDF extraction quality improvements
+
+Based on MetaESCI extraction analysis of 121,040 results from 8,415 PDFs across 7 journals.
+These changes reduce PDF extraction artifacts affecting statistical parsing from ~6.5% to ~0.6%.
+
+### Header/footer stripping (utils-pdf.R)
+
+* New `strip_headers_footers()` function removes repeated lines (5+ occurrences, 15-120 chars)
+  from pdftotext output. Fixes page-number-appended-to-p-value artifacts.
+
+### Dropped decimal recovery (parse.R)
+
+* `p < 001` now corrected to `p < .001` during normalization.
+* `p = NNN` where NNN has 3+ digits (e.g., `p = 484`) corrected to `p = .NNN` (e.g., `p = .484`).
+  Flagged as `extraction_suspect` with assumption note in `uncertainty_reasons`.
+* New `p_decimal_corrected` column in parsed output tracks which p-values were corrected.
+
+### General line-break joining (parse.R)
+
+* Lines ending with `=`, `<`, or `>` followed by a digit on the next line are now joined.
+  Catches edge cases like `F(1, 30) =\n4.425` that existing stat-specific patterns missed.
+* Lines where `(` is followed by a line break then a digit are joined (broken df).
+
+### Standalone page number removal (parse.R)
+
+* Lines containing only 1-3 digits are removed during normalization (page numbers).
+
+### Computation-guided decimal recovery (check.R — Phase 5B)
+
+* When `extraction_suspect` is triggered by an extreme delta, the pipeline now tries all
+  possible decimal placements of the reported effect size (e.g., 615 → 61.5, 6.15, 0.615)
+  and checks if any matches the computed value within tolerance.
+* If a match is found, the effect size is recovered with a `decimal_recovered` flag and
+  detailed assumption note. Status is re-evaluated (may become PASS/WARN).
+* Uses computed values as oracle — self-verifying, zero risk to correct data.
+* Also flags p-values that were decimal-corrected during normalization.
+
+### New columns
+
+* `decimal_recovered`: TRUE when Phase 5B successfully recovered a dropped decimal
+* `p_decimal_corrected` (parse output): TRUE when normalization corrected a dropped decimal in p-value
+
+### Tests
+
+* 39 new extraction quality tests in `test-extraction-quality.R`
+* 878 total tests passing (0 failures)
+
+# effectcheck 0.2.4
+
+## Validation-driven improvements
+
+Based on comprehensive validation of 19,690 results across 7 journals (MetaESCI).
+
+### Bug fixes (Category A — 673 results)
+
+* **warn_tiny_delta** (48 results): Decision error no longer upgrades PASS→WARN when
+  effect size match is excellent (delta < 0.5x tolerance) and ambiguity is clear.
+* **method_context_in_result** (527 results, 58 ERRORs): New `method_context_in_chunk`
+  flag distinguishes method keywords IN the stat's sentence vs nearby context. ERROR
+  status capped at NOTE for in-chunk method contexts (power analysis, meta-analysis, etc.).
+* **cross_type_error** (68 results, all ERROR): Phase 5 same-type matching now includes
+  `alternatives` (e.g., g_ind for t-tests). Previously only `computed_variants` were
+  searched, missing valid same-type matches.
+* **effect_not_in_text** (18 results, 15 ERRORs): Parse-time rejection of impossible
+  effect sizes: R2/V/phi/eta2 > 1.0, round-integer d/g > 5.
+* **suspicious_decision_error** (25 results, 4 ERRORs): `effect_test_mismatch` flag
+  now caps ERROR→NOTE for type-incompatible effect sizes (e.g., chi2 with R2=52).
+* **garbled_p_threshold** (4 results): Extended garbled p-value detection to non-inequality
+  p > 0.5 with large computed discrepancy.
+
+### Extraction guards (Category B — 41 PDF extraction artifacts)
+
+* **Computed-side plausibility**: If computed effect size exceeds plausibility bounds
+  (e.g., computed d=13.49 from garbled t-stat), flags `extraction_suspect` and caps
+  ERROR→NOTE.
+* **Stat value plausibility**: Flags |t| > 100 and F > 10000 as possible artifacts.
+* **DF plausibility**: Flags df ≤ 0 or df > 50000 as possible artifacts.
+* **Tightened bounds**: d/g/dz/dav/drm plausibility from 10→5.
+
+### New features
+
+* **Confidence score** (`confidence` column, 0-10 integer): Deterministic quality score
+  aggregating ambiguity level, match type, delta distance from threshold, design
+  inference, and extraction quality.
+* **Result context** (`result_context` column): "study" or "method" classification.
+* **`method_context_action` parameter**: Controls behavior for method-context stats
+  ("NOTE", "WARN", or "SKIP"). Default: "NOTE".
+* **`min_confidence` parameter**: Minimum confidence score for output filtering.
+  Results below threshold are dropped. Default: 0 (no filtering).
+
+# effectcheck 0.2.3
+
+## New features
+
+* **User configuration**: New `cross_type_action`, `ci_affects_status`, and
+  `plausibility_filter` parameters for `check_text()`.
+* **Plausibility bounds**: Implausibly large effect sizes (e.g., d > 10, r > 1)
+  flagged via `extraction_suspect` column. Configurable via `EFFECT_PLAUSIBILITY`
+  in constants.
+* **Effect size families**: OR, RR, IRR, h added to `EFFECT_SIZE_FAMILIES`.
+* **Completeness**: Cohen's f² = r²/(1-r²) for r-tests.
+* **Beginner-friendly UI**: Legend, tooltips, plain English verdicts, narrative
+  report mode in frontend.
+* **Paste-text input**: Direct text input mode in frontend.
+
+## Bug fixes
+
+* Fixed F→t conversion missing Hedges' g variant (`g_ind`).
+* Added `d_ind_min`/`d_ind_max` bounds for F-test conversions.
+* Fixed chi-square inline N parsing and multi-stat sentence handling.
+* Fixed section-number false positives in p-value extraction.
+* Fixed `ns` (non-significant) notation parsing.
+
+## API changes
+
+* Options forwarding in plumber.R via `do.call()`.
+* Summary and version fields included in all API responses.
+
+# effectcheck 0.2.2
+
+## Bug fixes
+
+* **Cross-type matching**: Best match now selected across effect size types,
+  reducing false ERROR rate from 47.6% to ~10%.
+* **Paired N fix**: Paired designs no longer double the sample size incorrectly.
+* **NOTE→PASS**: Results matching within tolerance now correctly report PASS
+  instead of NOTE.
+* **check_type column**: Added to output for transparency in variant matching.
+* **extraction_suspect flag**: Extreme deltas flagged for manual review.
+
+## New features
+
+* **SKIP status**: Extraction-only results (no p-value or effect size to verify)
+  now get status "SKIP" instead of misleading WARN.
+* **Universal tail fallback**: Phase 9 tries both one-tailed and two-tailed
+  when decision error occurs, resolving to NOTE with explanation.
+* **Two-tailed detection**: New `two_tailed_detected` flag overrides one-tailed
+  when both present in text.
+* **Method context detection**: `method_context_detected` flag suppresses
+  decision_error for p-curve, equivalence test, TOST contexts.
+* **N candidates for r-tests**: Multiple N values extracted from context;
+  best match selected with assumption note.
+* **One-tailed scope fix**: `one_tailed_detected` now searches chunk only,
+  preventing cross-chunk bleeding.
+* **Garbled p-value detection**: p-values like p < 0.645 flagged as
+  `extraction_suspect`.
+
+# effectcheck 0.2.1
+
+## Bug fixes
+
+* Fixed thousands-separator N parsing (e.g., N = 1,182 no longer misread as
+  N = 1).
+* Fixed Welch t-test N estimation.
+* Removed officer dependency; DOCX extraction via pandoc only.
+* Fixed DOCX segfault crash.
+
+## Improvements
+
+* Cold start progress indicator for Render free tier.
+* Page-load health check and server status banner for classroom use.
+* Paste-text input mode.
+* Parser robustness: 7 fixes from AI verification testing across 12 journal
+  styles.
+
+## CRAN-related
+
+* Fixed invalid URI, APA spelling, broadened package scope description.
+* Fixed effectcheck namespace refs for shinyapps.io deployment.
+* Removed pdftools dependency.
+* Added development disclaimers throughout package and app.
+
 # effectcheck 0.2.0
 
 ## New features

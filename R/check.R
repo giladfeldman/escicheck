@@ -336,6 +336,7 @@ VARIANT_METADATA <- list(
 #' @param ci_affects_status Whether CI mismatches affect status (default TRUE)
 #' @param plausibility_filter Whether to apply plausibility bounds filter (default TRUE)
 #' @param sign_sensitive Whether sign differences affect status (default FALSE)
+#' @param method_context_action Action when method context detected in chunk ("NOTE", "WARN", "SKIP")
 #' @return A tibble with comparison results
 #' @keywords internal
 compute_and_compare_one <- function(row,
@@ -350,7 +351,8 @@ compute_and_compare_one <- function(row,
                                     cross_type_action = "NOTE",
                                     ci_affects_status = TRUE,
                                     plausibility_filter = TRUE,
-                                    sign_sensitive = FALSE) {
+                                    sign_sensitive = FALSE,
+                                    method_context_action = "NOTE") {
   # ============================================================================
   # PHASE 1: Extract and validate input data
   # ============================================================================
@@ -1662,6 +1664,16 @@ compute_and_compare_one <- function(row,
           same_type_variants[[vname]] <- computed_variants[[vname]]
         }
       }
+
+      # v0.2.4: Also include same-type variants from alternatives
+      # (e.g., g_ind is stored as alternative for t-tests but IS same-type for reported "d")
+      for (vname in names(alternatives)) {
+        base_name <- gsub("_equalN|_min|_max", "", vname)
+        if ((base_name %in% valid_variants || vname %in% valid_variants) &&
+            !(vname %in% names(same_type_variants))) {
+          same_type_variants[[vname]] <- alternatives[[vname]]
+        }
+      }
     } else {
       # Unknown type - use all computed variants
       same_type_variants <- computed_variants
@@ -1918,6 +1930,152 @@ compute_and_compare_one <- function(row,
               p_reported))
   }
 
+  # v0.2.4: non-inequality p > 0.5 with large computed discrepancy
+  # (p_computed checked later in Phase 9B after it's been set)
+
+  # Computed-side plausibility (v0.2.4): if the COMPUTED effect size is implausible,
+  # the test statistic or df was likely garbled by PDF extraction
+  if (plausibility_filter && !is.na(matched_value) && !is.na(canonical_type)) {
+    computed_bound <- EFFECT_PLAUSIBILITY[[canonical_type]]
+    if (!is.null(computed_bound) && abs(matched_value) > computed_bound) {
+      extraction_suspect <- TRUE
+      uncertainty <- c(uncertainty,
+        sprintf("Computed effect size |%s| = %.2f exceeds plausibility bound (%.1f) \u2014 likely garbled test statistic or df",
+                matched_variant, abs(matched_value), computed_bound))
+      if (status == "ERROR") status <- "NOTE"
+    }
+  }
+
+  # Stat value plausibility (v0.2.4): flag extremely large test statistics
+  if (!is.na(stat)) {
+    if (tt == "t" && abs(stat) > 100) {
+      extraction_suspect <- TRUE
+      uncertainty <- c(uncertainty,
+        sprintf("Test statistic |t| = %.1f is unusually large \u2014 possible extraction artifact", abs(stat)))
+    }
+    if (tt == "F" && stat > 10000) {
+      extraction_suspect <- TRUE
+      uncertainty <- c(uncertainty,
+        sprintf("Test statistic F = %.1f is unusually large \u2014 possible extraction artifact", stat))
+    }
+  }
+
+  # DF plausibility (v0.2.4): flag zero, negative, or impossibly large df
+  if (!is.na(df1) && (df1 <= 0 || df1 > 50000)) {
+    extraction_suspect <- TRUE
+    uncertainty <- c(uncertainty,
+      sprintf("Degrees of freedom df1 = %.0f appears implausible \u2014 possible extraction artifact", df1))
+  }
+
+  # ============================================================================
+  # PHASE 5B: Computation-guided decimal recovery (v0.2.5)
+  # When extraction_suspect is TRUE and a large delta or plausibility violation
+  # was detected, try all possible decimal placements of the reported value
+  # and check if any matches the computed value. This uses the computation
+  # pipeline as an oracle to unambiguously recover dropped decimals.
+  # ============================================================================
+  decimal_recovered <- FALSE
+
+  # 5B-1: Effect size decimal recovery
+  # Only attempt when we have a computed value to compare against AND the
+  # reported effect size triggered a plausibility or extreme delta flag
+  if (extraction_suspect && !is.na(effect_reported) && !is.na(matched_value) &&
+      !is.na(delta_effect_abs) && delta_effect_abs > EXTREME_DELTA_THRESHOLD) {
+    original_effect <- effect_reported
+    # Generate decimal candidates by dividing by powers of 10
+    # e.g., 615 -> c(61.5, 6.15, 0.615, 0.0615)
+    candidates <- abs(original_effect) / (10^(1:4))
+    # Preserve sign
+    if (original_effect < 0) candidates <- -candidates
+
+    best_candidate <- NA_real_
+    best_delta <- Inf
+    best_variant <- NA_character_
+
+    for (cand in candidates) {
+      # Compare candidate against all same-type computed variants
+      for (vname in names(same_type_variants)) {
+        vval <- same_type_variants[[vname]]$value
+        if (!is.null(vval) && !is.na(vval)) {
+          d <- abs(abs(cand) - abs(vval))
+          if (d < best_delta) {
+            best_delta <- d
+            best_candidate <- cand
+            best_variant <- vname
+          }
+        }
+      }
+      # Also try computed_variants (cross-type fallback)
+      for (vname in names(computed_variants)) {
+        vval <- computed_variants[[vname]]$value
+        if (!is.null(vval) && !is.na(vval)) {
+          d <- abs(abs(cand) - abs(vval))
+          if (d < best_delta) {
+            best_delta <- d
+            best_candidate <- cand
+            best_variant <- vname
+          }
+        }
+      }
+    }
+
+    # Accept recovery if the best candidate matches within tolerance
+    if (!is.null(tol_eff) && best_delta <= tol_eff * 3 && !is.na(best_candidate)) {
+      effect_reported <- best_candidate
+      matched_value <- if (best_variant %in% names(same_type_variants)) {
+        same_type_variants[[best_variant]]$value
+      } else if (best_variant %in% names(computed_variants)) {
+        computed_variants[[best_variant]]$value
+      } else matched_value
+      matched_variant <- best_variant
+      delta_effect_abs <- best_delta
+      decimal_recovered <- TRUE
+
+      # Re-evaluate status with corrected value
+      if (delta_effect_abs <= tol_eff) {
+        status <- "PASS"
+      } else if (delta_effect_abs <= 3 * tol_eff) {
+        status <- "WARN"
+      }
+      # Keep extraction_suspect TRUE — the correction is still flagged
+      uncertainty <- c(uncertainty,
+        sprintf("Decimal recovery: reported %s = %.2f likely %s = %.4f (matches computed %s = %.4f, delta = %.4f)",
+                effect_reported_name, original_effect,
+                effect_reported_name, effect_reported,
+                best_variant, matched_value, delta_effect_abs))
+    }
+  }
+
+  # 5B-2: P-value decimal recovery
+  # When p_decimal_corrected flag was set by normalize_text(), add assumption note
+  if ("p_decimal_corrected" %in% names(row) && isTRUE(row$p_decimal_corrected[1])) {
+    uncertainty <- c(uncertainty,
+      "P-value decimal corrected: original text had dropped decimal (e.g., 'p = 484' corrected to 'p = .484')")
+    extraction_suspect <- TRUE
+  }
+
+  # Type-incompatible effect sizes (v0.2.4): when the reported effect size type
+  # is incompatible with the test statistic type, cap at NOTE
+  if (effect_test_mismatch && status == "ERROR") {
+    status <- "NOTE"
+    extraction_suspect <- TRUE
+    uncertainty <- c(uncertainty,
+      "Status capped at NOTE: reported effect size type is incompatible with test statistic type")
+  }
+
+  # Method context status cap (v0.2.4): when method keyword is IN the chunk
+  # (not just nearby), the stat is likely from a power analysis, meta-analysis, etc.
+  # Cap status at method_context_action to avoid false ERRORs.
+  method_in_chunk <- if ("method_context_in_chunk" %in% names(row) &&
+                          length(row$method_context_in_chunk) > 0)
+    isTRUE(row$method_context_in_chunk[1]) else FALSE
+
+  if (method_in_chunk && status == "ERROR") {
+    status <- method_context_action
+    uncertainty <- c(uncertainty,
+      "Status capped: statistic appears within methodological context (power analysis, meta-analysis, etc.)")
+  }
+
   # ============================================================================
   # PHASE 8: Design inference
   # ============================================================================
@@ -2153,9 +2311,20 @@ compute_and_compare_one <- function(row,
           )
         )
       }
-      if (status == "PASS") status <- "WARN"
-      if (status == "OK") status <- "WARN"
-      if (status == "NOTE") status <- "WARN"
+      # v0.2.4: When effect size match is excellent (< 0.5x tolerance) AND
+      # ambiguity is clear, keep PASS — the p-value discrepancy is likely
+      # rounding, not a genuine inconsistency.
+      has_strong_effect_match <- !is.na(delta_effect_abs) && !is.na(tol_eff) &&
+        delta_effect_abs < (0.5 * tol_eff) && ambiguity_level == "clear"
+
+      if (has_strong_effect_match) {
+        uncertainty <- c(uncertainty,
+          "Decision error detected but effect size match is excellent (delta < 0.5x tolerance) \u2014 p-value discrepancy likely rounding")
+      } else {
+        if (status == "PASS") status <- "WARN"
+        if (status == "OK") status <- "WARN"
+        if (status == "NOTE") status <- "WARN"
+      }
     }
   }
 
@@ -2250,6 +2419,14 @@ compute_and_compare_one <- function(row,
     status <- "SKIP"
   }
 
+  # v0.2.4: non-inequality p > 0.5 with large computed discrepancy
+  if (!p_is_inequality && !is.na(p_reported) && p_reported > 0.5 &&
+      !is.na(p_computed) && abs(p_reported - p_computed) > 0.3) {
+    extraction_suspect <- TRUE
+    uncertainty <- c(uncertainty,
+      "Reported p-value > 0.5 with large computed discrepancy \u2014 possible extraction artifact")
+  }
+
   # ============================================================================
   # PHASE 10: Build variants_tested string and all_variants structure
   # ============================================================================
@@ -2314,6 +2491,47 @@ compute_and_compare_one <- function(row,
   } else if (length(uncertainty) >= 1 && uncertainty_level == "low") {
     uncertainty_level <- "medium"
   }
+
+  # ============================================================================
+  # PHASE 11B: Deterministic confidence score (v0.2.4)
+  # Aggregates observable quality signals into a 0-10 integer score.
+  # ============================================================================
+
+  confidence <- 5L  # baseline
+
+  # Ambiguity level
+  if (ambiguity_level == "clear") confidence <- confidence + 3L
+  else if (ambiguity_level == "ambiguous") confidence <- confidence - 1L
+  else confidence <- confidence - 3L  # highly_ambiguous
+
+  # Same-type vs cross-type
+  if (length(same_type_variants) > 0) confidence <- confidence + 1L
+  else confidence <- confidence - 2L
+
+  # Delta quality
+  if (!is.na(delta_effect_abs) && !is.na(tol_eff)) {
+    if (delta_effect_abs < tol_eff * 0.25) confidence <- confidence + 1L
+    else if (delta_effect_abs > tol_eff * 5) confidence <- confidence + 1L
+    else if (delta_effect_abs > tol_eff * 0.8 && delta_effect_abs < tol_eff * 3)
+      confidence <- confidence - 1L
+  }
+
+  # Design inference (t-tests)
+  if (tt == "t") {
+    if (design_inferred %in% c("independent", "paired") && ambiguity_level == "clear")
+      confidence <- confidence + 1L
+    else if (design_inferred %in% c("ambiguous", "unclear"))
+      confidence <- confidence - 1L
+  }
+
+  # Extraction quality signals
+  if (extraction_suspect) confidence <- confidence - 2L
+  if (!is.na(row$raw_text[1]) && nchar(row$raw_text[1]) < 20) confidence <- confidence - 1L
+
+  # Method context penalty
+  if (method_in_chunk) confidence <- confidence - 1L
+
+  confidence <- max(0L, min(10L, as.integer(confidence)))
 
   # ============================================================================
   # PHASE 12: Assemble output tibble
@@ -2569,6 +2787,9 @@ compute_and_compare_one <- function(row,
     status = status,
     check_type = check_type,
     extraction_suspect = extraction_suspect,
+    decimal_recovered = decimal_recovered,
+    result_context = if (method_in_chunk) "method" else "study",
+    confidence = confidence,
     design_ambiguous = (ambiguity_level != "clear"),
     sign_mismatch = if (!is.na(effect_reported) && !is.na(matched_value) &&
                         effect_reported != 0 && matched_value != 0)
@@ -2631,7 +2852,9 @@ check_text <- function(text,
                        cross_type_action = "NOTE",
                        ci_affects_status = TRUE,
                        plausibility_filter = TRUE,
-                       sign_sensitive = FALSE) {
+                       sign_sensitive = FALSE,
+                       method_context_action = "NOTE",
+                       min_confidence = 0L) {
   # Resource Limit Check: Text Length
   if (sum(nchar(text)) > max_text_length) {
     stop("Text too long. Maximum total length: ", max_text_length, " characters")
@@ -2655,7 +2878,9 @@ check_text <- function(text,
     cross_type_action = cross_type_action,
     ci_affects_status = ci_affects_status,
     plausibility_filter = plausibility_filter,
-    sign_sensitive = sign_sensitive
+    sign_sensitive = sign_sensitive,
+    method_context_action = method_context_action,
+    min_confidence = min_confidence
   )
 
   parsed <- parse_text(text)
@@ -2704,7 +2929,8 @@ check_text <- function(text,
           cross_type_action = cross_type_action,
           ci_affects_status = ci_affects_status,
           plausibility_filter = plausibility_filter,
-          sign_sensitive = sign_sensitive
+          sign_sensitive = sign_sensitive,
+          method_context_action = method_context_action
         )
       },
       error = function(e) {
@@ -2740,6 +2966,9 @@ check_text <- function(text,
           status = "ERROR",
           check_type = NA_character_,
           extraction_suspect = FALSE,
+          decimal_recovered = FALSE,
+          result_context = "study",
+          confidence = 0L,
           design_inferred = "unclear",
           variants_tested = "",
           uncertainty_level = "high",
@@ -2779,6 +3008,11 @@ check_text <- function(text,
 
   res$status[res$insufficient_data & (is.na(res$status) | res$status == "")] <- "INSUFFICIENT_DATA"
   res$source <- "text"
+
+  # v0.2.4: min_confidence filter
+  if (min_confidence > 0 && "confidence" %in% names(res)) {
+    res <- res[is.na(res$confidence) | res$confidence >= min_confidence, ]
+  }
 
   new_effectcheck(res, call = match.call(), settings = settings)
 }

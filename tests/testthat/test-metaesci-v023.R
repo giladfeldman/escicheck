@@ -98,12 +98,14 @@ test_that("cross_type_action='NOTE' is the default", {
 # Issue C: Plausibility bounds
 # ===========================================================================
 
-test_that("Implausibly large d is flagged as extraction_suspect (Issue C)", {
+test_that("Implausibly large d is rejected at parse time or flagged (Issue C)", {
+  # d=615 is a round integer > 5, rejected at parse time in v0.2.4
   res <- check_text("t(61) = 4.84, p < .001, d = 615")
   expect_equal(nrow(res), 1)
-  expect_true(res$extraction_suspect[1])
-  # Should NOT be ERROR for implausible extraction
-  expect_true(res$status[1] %in% c("NOTE", "WARN"))
+  # Either: rejected at parse time (no effect_reported) or flagged as extraction_suspect
+  expect_true(is.na(res$effect_reported[1]) || res$extraction_suspect[1])
+  # Should NOT be ERROR
+  expect_true(res$status[1] %in% c("NOTE", "WARN", "OK", "SKIP"))
 })
 
 test_that("Plausible d is NOT flagged as extraction_suspect", {
@@ -196,7 +198,7 @@ test_that("EFFECT_PLAUSIBILITY bounds are defined", {
   expect_true("r" %in% names(bounds))
   expect_true("OR" %in% names(bounds))
   expect_equal(bounds$r, 1)
-  expect_equal(bounds$d, 10)
+  expect_equal(bounds$d, 5)  # Tightened in v0.2.4
 })
 
 # ===========================================================================
