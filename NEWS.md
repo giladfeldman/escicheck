@@ -1,3 +1,35 @@
+# effectcheck 0.2.6
+
+## Design ambiguity + decision error fixes
+
+Based on MetaESCI analysis of 132,499 results from 8,415 articles. These changes
+reduce the ERROR false positive rate from ~3.9% to ~0.8%.
+
+### Design-ambiguous t-test downgrade (check.R)
+
+* New `design_ambiguous_action` parameter (default `"WARN"`). When a t-test or
+  F(1,df) effect size ERROR occurs with ambiguous variant matching, the status is
+  downgraded to WARN with confidence capped at 4. This reflects the known
+  limitation that d computed from t-statistics systematically differs from d
+  computed from raw data (means/SDs).
+
+### Decision error requires reported p-value (check.R)
+
+* Decision errors now require an explicitly reported p-value. Without one, there
+  is no author's significance decision to check. Fixes false decision errors for
+  regression z-statistics from coefficient tables and other extraction-only results.
+
+### r-test global N guard (check.R)
+
+* Decision errors suppressed for r-tests when sample size was inferred from global
+  text (`N_source == "global_text"`). The globally-inferred N may not apply to
+  this specific correlation (e.g., subgroup analysis).
+
+### API changes
+
+* New parameter: `design_ambiguous_action` (forwarded via plumber.R)
+* Fixed: `method_context_action` was missing from plumber.R option map
+
 # effectcheck 0.2.5
 
 ## PDF extraction quality improvements

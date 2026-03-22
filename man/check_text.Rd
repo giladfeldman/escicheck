@@ -25,6 +25,7 @@ check_text(
   plausibility_filter = TRUE,
   sign_sensitive = FALSE,
   method_context_action = "NOTE",
+  design_ambiguous_action = "WARN",
   min_confidence = 0L
 )
 }
@@ -68,6 +69,8 @@ check_text(
 \item{sign_sensitive}{Whether sign differences affect status (default FALSE)}
 
 \item{method_context_action}{Action when method context detected in chunk ("NOTE", "WARN", or "SKIP"; default "NOTE")}
+
+\item{design_ambiguous_action}{Action when design-ambiguous t-test (or F(1,df)) effect size ERROR occurs ("WARN", "NOTE", or "ERROR"; default "WARN")}
 
 \item{min_confidence}{Minimum confidence score (0-10) for results to be included in output (default 0)}
 }

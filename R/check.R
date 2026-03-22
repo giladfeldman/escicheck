@@ -337,6 +337,7 @@ VARIANT_METADATA <- list(
 #' @param plausibility_filter Whether to apply plausibility bounds filter (default TRUE)
 #' @param sign_sensitive Whether sign differences affect status (default FALSE)
 #' @param method_context_action Action when method context detected in chunk ("NOTE", "WARN", "SKIP")
+#' @param design_ambiguous_action Action when design-ambiguous t-test (or F(1,df)) effect size ERROR occurs ("WARN", "NOTE", or "ERROR"; default "WARN")
 #' @return A tibble with comparison results
 #' @keywords internal
 compute_and_compare_one <- function(row,
@@ -352,7 +353,8 @@ compute_and_compare_one <- function(row,
                                     ci_affects_status = TRUE,
                                     plausibility_filter = TRUE,
                                     sign_sensitive = FALSE,
-                                    method_context_action = "NOTE") {
+                                    method_context_action = "NOTE",
+                                    design_ambiguous_action = "WARN") {
   # ============================================================================
   # PHASE 1: Extract and validate input data
   # ============================================================================
@@ -2136,6 +2138,44 @@ compute_and_compare_one <- function(row,
   }
 
   # ============================================================================
+  # PHASE 8B: Design-ambiguous effect size ERROR downgrade (v0.2.6)
+  # When a t-test (or F(1,df)) has ambiguous variant matching and the status is
+  # ERROR from effect size comparison, downgrade to design_ambiguous_action.
+  # Rationale: d-from-t (d = 2t/sqrt(df)) systematically differs from d computed
+  # from raw data (means/SDs) when groups are unequal or different pooling methods
+  # are used. This is a fundamental limitation, not a reporting error.
+  # ============================================================================
+
+  design_ambiguous_downgraded <- FALSE
+
+  if (status == "ERROR" && check_type == "effect_size" && !extraction_suspect) {
+    is_design_ambiguous_t <- (tt == "t" && ambiguity_level == "ambiguous")
+    is_design_ambiguous_F1 <- (tt == "F" && !is.na(df1) && df1 == 1 &&
+                                ambiguity_level == "ambiguous" &&
+                                !is.na(canonical_type) && canonical_type %in% c("d", "g"))
+
+    if (is_design_ambiguous_t || is_design_ambiguous_F1) {
+      status <- design_ambiguous_action
+      design_ambiguous_downgraded <- TRUE
+
+      ratio_text <- if (!is.na(matched_value) && matched_value != 0) {
+        ratio <- abs(effect_reported) / abs(matched_value)
+        sprintf(" (reported is %.0f%% %s than computed)",
+                abs(ratio - 1) * 100,
+                if (ratio > 1) "larger" else "smaller")
+      } else ""
+
+      uncertainty <- c(uncertainty,
+        sprintf(
+          "Design-ambiguous: reported %s=%.3f vs computed %s=%.3f (delta=%.3f)%s. Likely reflects d computation method difference (d from raw data vs d from t-statistic) rather than reporting error",
+          effect_reported_name, effect_reported,
+          matched_variant, matched_value, delta_effect_abs,
+          ratio_text
+        ))
+    }
+  }
+
+  # ============================================================================
   # PHASE 9: P-value and decision error detection
   # ============================================================================
 
@@ -2250,6 +2290,13 @@ compute_and_compare_one <- function(row,
     if (p_inequality_consistent) {
       decision_error <- FALSE
     }
+    # Decision error requires a reported p-value (v0.2.6) — without one,
+    # there is no author's significance decision to check. This prevents false
+    # decision errors for extraction-only results (e.g., regression z-statistics
+    # from coefficient tables where z = 9.47** but no p is reported).
+    if (is.na(p_reported) && decision_error) {
+      decision_error <- FALSE
+    }
 
     # Universal one-tailed/two-tailed fallback:
     # If there's a decision error, try the OTHER tail interpretation
@@ -2290,6 +2337,19 @@ compute_and_compare_one <- function(row,
       decision_error <- FALSE
       uncertainty <- c(uncertainty,
         "Decision error suppressed: statistic appears in methodological context (p-curve, equivalence test, etc.)")
+      if (status == "WARN") status <- "NOTE"
+    }
+
+    # r-test with globally-inferred N: suppress decision_error (v0.2.6)
+    # When N comes from the methods/intro section rather than adjacent text,
+    # it may not apply to this specific correlation (e.g., subgroup analysis).
+    # The p-value discrepancy likely reflects wrong N, not a reporting error.
+    n_source <- if ("N_source" %in% names(row) && length(row$N_source) > 0)
+      as.character(row$N_source[1]) else NA_character_
+    if (tt == "r" && decision_error && !is.na(n_source) && n_source == "global_text") {
+      decision_error <- FALSE
+      uncertainty <- c(uncertainty,
+        "Decision error suppressed: r-test with globally-inferred N (from methods section) \u2014 p-value discrepancy may reflect N applied to different analysis")
       if (status == "WARN") status <- "NOTE"
     }
 
@@ -2523,6 +2583,9 @@ compute_and_compare_one <- function(row,
     else if (design_inferred %in% c("ambiguous", "unclear"))
       confidence <- confidence - 1L
   }
+
+  # Design-ambiguous downgrade confidence cap (v0.2.6)
+  if (design_ambiguous_downgraded) confidence <- min(confidence, 4L)
 
   # Extraction quality signals
   if (extraction_suspect) confidence <- confidence - 2L
@@ -2829,6 +2892,7 @@ compute_and_compare_one <- function(row,
 #' @param plausibility_filter Whether to apply plausibility bounds filter (default TRUE)
 #' @param sign_sensitive Whether sign differences affect status (default FALSE)
 #' @param method_context_action Action when method context detected in chunk ("NOTE", "WARN", or "SKIP"; default "NOTE")
+#' @param design_ambiguous_action Action when design-ambiguous t-test (or F(1,df)) effect size ERROR occurs ("WARN", "NOTE", or "ERROR"; default "WARN")
 #' @param min_confidence Minimum confidence score (0-10) for results to be included in output (default 0)
 #' @return An effectcheck S3 object with consistency check results
 #' @export
@@ -2856,6 +2920,7 @@ check_text <- function(text,
                        plausibility_filter = TRUE,
                        sign_sensitive = FALSE,
                        method_context_action = "NOTE",
+                       design_ambiguous_action = "WARN",
                        min_confidence = 0L) {
   # Resource Limit Check: Text Length
   if (sum(nchar(text)) > max_text_length) {
@@ -2882,6 +2947,7 @@ check_text <- function(text,
     plausibility_filter = plausibility_filter,
     sign_sensitive = sign_sensitive,
     method_context_action = method_context_action,
+    design_ambiguous_action = design_ambiguous_action,
     min_confidence = min_confidence
   )
 
@@ -2932,7 +2998,8 @@ check_text <- function(text,
           ci_affects_status = ci_affects_status,
           plausibility_filter = plausibility_filter,
           sign_sensitive = sign_sensitive,
-          method_context_action = method_context_action
+          method_context_action = method_context_action,
+          design_ambiguous_action = design_ambiguous_action
         )
       },
       error = function(e) {

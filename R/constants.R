@@ -58,6 +58,11 @@ EFFECT_PLAUSIBILITY <- list(
 # Default cross-type action — status when no same-type variant can be computed
 DEFAULT_CROSS_TYPE_ACTION <- "NOTE"
 
+# Default design-ambiguous action — status when t-test (or F(1,df)) effect size
+# ERROR occurs with ambiguous design. d-from-t systematically differs from
+# d-from-raw-data when groups are unequal or different SD pooling is used.
+DEFAULT_DESIGN_AMBIGUOUS_ACTION <- "WARN"
+
 # Resource Limits
 DEFAULT_MAX_TEXT_LENGTH <- 10^7 # 10 MB
 DEFAULT_MAX_STATS_PER_TEXT <- 10000
