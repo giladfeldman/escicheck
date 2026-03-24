@@ -19,8 +19,10 @@ test_that("Ambiguous t-test effect size ERROR downgraded to WARN by default", {
 })
 
 test_that("design_ambiguous_action = ERROR preserves original behavior", {
+  # Also set unknown_groups_action = "ERROR" to prevent Phase 8C from catching it
   res <- check_text("t(100) = 3.45, p < .001, d = 1.20",
-                    design_ambiguous_action = "ERROR")
+                    design_ambiguous_action = "ERROR",
+                    unknown_groups_action = "ERROR")
   expect_true(nrow(res) >= 1)
   if (res$check_type[1] == "effect_size" && !is.na(res$delta_effect[1]) &&
       res$delta_effect[1] > 5 * 0.02) {

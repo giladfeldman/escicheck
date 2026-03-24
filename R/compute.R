@@ -674,6 +674,15 @@ semi_partial_r_from_t <- function(t, df, R2_full = NA_real_, R2_other = NA_real_
 
 # Cohen's f\u00b2 from R\u00b2
 # Formula: f^2 = R^2 / (1 - R^2)
+# Adjusted R-squared from R-squared
+# Formula: R²_adj = 1 - (1-R²)(N-1)/(N-k-1) where k = number of predictors (df1)
+# N estimated from F-test as df1 + df2 + 1
+#' @keywords internal
+adjusted_R2_from_R2 <- function(R2, N, k) {
+  if (any(is.na(c(R2, N, k))) || N <= k + 1 || R2 < 0 || R2 > 1) return(NA_real_)
+  1 - (1 - R2) * (N - 1) / (N - k - 1)
+}
+
 cohens_f2_from_R2 <- function(R2) {
   if (is.na(R2) || R2 < 0 || R2 >= 1) {
     return(NA_real_)
@@ -852,6 +861,15 @@ rank_biserial_r_from_U <- function(U, n1, n2) {
 }
 
 # Rank-biserial r from z-score (approximation)
+# Cohen's d from z-statistic (equal groups assumption)
+# Formula: d = 2z / sqrt(N)
+# Same family as d = 2t/sqrt(df) for large samples where z approximates t
+#' @keywords internal
+d_from_z <- function(z, N) {
+  if (is.na(z) || is.na(N) || N <= 0) return(NA_real_)
+  2 * z / sqrt(N)
+}
+
 rank_biserial_r_from_z <- function(z, N) {
   if (any(is.na(c(z, N))) || N <= 0) {
     return(NA_real_)

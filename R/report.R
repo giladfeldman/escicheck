@@ -174,7 +174,7 @@ generate_report <- function(res, out,
 
   all_cols <- names(res)
   key_cols <- c("location", "test_type", "stat_value", "df1", "df2", "effect_reported_name",
-                "effect_reported", "status", "check_type", "closest_method", "delta_effect_abs",
+                "effect_reported", "status", "check_type", "check_scope", "closest_method", "delta_effect_abs",
                 "p_reported", "p_computed", "extraction_suspect")
   key_cols <- key_cols[key_cols %in% all_cols]
 
@@ -629,7 +629,7 @@ render_report <- function(res, out) {
   # Get all column names dynamically
   all_cols <- names(res)
   key_cols <- c("location", "test_type", "stat_value", "df1", "df2", "effect_reported_name",
-                "effect_reported", "status", "check_type", "uncertainty_level", "closest_method",
+                "effect_reported", "status", "check_type", "check_scope", "uncertainty_level", "closest_method",
                 "delta_effect_abs", "extraction_suspect")
   key_cols <- key_cols[key_cols %in% all_cols]
   

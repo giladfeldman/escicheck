@@ -338,6 +338,7 @@ VARIANT_METADATA <- list(
 #' @param sign_sensitive Whether sign differences affect status (default FALSE)
 #' @param method_context_action Action when method context detected in chunk ("NOTE", "WARN", "SKIP")
 #' @param design_ambiguous_action Action when design-ambiguous t-test (or F(1,df)) effect size ERROR occurs ("WARN", "NOTE", or "ERROR"; default "WARN")
+#' @param unknown_groups_action Action when d/g ERROR occurs with unknown group sizes n1/n2 ("WARN", "NOTE", or "ERROR"; default "WARN")
 #' @return A tibble with comparison results
 #' @keywords internal
 compute_and_compare_one <- function(row,
@@ -354,7 +355,8 @@ compute_and_compare_one <- function(row,
                                     plausibility_filter = TRUE,
                                     sign_sensitive = FALSE,
                                     method_context_action = "NOTE",
-                                    design_ambiguous_action = "WARN") {
+                                    design_ambiguous_action = "WARN",
+                                    unknown_groups_action = "WARN") {
   # ============================================================================
   # PHASE 1: Extract and validate input data
   # ============================================================================
@@ -453,6 +455,8 @@ compute_and_compare_one <- function(row,
     "v" = "V", "cramer's v" = "V", "cramers v" = "V",
     "beta" = "beta", "\u03b2" = "beta", "standardized beta" = "beta",
     "r2" = "R2", "r-squared" = "R2", "r squared" = "R2",
+    "adjusted r2" = "adjusted_R2", "adj. r2" = "adjusted_R2", "r2adj" = "adjusted_R2",
+    "r2_adj" = "adjusted_R2", "adjusted r-squared" = "adjusted_R2",
     "f2" = "f2", "f-squared" = "f2", "f squared" = "f2", "cohen's f2" = "f2",
     "rank_biserial_r" = "rank_biserial_r", "rank biserial r" = "rank_biserial_r",
     "cliffs_delta" = "cliffs_delta", "cliff's delta" = "cliffs_delta",
@@ -844,14 +848,18 @@ compute_and_compare_one <- function(row,
         )
       }
 
-      # Also compute Hedges' g as alternative
+      # Also compute Hedges' g — promote to computed_variants when canonical_type is "g"
       g_ind <- tryCatch(g_ind_from_t(stat, n1, n2), error = function(e) NA_real_)
       if (!is.na(g_ind)) {
-        alternatives$g_ind <- list(
-          value = g_ind,
-          metadata = VARIANT_METADATA$g_ind,
-          why_consider = "Bias-corrected version of d, recommended for small samples (n < 20)"
-        )
+        if (!is.na(canonical_type) && canonical_type == "g") {
+          computed_variants$g_ind <- list(value = g_ind, metadata = VARIANT_METADATA$g_ind)
+        } else {
+          alternatives$g_ind <- list(
+            value = g_ind,
+            metadata = VARIANT_METADATA$g_ind,
+            why_consider = "Bias-corrected version of d, recommended for small samples (n < 20)"
+          )
+        }
       }
 
       # Compute CI for d_ind
@@ -873,14 +881,18 @@ compute_and_compare_one <- function(row,
             )
           }
 
-          # Hedges' g for equal N
+          # Hedges' g for equal N — promote when canonical_type is "g"
           g_ind <- tryCatch(g_ind_from_t(stat, n1_eq, n2_eq), error = function(e) NA_real_)
           if (!is.na(g_ind)) {
-            alternatives$g_ind <- list(
-              value = g_ind,
-              metadata = VARIANT_METADATA$g_ind,
-              why_consider = "Bias-corrected version of d, recommended for small samples"
-            )
+            if (!is.na(canonical_type) && canonical_type == "g") {
+              computed_variants$g_ind <- list(value = g_ind, metadata = VARIANT_METADATA$g_ind)
+            } else {
+              alternatives$g_ind <- list(
+                value = g_ind,
+                metadata = VARIANT_METADATA$g_ind,
+                why_consider = "Bias-corrected version of d, recommended for small samples"
+              )
+            }
           }
 
           # Compute CI for d_ind_equalN
@@ -961,6 +973,65 @@ compute_and_compare_one <- function(row,
           dz_ci <- tryCatch(ci_dz(dz, n_paired, ci_level_used), error = function(e) list(success = FALSE))
           if (dz_ci$success) computed_variants$dz$ci <- dz_ci$bounds
         }
+
+        # v0.2.7: Compute Hedges-corrected paired variants (gz, gav, grm)
+        # gz = dz * J(n-1), gav = dav * J(n-1), grm = drm * J(n-1)
+        # These are declared in EFFECT_SIZE_FAMILIES but were never computed.
+        # Fixes 52/112 (46%) Hedges' g ERRORs from MetaESCI audit.
+        df_paired <- n_paired - 1
+        if (df_paired > 0) {
+          J_paired <- hedges_J(df_paired)
+          if (!is.na(J_paired)) {
+            # gz = dz * J
+            gz <- dz * J_paired
+            computed_variants$gz <- list(
+              value = gz,
+              metadata = list(
+                name = "Hedges' gz (paired)",
+                assumptions = "Paired/within-subjects, bias-corrected dz",
+                formula = "gz = dz * J(n-1)",
+                when_to_use = "Paired design with Hedges correction"
+              )
+            )
+
+            # gav = dav * J for each r in grid
+            if ("dav" %in% names(computed_variants) && !is.null(computed_variants$dav$value)) {
+              dav_val <- computed_variants$dav$value
+              gav <- dav_val * J_paired
+              computed_variants$gav <- list(
+                value = gav,
+                metadata = list(
+                  name = "Hedges' gav (paired, average SD)",
+                  assumptions = "Paired/within-subjects, bias-corrected dav",
+                  formula = "gav = dav * J(n-1)",
+                  when_to_use = "Paired design, average SD pooling, with Hedges correction"
+                )
+              )
+              # Also store range if dav has range
+              if (!is.null(computed_variants$dav$range)) {
+                computed_variants$gav$range <- computed_variants$dav$range * J_paired
+              }
+            }
+
+            # grm = drm * J for each r in grid
+            if ("drm" %in% names(computed_variants) && !is.null(computed_variants$drm$value)) {
+              drm_val <- computed_variants$drm$value
+              grm <- drm_val * J_paired
+              computed_variants$grm <- list(
+                value = grm,
+                metadata = list(
+                  name = "Hedges' grm (repeated measures)",
+                  assumptions = "Paired/within-subjects, bias-corrected drm",
+                  formula = "grm = drm * J(n-1)",
+                  when_to_use = "Repeated-measures design with Hedges correction"
+                )
+              )
+              if (!is.null(computed_variants$drm$range)) {
+                computed_variants$grm$range <- computed_variants$drm$range * J_paired
+              }
+            }
+          }
+        }
       }
     }
 
@@ -990,11 +1061,13 @@ compute_and_compare_one <- function(row,
     }
 
     # If reported type is d/g but we don't know design, add paired variants as alternatives
+    # v0.2.7: also move dav, drm, gz, gav, grm (not just dz)
     if (!is.na(canonical_type) && canonical_type %in% c("d", "g")) {
-      # Move paired variants to alternatives if they exist
-      if ("dz" %in% names(computed_variants)) {
-        alternatives$dz <- computed_variants$dz
-        alternatives$dz$why_consider <- "If this is actually a paired/within-subjects design"
+      for (paired_var in c("dz", "dav", "drm", "gz", "gav", "grm")) {
+        if (paired_var %in% names(computed_variants)) {
+          alternatives[[paired_var]] <- computed_variants[[paired_var]]
+          alternatives[[paired_var]]$why_consider <- "If this is actually a paired/within-subjects design"
+        }
       }
     }
     # Fix 5B: Graceful failure — when N is unknown and no variants computed,
@@ -1178,6 +1251,58 @@ compute_and_compare_one <- function(row,
             when_to_use = "Proportion of variance explained"
           )
         )
+      }
+
+      # v0.2.7: Compute adjusted R² as alternative for F-tests
+      if (!is.na(anova_effects$eta2) && !is.na(df1) && !is.na(df2)) {
+        N_est <- df1 + df2 + 1
+        adj_R2 <- tryCatch(adjusted_R2_from_R2(anova_effects$eta2, N_est, df1),
+                            error = function(e) NA_real_)
+        if (!is.na(adj_R2) && adj_R2 >= 0 && adj_R2 <= 1) {
+          if (!is.na(canonical_type) && canonical_type == "adjusted_R2") {
+            computed_variants$adjusted_R2 <- list(
+              value = adj_R2,
+              metadata = list(
+                name = "Adjusted R-squared",
+                assumptions = "Adjusted for number of predictors, N estimated from df",
+                formula = "R\u00b2_adj = 1 - (1-R\u00b2)(N-1)/(N-k-1)"
+              )
+            )
+          } else {
+            alternatives$adjusted_R2 <- list(
+              value = adj_R2,
+              metadata = list(
+                name = "Adjusted R-squared (from F)",
+                assumptions = "Adjusted for number of predictors",
+                formula = "R\u00b2_adj = 1 - (1-R\u00b2)(N-1)/(N-k-1)"
+              ),
+              why_consider = "Authors may report adjusted R\u00b2 rather than unadjusted"
+            )
+          }
+        }
+      }
+
+      # v0.2.7: Compute Cohen's f² for F-tests (f² = R²/(1-R²) = F*df1/df2)
+      if (!is.na(anova_effects$eta2) && anova_effects$eta2 < 1) {
+        f2_val <- tryCatch(cohens_f2_from_R2(anova_effects$eta2),
+                           error = function(e) NA_real_)
+        if (!is.na(f2_val)) {
+          if (!is.na(canonical_type) && canonical_type == "f2") {
+            computed_variants$cohens_f2 <- list(
+              value = f2_val,
+              metadata = list(name = "Cohen's f\u00b2 (from F)",
+                              assumptions = "f\u00b2 = R\u00b2/(1-R\u00b2)",
+                              when_to_use = "Effect size for regression")
+            )
+          } else {
+            alternatives$cohens_f2 <- list(
+              value = f2_val,
+              metadata = list(name = "Cohen's f\u00b2 (from F)",
+                              assumptions = "f\u00b2 = R\u00b2/(1-R\u00b2)"),
+              why_consider = "Alternative effect size for regression/ANOVA"
+            )
+          }
+        }
       }
 
       # omega2 and cohens_f as alternatives (or primary if reported)
@@ -1435,6 +1560,38 @@ compute_and_compare_one <- function(row,
       }
     }
 
+    # v0.2.7: Cross-validate N against reported V when N from global_text
+    # Back-calculate N_back = chi2 / (V^2 * m). If N_back is plausible and
+    # substantially smaller than current N, override with back-calculated N.
+    # Only fires for global_text N_source (never overrides inline or adjacent N).
+    if (!is.na(N) && !is.na(effect_reported) && abs(effect_reported) > 0 &&
+        !is.na(stat) && stat > 0 &&
+        !is.na(canonical_type) && canonical_type == "V") {
+      n_source_val <- if ("N_source" %in% names(row) && length(row$N_source) > 0)
+        as.character(row$N_source[1]) else NA_character_
+      if (!is.na(n_source_val) && n_source_val == "global_text") {
+        m_back <- if (!is.na(table_r) && !is.na(table_c)) {
+          min(table_r - 1, table_c - 1)
+        } else if (!is.na(df1)) {
+          m_cands <- enumerate_m_from_df(df1)
+          if (length(m_cands) > 0) m_cands[1] else 1
+        } else { 1 }
+
+        N_back <- round(stat / (effect_reported^2 * m_back))
+        min_N_chisq <- if (!is.na(df1)) df1 + 1 else 4
+
+        if (N_back >= min_N_chisq && N_back <= N && N_back < 0.8 * N) {
+          N_original_chisq <- N
+          N <- N_back
+          assumptions <- c(assumptions,
+            sprintf("N=%d back-calculated from V=%.3f (was %d from global text, m=%d)",
+                    as.integer(N), effect_reported, as.integer(N_original_chisq), as.integer(m_back)))
+          uncertainty <- c(uncertainty,
+            "Global N overridden by back-calculation from reported Cramer's V")
+        }
+      }
+    }
+
     if (!is.na(N) && N > 0) {
       phi_val <- tryCatch(phi_from_chisq(stat, N), error = function(e) NA_real_)
       if (!is.na(phi_val)) {
@@ -1497,6 +1654,46 @@ compute_and_compare_one <- function(row,
           metadata = VARIANT_METADATA$partial_r,
           why_consider = "Correlation-based interpretation"
         )
+      }
+    }
+
+    # v0.2.7: Compute d from z when N is available (d = 2z/sqrt(N))
+    # Only promote to computed_variants when author explicitly reported d/g
+    if (!is.na(stat) && !is.na(N) && N > 0) {
+      d_z <- tryCatch(d_from_z(stat, N), error = function(e) NA_real_)
+      if (!is.na(d_z)) {
+        if (!is.na(canonical_type) && canonical_type %in% c("d", "g")) {
+          computed_variants$d_ind_equalN <- list(
+            value = d_z,
+            metadata = VARIANT_METADATA$d_ind_equalN
+          )
+          # Also compute Hedges' g
+          if (N > 2) {
+            J <- hedges_J(N - 2)
+            if (!is.na(J)) {
+              g_z <- d_z * J
+              if (!is.na(canonical_type) && canonical_type == "g") {
+                computed_variants$g_ind <- list(
+                  value = g_z,
+                  metadata = VARIANT_METADATA$g_ind
+                )
+              } else {
+                alternatives$g_ind <- list(
+                  value = g_z,
+                  metadata = VARIANT_METADATA$g_ind,
+                  why_consider = "Bias-corrected d from z-test"
+                )
+              }
+            }
+          }
+          assumptions <- c(assumptions, "d computed from z using d = 2z/sqrt(N) (equal-groups assumption)")
+        } else {
+          alternatives$d <- list(
+            value = d_z,
+            metadata = VARIANT_METADATA$d_ind,
+            why_consider = "Cohen's d equivalent from z-statistic"
+          )
+        }
       }
     }
   } else if (tt == "regression") {
@@ -1592,6 +1789,22 @@ compute_and_compare_one <- function(row,
         }
       }
       uncertainty <- c(uncertainty, "Group sizes (n1, n2) not found - U-based r requires group sizes for exact computation")
+    }
+
+    # v0.2.7: When no n1/n2 and no z_aux but N is known, approximate with equal split
+    if (length(computed_variants) == 0 && !is.na(stat) && !is.na(N) && N > 2 &&
+        (is.na(n1) || n1 == 0) && (is.na(n2) || n2 == 0)) {
+      n1_eq <- floor(N / 2)
+      n2_eq <- N - n1_eq
+      rb_approx <- tryCatch(rank_biserial_r_from_U(stat, n1_eq, n2_eq), error = function(e) NA_real_)
+      if (!is.na(rb_approx) && abs(rb_approx) <= 1) {
+        computed_variants$rank_biserial_r <- list(
+          value = rb_approx,
+          metadata = VARIANT_METADATA$rank_biserial_r
+        )
+        assumptions <- c(assumptions, sprintf("Rank-biserial r with assumed equal groups (n1=%d, n2=%d)", n1_eq, n2_eq))
+        uncertainty <- c(uncertainty, "U-test group sizes unknown; equal-split assumption may affect accuracy")
+      }
     }
   } else if (tt == "W") {
     # ------ WILCOXON W COMPUTATIONS ------
@@ -1899,6 +2112,14 @@ compute_and_compare_one <- function(row,
     check_type <- "ci"
   }
 
+  # v0.2.7: Clean matched_value/variant when only p-value or extraction-only
+  # Prevents literal "NA" strings in JSON serialization from inflating ES-checkable counts
+  if (check_type %in% c("p_value", "extraction_only")) {
+    matched_value <- NA_real_
+    matched_variant <- NA_character_
+    delta_effect_abs <- NA_real_
+  }
+
   # Extreme delta flag (Issue 5): flag likely extraction errors
   extraction_suspect <- FALSE
   if (!is.na(delta_effect_abs) && delta_effect_abs > EXTREME_DELTA_THRESHOLD) {
@@ -2173,6 +2394,162 @@ compute_and_compare_one <- function(row,
           ratio_text
         ))
     }
+  }
+
+  # ============================================================================
+  # PHASE 8C: Unknown group sizes ERROR downgrade (v0.2.7)
+  # When d/g is ERROR and n1/n2 are unknown (N/2 assumption used), the error
+  # likely reflects unequal groups rather than a reporting error. Downgrade to
+  # unknown_groups_action. Only fires for t-tests and F(1,df).
+  # ============================================================================
+
+  unknown_groups_downgraded <- FALSE
+
+  # Note: extraction_suspect guard is relaxed when computed > reported (the
+  # systematic direction of N/2 inflation). When equal-split assumption is used,
+  # computed d/g is LARGER than actual because the minority group is smaller
+  # than N/2. This triggers extraction_suspect for large deltas, but these are
+  # NOT extraction errors — they are N/2 assumption artifacts (MetaESCI audit:
+  # 84.8% of g errors from this pattern). However, when reported > computed
+  # (the opposite direction), keep extraction_suspect guard since the error
+  # pattern is inconsistent with N/2 inflation and may be a genuine extraction issue.
+  n2_inflation_pattern <- !is.na(matched_value) && !is.na(effect_reported) &&
+    abs(matched_value) > abs(effect_reported)  # computed > reported = N/2 pattern
+  if (status == "ERROR" && check_type == "effect_size" &&
+      (!extraction_suspect || n2_inflation_pattern) &&
+      is.na(n1) && is.na(n2) && !is.na(N) &&
+      !is.na(canonical_type) && canonical_type %in% c("d", "g")) {
+    is_affected <- (tt == "t") || (tt == "F" && !is.na(df1) && df1 == 1)
+    if (is_affected) {
+      status <- unknown_groups_action
+      unknown_groups_downgraded <- TRUE
+      # Note: confidence cap applied in Phase 11 (line ~2634) using unknown_groups_downgraded flag
+
+      ratio_text <- if (!is.na(matched_value) && matched_value != 0) {
+        ratio <- abs(effect_reported) / abs(matched_value)
+        sprintf(" (reported is %.0f%% %s than computed)",
+                abs(ratio - 1) * 100,
+                if (ratio > 1) "larger" else "smaller")
+      } else ""
+
+      uncertainty <- c(uncertainty,
+        sprintf(
+          "Group sizes unknown (n1, n2 not found) - equal-split N/2=%d assumed. Reported %s=%.3f vs computed %s=%.3f (delta=%.3f)%s. May reflect unequal groups rather than reporting error",
+          as.integer(floor(N / 2)),
+          effect_reported_name, effect_reported,
+          matched_variant, matched_value, delta_effect_abs,
+          ratio_text
+        ))
+    }
+  }
+
+  # ============================================================================
+  # PHASE 8D: R2 cross-pairing detection for F-tests (v0.2.7)
+  # When F-test is paired with R2 and the status is ERROR, check text signals
+  # to detect cross-pairing artifacts from regression tables.
+  # V028 simulation: 275 -> 45 ERRORs (84% reduction), 0 regressions.
+  # ============================================================================
+
+  r2_cross_pairing_detected <- FALSE
+
+  if (status == "ERROR" && tt == "F" && check_type == "effect_size" &&
+      !is.na(canonical_type) && canonical_type %in% c("R2", "adjusted_R2", "f2") &&
+      !is.na(delta_effect_abs)) {
+
+    raw <- if (!is.null(row$raw_text) && length(row$raw_text) > 0)
+      as.character(row$raw_text[1]) else ""
+    ctx <- if (!is.null(row$context_window) && length(row$context_window) > 0)
+      as.character(row$context_window[1]) else ""
+    full_ctx <- paste(raw, ctx)
+
+    # Signal 1: R2 position relative to F in raw_text
+    f_pos <- regexpr("F\\s*[\\(\\[]", raw)
+    r2_pos <- regexpr("R\\^?2\\s*=|R-squared|R squared", raw, ignore.case = TRUE)
+    r2_before_F <- (r2_pos > 0 && f_pos > 0 && r2_pos < f_pos)
+    r2_after_F <- (r2_pos > 0 && f_pos > 0 && r2_pos > f_pos)
+
+    # Signal 2: Line break between F and R2
+    newline_between <- FALSE
+    if (r2_pos > 0 && f_pos > 0) {
+      between_text <- substr(raw, min(f_pos, r2_pos), max(f_pos, r2_pos))
+      newline_between <- grepl("\n", between_text)
+    }
+
+    # Signal 3: Regression keywords in context
+    regression_context <- grepl(
+      "regression|regress|predictor|hierarchical|stepwise|linear model|accounted\\s*for|model\\s*fit|model\\s*summary",
+      full_ctx, ignore.case = TRUE
+    )
+
+    # Signal 4: ANOVA keywords (negative signal — do NOT apply regression downgrades)
+    anova_context <- grepl(
+      "ANOVA|analysis\\s*of\\s*variance|partial\\s*eta|\\u03B7\\u00B2|\\u03B7p\\u00B2",
+      full_ctx, ignore.case = TRUE
+    )
+
+    # Signal 5: df1 > 1 (multiple predictors suggest regression)
+    df1_gt1 <- !is.na(df1) && df1 > 1
+
+    # Signal 6: Multiple F-tests in context (table indicator)
+    f_count <- length(gregexpr("F\\s*\\(\\s*\\d+", full_ctx)[[1]])
+    multi_F_context <- f_count >= 3
+
+    # Signal 7: Table header in context
+    table_header <- grepl("Table\\s*\\d", full_ctx, ignore.case = TRUE)
+
+    # Signal 8: Hierarchical/step regression
+    hierarchical <- grepl(
+      "step\\s*\\d|step\\s*R|hierarchical|block\\s*\\d",
+      full_ctx, ignore.case = TRUE
+    )
+
+    # Apply detection logic (priority order from V028 simulation)
+    if (!anova_context) {
+      if (r2_before_F) {
+        # R2 before F is more reliable — only downgrade with strong evidence
+        if (hierarchical) {
+          status <- "NOTE"
+          r2_cross_pairing_detected <- TRUE
+          uncertainty <- c(uncertainty,
+            "Hierarchical regression: R2 may be incremental (delta-R2), not total")
+        }
+        # Otherwise keep ERROR — position suggests correct pairing but values don't match
+      } else {
+        # R2 after F or unknown position — higher cross-pairing risk
+        if (hierarchical) {
+          status <- "NOTE"
+          r2_cross_pairing_detected <- TRUE
+          uncertainty <- c(uncertainty,
+            "Hierarchical regression: R2 may be incremental, not total")
+        } else if (r2_after_F && newline_between) {
+          status <- "NOTE"
+          r2_cross_pairing_detected <- TRUE
+          uncertainty <- c(uncertainty,
+            "R2 appears on different line from F-test, possible table cross-pairing")
+        } else if (multi_F_context && r2_after_F) {
+          status <- "NOTE"
+          r2_cross_pairing_detected <- TRUE
+          uncertainty <- c(uncertainty,
+            "Multiple F-tests in context with R2 after F: possible table extraction artifact")
+        } else if (regression_context) {
+          status <- "WARN"
+          r2_cross_pairing_detected <- TRUE
+          uncertainty <- c(uncertainty,
+            "Regression context detected: R2 may be from different model than F-test")
+        } else if (df1_gt1) {
+          status <- "WARN"
+          r2_cross_pairing_detected <- TRUE
+          uncertainty <- c(uncertainty,
+            "Multi-predictor F-test with R2: likely regression, possible model mismatch")
+        } else if (table_header) {
+          status <- "WARN"
+          r2_cross_pairing_detected <- TRUE
+          uncertainty <- c(uncertainty,
+            "Table context: R2 may be from adjacent row")
+        }
+      }
+    }
+    # Note: do NOT set confidence here (Phase 11 handles it via flag)
   }
 
   # ============================================================================
@@ -2586,6 +2963,8 @@ compute_and_compare_one <- function(row,
 
   # Design-ambiguous downgrade confidence cap (v0.2.6)
   if (design_ambiguous_downgraded) confidence <- min(confidence, 4L)
+  if (unknown_groups_downgraded) confidence <- min(confidence, 4L)
+  if (r2_cross_pairing_detected) confidence <- min(confidence, 3L)
 
   # Extraction quality signals
   if (extraction_suspect) confidence <- confidence - 2L
@@ -2849,11 +3228,17 @@ compute_and_compare_one <- function(row,
     # Status and metadata
     status = status,
     check_type = check_type,
+    check_scope = if (check_type == "effect_size") "effect_size_checked"
+                  else if (check_type == "p_value") "p_value_only"
+                  else if (check_type == "ci") "ci_checked"
+                  else "extraction_only",
     extraction_suspect = extraction_suspect,
     decimal_recovered = decimal_recovered,
     result_context = if (method_in_chunk) "method" else "study",
     confidence = confidence,
     design_ambiguous = (ambiguity_level != "clear"),
+    unknown_groups_downgraded = unknown_groups_downgraded,
+    r2_cross_pairing_detected = r2_cross_pairing_detected,
     sign_mismatch = if (!is.na(effect_reported) && !is.na(matched_value) &&
                         effect_reported != 0 && matched_value != 0)
                      sign(effect_reported) != sign(matched_value) else FALSE,
@@ -2893,6 +3278,7 @@ compute_and_compare_one <- function(row,
 #' @param sign_sensitive Whether sign differences affect status (default FALSE)
 #' @param method_context_action Action when method context detected in chunk ("NOTE", "WARN", or "SKIP"; default "NOTE")
 #' @param design_ambiguous_action Action when design-ambiguous t-test (or F(1,df)) effect size ERROR occurs ("WARN", "NOTE", or "ERROR"; default "WARN")
+#' @param unknown_groups_action Action when d/g ERROR occurs with unknown group sizes n1/n2 ("WARN", "NOTE", or "ERROR"; default "WARN")
 #' @param min_confidence Minimum confidence score (0-10) for results to be included in output (default 0)
 #' @return An effectcheck S3 object with consistency check results
 #' @export
@@ -2921,6 +3307,7 @@ check_text <- function(text,
                        sign_sensitive = FALSE,
                        method_context_action = "NOTE",
                        design_ambiguous_action = "WARN",
+                       unknown_groups_action = "WARN",
                        min_confidence = 0L) {
   # Resource Limit Check: Text Length
   if (sum(nchar(text)) > max_text_length) {
@@ -2948,6 +3335,7 @@ check_text <- function(text,
     sign_sensitive = sign_sensitive,
     method_context_action = method_context_action,
     design_ambiguous_action = design_ambiguous_action,
+    unknown_groups_action = unknown_groups_action,
     min_confidence = min_confidence
   )
 
@@ -2999,7 +3387,8 @@ check_text <- function(text,
           plausibility_filter = plausibility_filter,
           sign_sensitive = sign_sensitive,
           method_context_action = method_context_action,
-          design_ambiguous_action = design_ambiguous_action
+          design_ambiguous_action = design_ambiguous_action,
+          unknown_groups_action = unknown_groups_action
         )
       },
       error = function(e) {
@@ -3034,6 +3423,7 @@ check_text <- function(text,
           all_variants = "{}",
           status = "ERROR",
           check_type = NA_character_,
+          check_scope = "error",
           extraction_suspect = FALSE,
           decimal_recovered = FALSE,
           result_context = "study",
@@ -3044,6 +3434,8 @@ check_text <- function(text,
           uncertainty_reasons = paste0("Processing error: ", error_msg),
           assumptions_used = "",
           insufficient_data = TRUE,
+          unknown_groups_downgraded = FALSE,
+          r2_cross_pairing_detected = FALSE,
           decision_error = FALSE,
           p_reported = NA_real_,
           p_computed = NA_real_,
