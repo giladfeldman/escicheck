@@ -1,8 +1,6 @@
 # test-v027-F-R2.R — v0.2.7 Issue C: adjusted_R2 and cohens_f2 for F-tests
 
 test_that("adjusted_R2_from_R2 computes correctly", {
-  suppressMessages(suppressWarnings(devtools::load_all(
-    "c:/Users/filin/Dropbox/Vibe/ESCIcheckapp/effectcheck", quiet = TRUE)))
   # R2=0.50, N=100, k=3: adj = 1 - (0.50)*(99/96) = 1 - 0.515625 = 0.484375
   expect_equal(round(adjusted_R2_from_R2(0.50, 100, 3), 4), 0.4844)
   # Edge cases

@@ -4,8 +4,6 @@
 
 test_that("d_from_z computes correctly", {
   # d = 2 * 2.5 / sqrt(100) = 0.50
-  suppressMessages(suppressWarnings(devtools::load_all(
-    "c:/Users/filin/Dropbox/Vibe/ESCIcheckapp/effectcheck", quiet = TRUE)))
   expect_equal(d_from_z(2.5, 100), 0.50)
   expect_equal(d_from_z(0, 100), 0)
   expect_true(is.na(d_from_z(NA, 100)))

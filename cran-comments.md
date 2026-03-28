@@ -5,18 +5,18 @@
 * The only NOTE is "unable to verify current time" which is a transient
   network/clock check issue, not a package problem.
 
-* This is a resubmission (v0.2.3). Changes since previous CRAN submission:
-  - Added nonparametric test support (Mann-Whitney U, Wilcoxon W, Kruskal-Wallis H)
-  - Added regression coefficient verification (b/SE parsing)
-  - Added HTML report generation and CSV/JSON export
-  - Added statcheck comparison functions
+* This is a resubmission (v0.2.7). Changes since v0.2.3:
+  - Design-ambiguous t-test/F(1,df) downgrade to WARN (reduces false ERROR rate)
+  - Unknown group sizes action (unknown_groups_action param)
+  - Minimum confidence filtering (min_confidence param)
+  - Confidence scoring (0-10) for each result
+  - Check scope classification (effect_size_checked, p_value_only, ci_checked, extraction_only)
+  - Dropped decimal p-value recovery (p=484 -> p=.484)
+  - Header/footer stripping for PDF extraction
+  - Decision error now requires reported p-value (prevents false alarms on bare stats)
   - Cross-type effect size matching reduces false ERROR rate
-  - SKIP status for extraction-only results
-  - Universal tail fallback for one-tailed/two-tailed detection
-  - Plausibility bounds for effect sizes
-  - User-configurable parameters (cross_type_action, ci_affects_status, plausibility_filter)
-  - Removed pdftools and officer dependencies
-  - Fixed thousands-separator N parsing, Welch t-test estimation, and many parser bugs
+  - Plausibility bounds for computed effect sizes
+  - 986 tests passing, 0 failures
 
 ## Notes
 

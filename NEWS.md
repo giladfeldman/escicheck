@@ -1,3 +1,25 @@
+# effectcheck 0.2.7
+
+## Bug fixes and API improvements
+
+### Bug fixes
+
+* Fixed `devtools::load_all()` calls in test files that broke R CMD check in CI
+  (devtools is not available in CI environment)
+* Fixed codoc mismatch: `unknown_groups_action` parameter was missing from Rd
+  documentation for `check_text()` and `compute_and_compare_one()`
+* Added `min_confidence` parameter forwarding in plumber.R API
+
+### Documentation
+
+* Removed working documents from public repo (FEEDBACK_RESPONSE, METAESCI_REPORT,
+  DEVELOPMENT, testingai) — moved to archive/
+* Updated API.md to version 0.2.7 with `unknown_groups_action` and `min_confidence`
+  parameter documentation
+* Version bump from 0.2.6 to 0.2.7 (aligns DESCRIPTION with frontend)
+
+---
+
 # effectcheck 0.2.6
 
 ## Design ambiguity + decision error fixes

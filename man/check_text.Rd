@@ -26,6 +26,7 @@ check_text(
   sign_sensitive = FALSE,
   method_context_action = "NOTE",
   design_ambiguous_action = "WARN",
+  unknown_groups_action = "WARN",
   min_confidence = 0L
 )
 }
@@ -71,6 +72,8 @@ check_text(
 \item{method_context_action}{Action when method context detected in chunk ("NOTE", "WARN", or "SKIP"; default "NOTE")}
 
 \item{design_ambiguous_action}{Action when design-ambiguous t-test (or F(1,df)) effect size ERROR occurs ("WARN", "NOTE", or "ERROR"; default "WARN")}
+
+\item{unknown_groups_action}{Action when d/g ERROR occurs with unknown group sizes n1/n2 ("WARN", "NOTE", or "ERROR"; default "WARN")}
 
 \item{min_confidence}{Minimum confidence score (0-10) for results to be included in output (default 0)}
 }

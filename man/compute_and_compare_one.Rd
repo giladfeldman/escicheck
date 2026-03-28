@@ -19,7 +19,8 @@ compute_and_compare_one(
   plausibility_filter = TRUE,
   sign_sensitive = FALSE,
   method_context_action = "NOTE",
-  design_ambiguous_action = "WARN"
+  design_ambiguous_action = "WARN",
+  unknown_groups_action = "WARN"
 )
 }
 \arguments{
@@ -52,6 +53,8 @@ compute_and_compare_one(
 \item{method_context_action}{Action when method context detected in chunk ("NOTE", "WARN", "SKIP")}
 
 \item{design_ambiguous_action}{Action when design-ambiguous t-test (or F(1,df)) effect size ERROR occurs ("WARN", "NOTE", or "ERROR"; default "WARN")}
+
+\item{unknown_groups_action}{Action when d/g ERROR occurs with unknown group sizes n1/n2 ("WARN", "NOTE", or "ERROR"; default "WARN")}
 }
 \value{
 A tibble with comparison results
