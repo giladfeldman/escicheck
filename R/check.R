@@ -1448,6 +1448,58 @@ compute_and_compare_one <- function(row,
           dz_ci <- tryCatch(ci_dz(dz_equiv, df2 + 1, ci_level_used), error = function(e) list(success = FALSE))
           if (isTRUE(dz_ci$success)) computed_variants$dz$ci <- dz_ci$bounds
 
+          # v0.2.9b: Compute dav/drm via r-grid + Hedges-corrected gz/gav/grm
+          # Without these, Phase 8A-bis can't detect structural ambiguity for g
+          d_av_grid <- sapply(paired_r_grid, function(rr) {
+            tryCatch(dav_from_dz(dz_equiv, rr), error = function(e) NA_real_)
+          })
+          d_av_grid <- d_av_grid[!is.na(d_av_grid)]
+          if (length(d_av_grid) > 0) {
+            computed_variants$dav <- list(
+              value = stats::median(d_av_grid),
+              range = c(min(d_av_grid), max(d_av_grid)),
+              metadata = VARIANT_METADATA$dav
+            )
+          }
+          drm_grid <- sapply(paired_r_grid, function(rr) {
+            tryCatch(drm_from_dz(dz_equiv, rr), error = function(e) NA_real_)
+          })
+          drm_grid <- drm_grid[!is.na(drm_grid)]
+          if (length(drm_grid) > 0) {
+            computed_variants$drm <- list(
+              value = stats::median(drm_grid),
+              range = c(min(drm_grid), max(drm_grid)),
+              metadata = VARIANT_METADATA$drm
+            )
+          }
+          # Hedges-corrected paired variants for g-family matching
+          N_for_J <- df2 + 1
+          if (N_for_J > 1) {
+            J_paired <- hedges_J(N_for_J - 1)
+            if (!is.na(J_paired)) {
+              computed_variants$gz <- list(
+                value = dz_equiv * J_paired,
+                metadata = list(name = "Hedges' gz (paired, from F)", assumptions = "gz = dz * J(N-1)")
+              )
+              if (length(d_av_grid) > 0) {
+                gav_vals <- d_av_grid * J_paired
+                computed_variants$gav <- list(
+                  value = stats::median(gav_vals),
+                  range = c(min(gav_vals), max(gav_vals)),
+                  metadata = list(name = "Hedges' gav (paired, from F)", assumptions = "gav = dav * J(N-1)")
+                )
+              }
+              if (length(drm_grid) > 0) {
+                grm_vals <- drm_grid * J_paired
+                computed_variants$grm <- list(
+                  value = stats::median(grm_vals),
+                  range = c(min(grm_vals), max(grm_vals)),
+                  metadata = list(name = "Hedges' grm (paired, from F)", assumptions = "grm = drm * J(N-1)")
+                )
+              }
+            }
+          }
+
           # Keep r as alternative
           alternatives$r <- list(
             value = r_equiv,
@@ -2843,6 +2895,19 @@ compute_and_compare_one <- function(row,
         r2_cross_pairing_detected <- TRUE
         uncertainty <- c(uncertainty,
           sprintf("Computed/reported ratio > 5x for %s: likely cross-paired", canonical_type))
+      }
+      # Signal 13 (v0.2.9b): Cohen's f / f2 standalone cross-pairing
+      # Cohen's f and f2 are almost always reported alongside the F-test they
+      # derive from. Large delta alone is sufficient evidence of cross-pairing
+      # because f = sqrt(F*df1/df2) is deterministic — any mismatch means wrong F.
+      if (!r2_cross_pairing_detected &&
+          !is.na(canonical_type) && canonical_type %in% c("cohens_f", "f2") &&
+          !is.na(delta_effect_abs) && delta_effect_abs > 0.10) {
+        status <- "WARN"
+        r2_cross_pairing_detected <- TRUE
+        uncertainty <- c(uncertainty,
+          sprintf("Cohen's %s delta=%.3f > 0.10: f/f2 derives deterministically from F — mismatch indicates cross-pairing",
+                  canonical_type, delta_effect_abs))
       }
     }
 

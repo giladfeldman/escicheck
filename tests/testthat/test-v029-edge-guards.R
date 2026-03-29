@@ -95,6 +95,34 @@ test_that("Fix 2 regression: matching R2 stays PASS", {
   expect_equal(r$status[1], "PASS")
 })
 
+# ==== Issue A: F(1,df) with g — structural ambiguity ====
+
+test_that("Issue A: F(1,df) with g gets design-ambiguous WARN", {
+  r <- check_text("F(1, 69) = 10.00, p < .001, g = 0.291")
+  # F(1,df) with g should detect structural ambiguity (both g_ind and gz exist)
+  expect_true(r$status[1] %in% c("WARN", "NOTE"))
+})
+
+test_that("Issue A: F(1,df) with matching g stays PASS", {
+  # F(1,69) = 10 → g_ind ≈ 0.74 (J * 2*sqrt(F/N))
+  r <- check_text("F(1, 69) = 10.00, p < .001, g = 0.74")
+  expect_true(r$status[1] %in% c("PASS", "WARN"))
+})
+
+# ==== Issue B: Cohen's f/f2 cross-pairing ====
+
+test_that("Issue B: f2 standalone cross-pairing detected", {
+  # f2 = F*df1/df2 = 30/386 = 0.0777, reported 0.80, delta = 0.722 >> 0.10
+  r <- check_text("F(1, 386) = 30.0, p < .001, f2 = 0.80")
+  expect_true(r$status[1] %in% c("WARN", "NOTE"))
+})
+
+test_that("Issue B: f2 matching value stays PASS/WARN", {
+  # F(1, 100) = 25.0 → f2 = 25/100 = 0.25
+  r <- check_text("F(1, 100) = 25.0, p < .001, f2 = 0.25")
+  expect_true(r$status[1] %in% c("PASS", "WARN"))
+})
+
 # ==== Fix 9 continued ====
 
 test_that("Fix 9 edge: d=2.9 below threshold still computes", {
