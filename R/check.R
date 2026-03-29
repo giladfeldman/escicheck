@@ -97,9 +97,15 @@ EFFECT_SIZE_FAMILIES <- list(
   ),
   R2 = list(
     family = "R2",
-    variants = c("R2"),
-    alternatives = c("cohens_f2", "adjusted_R2"),
+    variants = c("R2", "adjusted_R2"),
+    alternatives = c("cohens_f2"),
     description = "R-squared - proportion of variance explained"
+  ),
+  adjusted_R2 = list(
+    family = "R2",
+    variants = c("adjusted_R2", "R2"),
+    alternatives = c("cohens_f2"),
+    description = "Adjusted R-squared - corrected for number of predictors"
   ),
   f2 = list(
     family = "f2",
@@ -1619,7 +1625,32 @@ compute_and_compare_one <- function(row,
       }
 
       if (!is.na(m_candidates[1])) {
-        V_val <- tryCatch(V_from_chisq(stat, N, m_candidates[1]), error = function(e) NA_real_)
+        # v0.2.8: When multiple m candidates exist and author reported V,
+        # try ALL candidates and pick the one producing V closest to reported.
+        # This handles cases where df allows multiple table dimensions
+        # (e.g., df=4 could be 5×2 with m=1 or 3×3 with m=2).
+        V_val <- NA_real_
+        if (length(m_candidates) > 1 && !is.na(canonical_type) &&
+            canonical_type == "V" && !is.na(effect_reported)) {
+          v_vals <- sapply(m_candidates, function(m) {
+            tryCatch(V_from_chisq(stat, N, m), error = function(e) NA_real_)
+          })
+          valid <- !is.na(v_vals)
+          if (any(valid)) {
+            diffs <- abs(v_vals[valid] - abs(effect_reported))
+            best_idx <- which(valid)[which.min(diffs)]
+            V_val <- v_vals[best_idx]
+            if (best_idx != 1) {
+              assumptions <- c(assumptions,
+                sprintf("Cramer's V: best match with m=%d (tried m=%s)",
+                        m_candidates[best_idx],
+                        paste(m_candidates, collapse = ",")))
+            }
+          }
+        } else {
+          V_val <- tryCatch(V_from_chisq(stat, N, m_candidates[1]), error = function(e) NA_real_)
+        }
+
         if (!is.na(V_val)) {
           if (!is.na(canonical_type) && canonical_type == "V") {
             computed_variants$V <- list(
@@ -1657,17 +1688,93 @@ compute_and_compare_one <- function(row,
       }
     }
 
-    # v0.2.7: Compute d from z when N is available (d = 2z/sqrt(N))
-    # Only promote to computed_variants when author explicitly reported d/g
+    # v0.2.7: Compute d from z when N is available
+    # v0.2.8: Compute BOTH independent (d = 2z/sqrt(N)) and paired (dz = z/sqrt(N))
+    # variants. z-tests can come from Mann-Whitney (independent) or Wilcoxon
+    # signed-rank (paired) — we cannot tell from the statistic alone.
     if (!is.na(stat) && !is.na(N) && N > 0) {
       d_z <- tryCatch(d_from_z(stat, N), error = function(e) NA_real_)
+      dz_z <- tryCatch(dz_from_z(stat, N), error = function(e) NA_real_)
       if (!is.na(d_z)) {
         if (!is.na(canonical_type) && canonical_type %in% c("d", "g")) {
+          # Independent assumption: d = 2z/sqrt(N)
           computed_variants$d_ind_equalN <- list(
             value = d_z,
             metadata = VARIANT_METADATA$d_ind_equalN
           )
-          # Also compute Hedges' g
+
+          # Paired assumption: dz = z/sqrt(N), treating N as number of pairs
+          if (!is.na(dz_z)) {
+            computed_variants$dz <- list(
+              value = dz_z,
+              metadata = VARIANT_METADATA$dz
+            )
+
+            # dav and drm via r-grid (same pattern as t-test block)
+            d_av_grid <- sapply(paired_r_grid, function(r) {
+              tryCatch(dav_from_dz(dz_z, r), error = function(e) NA_real_)
+            })
+            d_av_grid <- d_av_grid[!is.na(d_av_grid)]
+            if (length(d_av_grid) > 0) {
+              computed_variants$dav <- list(
+                value = stats::median(d_av_grid),
+                range = c(min(d_av_grid), max(d_av_grid)),
+                metadata = VARIANT_METADATA$dav
+              )
+            }
+
+            drm_grid <- sapply(paired_r_grid, function(r) {
+              tryCatch(drm_from_dz(dz_z, r), error = function(e) NA_real_)
+            })
+            drm_grid <- drm_grid[!is.na(drm_grid)]
+            if (length(drm_grid) > 0) {
+              computed_variants$drm <- list(
+                value = stats::median(drm_grid),
+                range = c(min(drm_grid), max(drm_grid)),
+                metadata = VARIANT_METADATA$drm
+              )
+            }
+
+            # Hedges-corrected paired variants: gz, gav, grm
+            if (N > 1) {
+              J_z <- hedges_J(N - 1)
+              if (!is.na(J_z)) {
+                computed_variants$gz <- list(
+                  value = dz_z * J_z,
+                  metadata = list(
+                    name = "Hedges' gz (paired, from z)",
+                    assumptions = "Paired/within-subjects, bias-corrected dz from z-test",
+                    formula = "gz = dz_from_z * J(N-1)",
+                    when_to_use = "Paired design with Hedges correction"
+                  )
+                )
+                if (length(d_av_grid) > 0) {
+                  computed_variants$gav <- list(
+                    value = stats::median(d_av_grid) * J_z,
+                    metadata = list(
+                      name = "Hedges' gav (paired, from z)",
+                      assumptions = "Paired/within-subjects, bias-corrected dav from z-test",
+                      formula = "gav = dav_from_z * J(N-1)",
+                      when_to_use = "Paired design with Hedges correction"
+                    )
+                  )
+                }
+                if (length(drm_grid) > 0) {
+                  computed_variants$grm <- list(
+                    value = stats::median(drm_grid) * J_z,
+                    metadata = list(
+                      name = "Hedges' grm (paired, from z)",
+                      assumptions = "Paired/within-subjects, bias-corrected drm from z-test",
+                      formula = "grm = drm_from_z * J(N-1)",
+                      when_to_use = "Paired design with Hedges correction"
+                    )
+                  )
+                }
+              }
+            }
+          }
+
+          # Also compute Hedges' g (independent)
           if (N > 2) {
             J <- hedges_J(N - 2)
             if (!is.na(J)) {
@@ -1681,12 +1788,12 @@ compute_and_compare_one <- function(row,
                 alternatives$g_ind <- list(
                   value = g_z,
                   metadata = VARIANT_METADATA$g_ind,
-                  why_consider = "Bias-corrected d from z-test"
+                  why_consider = "Bias-corrected d from z-test (independent assumption)"
                 )
               }
             }
           }
-          assumptions <- c(assumptions, "d computed from z using d = 2z/sqrt(N) (equal-groups assumption)")
+          assumptions <- c(assumptions, "z-test design unknown: computed both independent (d = 2z/sqrt(N)) and paired (dz = z/sqrt(N)) variants")
         } else {
           alternatives$d <- list(
             value = d_z,
@@ -2359,23 +2466,105 @@ compute_and_compare_one <- function(row,
   }
 
   # ============================================================================
+  # PHASE 8A-bis: Structural design ambiguity detection (v0.2.8)
+  # When F(1,df), t-test, or z-test computes variants from BOTH the independent
+  # family (d_ind, g_ind) AND the paired family (dz, dav, drm), the design is
+  # structurally ambiguous regardless of which variant matches best. Override
+  # ambiguity_level to "ambiguous" so Phase 8B can fire.
+  # Also: z-tests with d/g canonical_type are inherently design-ambiguous
+  # (Mann-Whitney vs Wilcoxon) even if only one family was computed.
+  # ============================================================================
+
+  structural_design_ambiguous <- FALSE
+  if (status == "ERROR" && check_type == "effect_size" &&
+      !is.na(canonical_type) && canonical_type %in% c("d", "g", "dz", "dav", "drm")) {
+    ind_variant_names <- c("d_ind", "d_ind_equalN", "d_ind_min", "d_ind_max", "g_ind")
+    paired_variant_names <- c("dz", "dav", "drm", "gz", "gav", "grm")
+    has_ind <- any(names(same_type_variants) %in% ind_variant_names)
+    has_paired <- any(names(same_type_variants) %in% paired_variant_names)
+
+    is_F1_or_t <- (tt == "t") || (tt == "F" && !is.na(df1) && df1 == 1)
+    is_z_with_d <- (tt == "z" && canonical_type %in% c("d", "g"))
+
+    if ((is_F1_or_t || is_z_with_d) && has_ind && has_paired) {
+      structural_design_ambiguous <- TRUE
+      if (ambiguity_level == "clear") {
+        ambiguity_level <- "ambiguous"
+        ambiguity_reason <- sprintf(
+          "Structural design ambiguity: both independent (%s) and paired (%s) variants computed for %s-test, matched=%s",
+          paste(intersect(names(same_type_variants), ind_variant_names), collapse = ", "),
+          paste(intersect(names(same_type_variants), paired_variant_names), collapse = ", "),
+          tt, matched_variant
+        )
+      }
+    }
+
+    # z-tests are inherently design-ambiguous even if only independent variant computed
+    if (is_z_with_d && !structural_design_ambiguous) {
+      structural_design_ambiguous <- TRUE
+      if (ambiguity_level == "clear") {
+        ambiguity_level <- "ambiguous"
+        ambiguity_reason <- "z-test design inherently ambiguous: could be Mann-Whitney (independent) or Wilcoxon signed-rank (paired)"
+      }
+    }
+  }
+
+  # ============================================================================
   # PHASE 8B: Design-ambiguous effect size ERROR downgrade (v0.2.6)
-  # When a t-test (or F(1,df)) has ambiguous variant matching and the status is
-  # ERROR from effect size comparison, downgrade to design_ambiguous_action.
+  # When a t-test, F(1,df), or z-test has ambiguous variant matching and the
+  # status is ERROR from effect size comparison, downgrade to design_ambiguous_action.
   # Rationale: d-from-t (d = 2t/sqrt(df)) systematically differs from d computed
   # from raw data (means/SDs) when groups are unequal or different pooling methods
   # are used. This is a fundamental limitation, not a reporting error.
+  # v0.2.8: Relaxed extraction_suspect guard for design ambiguity. Large deltas
+  # are EXPECTED when design is ambiguous (d-from-t vs d-from-raw differs ~2x
+  # for paired designs). Also extended to z-tests with d/g.
   # ============================================================================
 
   design_ambiguous_downgraded <- FALSE
 
-  if (status == "ERROR" && check_type == "effect_size" && !extraction_suspect) {
+  # v0.2.8: Design ambiguity causes systematically large deltas that trigger
+  # extraction_suspect (EXTREME_DELTA_THRESHOLD=1.0). But these are NOT extraction
+  # errors — they are design assumption artifacts. Relax the guard when both
+  # independent and paired variants exist (same pattern as Phase 8C n2_inflation_pattern).
+  design_ambiguity_pattern <- FALSE
+  if (ambiguity_level == "ambiguous" && !is.na(matched_value) && !is.na(effect_reported)) {
+    ind_check_names <- c("d_ind", "d_ind_equalN", "d_ind_min", "d_ind_max", "g_ind")
+    paired_check_names <- c("dz", "dav", "drm", "gz", "gav", "grm")
+    has_ind_check <- any(names(same_type_variants) %in% ind_check_names)
+    has_paired_check <- any(names(same_type_variants) %in% paired_check_names)
+    if (has_ind_check && has_paired_check) {
+      # Guard: reported value must be plausibly between the independent and paired
+      # variants (with 50% margin). If it's far from ALL variants, it's genuinely wrong.
+      all_vals <- abs(sapply(same_type_variants, function(v) v$value))
+      variant_range <- range(all_vals, na.rm = TRUE)
+      margin <- max(0.5, diff(variant_range) * 0.5)
+      reported_in_range <- abs(effect_reported) >= (variant_range[1] - margin) &&
+                           abs(effect_reported) <= (variant_range[2] + margin)
+      if (reported_in_range) design_ambiguity_pattern <- TRUE
+    }
+  }
+  # z-tests with d/g are inherently design-ambiguous (same range guard applies)
+  if (tt == "z" && !is.na(canonical_type) && canonical_type %in% c("d", "g") &&
+      !is.na(effect_reported) && length(same_type_variants) > 0) {
+    all_vals_z <- abs(sapply(same_type_variants, function(v) v$value))
+    variant_range_z <- range(all_vals_z, na.rm = TRUE)
+    margin_z <- max(0.5, diff(variant_range_z) * 0.5)
+    reported_in_range_z <- abs(effect_reported) >= (variant_range_z[1] - margin_z) &&
+                           abs(effect_reported) <= (variant_range_z[2] + margin_z)
+    if (reported_in_range_z) design_ambiguity_pattern <- TRUE
+  }
+
+  if (status == "ERROR" && check_type == "effect_size" &&
+      (!extraction_suspect || design_ambiguity_pattern)) {
     is_design_ambiguous_t <- (tt == "t" && ambiguity_level == "ambiguous")
     is_design_ambiguous_F1 <- (tt == "F" && !is.na(df1) && df1 == 1 &&
                                 ambiguity_level == "ambiguous" &&
                                 !is.na(canonical_type) && canonical_type %in% c("d", "g"))
+    is_design_ambiguous_z <- (tt == "z" && !is.na(canonical_type) &&
+                               canonical_type %in% c("d", "g"))
 
-    if (is_design_ambiguous_t || is_design_ambiguous_F1) {
+    if (is_design_ambiguous_t || is_design_ambiguous_F1 || is_design_ambiguous_z) {
       status <- design_ambiguous_action
       design_ambiguous_downgraded <- TRUE
 
@@ -2386,12 +2575,17 @@ compute_and_compare_one <- function(row,
                 if (ratio > 1) "larger" else "smaller")
       } else ""
 
+      method_explanation <- if (tt == "z") {
+        "d = 2z/sqrt(N) assumes independent groups (Mann-Whitney). If z is from Wilcoxon signed-rank (paired), dz = z/sqrt(N) applies instead"
+      } else {
+        "d from raw data vs d from t-statistic"
+      }
       uncertainty <- c(uncertainty,
         sprintf(
-          "Design-ambiguous: reported %s=%.3f vs computed %s=%.3f (delta=%.3f)%s. Likely reflects d computation method difference (d from raw data vs d from t-statistic) rather than reporting error",
+          "Design-ambiguous: reported %s=%.3f vs computed %s=%.3f (delta=%.3f)%s. Likely reflects d computation method difference (%s) rather than reporting error",
           effect_reported_name, effect_reported,
           matched_variant, matched_value, delta_effect_abs,
-          ratio_text
+          ratio_text, method_explanation
         ))
     }
   }
@@ -2419,7 +2613,7 @@ compute_and_compare_one <- function(row,
       (!extraction_suspect || n2_inflation_pattern) &&
       is.na(n1) && is.na(n2) && !is.na(N) &&
       !is.na(canonical_type) && canonical_type %in% c("d", "g")) {
-    is_affected <- (tt == "t") || (tt == "F" && !is.na(df1) && df1 == 1)
+    is_affected <- (tt == "t") || (tt == "F" && !is.na(df1) && df1 == 1) || (tt == "z")
     if (is_affected) {
       status <- unknown_groups_action
       unknown_groups_downgraded <- TRUE
@@ -2503,8 +2697,39 @@ compute_and_compare_one <- function(row,
       full_ctx, ignore.case = TRUE
     )
 
+    # Signal 9 (v0.2.8): Large R2 delta — R2 is bounded [0,1], so delta > 0.3
+    # is a strong signal of cross-pairing (wrong F matched to wrong R2).
+    # v0.2.8b: Lowered from 0.5 to 0.3 per MetaESCI verification (only 3/53 had
+    # delta > 0.5; lowering to 0.3 catches 5 while remaining conservative).
+    large_r2_delta <- (!is.na(delta_effect_abs) && delta_effect_abs > 0.3 &&
+                        !is.na(canonical_type) && canonical_type == "R2")
+
+    # Signal 10 (v0.2.8): Extreme mismatch direction — small reported R2 (<0.10)
+    # but very large computed R2 (>0.80), or vice versa
+    extreme_r2_mismatch <- (!is.na(effect_reported) && !is.na(matched_value) &&
+                             ((abs(effect_reported) < 0.10 && abs(matched_value) > 0.80) ||
+                              (abs(effect_reported) > 0.80 && abs(matched_value) < 0.10)))
+
     # Apply detection logic (priority order from V028 simulation)
-    if (!anova_context) {
+    # v0.2.8: Allow extreme delta detection even with ANOVA context
+    if (large_r2_delta && !r2_cross_pairing_detected) {
+      # Very large R2 delta overrides ANOVA context guard
+      if (regression_context || hierarchical || df1_gt1 || multi_F_context || table_header) {
+        status <- "WARN"
+        r2_cross_pairing_detected <- TRUE
+        uncertainty <- c(uncertainty,
+          sprintf("Very large R2 discrepancy (delta=%.2f > 0.5) with contextual signals: likely cross-paired from different model",
+                  delta_effect_abs))
+      } else if (extreme_r2_mismatch) {
+        status <- "WARN"
+        r2_cross_pairing_detected <- TRUE
+        uncertainty <- c(uncertainty,
+          sprintf("Extreme R2 mismatch (reported=%.2f, computed=%.2f): F-test and R2 likely from different analyses",
+                  abs(effect_reported), abs(matched_value)))
+      }
+    }
+
+    if (!r2_cross_pairing_detected && !anova_context) {
       if (r2_before_F) {
         # R2 before F is more reliable — only downgrade with strong evidence
         if (hierarchical) {
@@ -3239,6 +3464,8 @@ compute_and_compare_one <- function(row,
     design_ambiguous = (ambiguity_level != "clear"),
     unknown_groups_downgraded = unknown_groups_downgraded,
     r2_cross_pairing_detected = r2_cross_pairing_detected,
+    decision_error_downgraded = (decision_error &&
+      (design_ambiguous_downgraded || unknown_groups_downgraded || r2_cross_pairing_detected)),
     sign_mismatch = if (!is.na(effect_reported) && !is.na(matched_value) &&
                         effect_reported != 0 && matched_value != 0)
                      sign(effect_reported) != sign(matched_value) else FALSE,
@@ -3436,6 +3663,7 @@ check_text <- function(text,
           insufficient_data = TRUE,
           unknown_groups_downgraded = FALSE,
           r2_cross_pairing_detected = FALSE,
+          decision_error_downgraded = FALSE,
           decision_error = FALSE,
           p_reported = NA_real_,
           p_computed = NA_real_,

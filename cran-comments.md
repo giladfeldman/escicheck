@@ -5,18 +5,14 @@
 * The only NOTE is "unable to verify current time" which is a transient
   network/clock check issue, not a package problem.
 
-* This is a resubmission (v0.2.7). Changes since v0.2.3:
-  - Design-ambiguous t-test/F(1,df) downgrade to WARN (reduces false ERROR rate)
-  - Unknown group sizes action (unknown_groups_action param)
-  - Minimum confidence filtering (min_confidence param)
-  - Confidence scoring (0-10) for each result
-  - Check scope classification (effect_size_checked, p_value_only, ci_checked, extraction_only)
-  - Dropped decimal p-value recovery (p=484 -> p=.484)
-  - Header/footer stripping for PDF extraction
-  - Decision error now requires reported p-value (prevents false alarms on bare stats)
-  - Cross-type effect size matching reduces false ERROR rate
-  - Plausibility bounds for computed effect sizes
-  - 986 tests passing, 0 failures
+* This is a resubmission (v0.2.8). Changes since v0.2.7:
+  - z-test paired variants: dz = z/sqrt(N) plus dav, drm, gz, gav, grm
+  - Structural design ambiguity detection (Phase 8A-bis) for t/F(1,df)/z
+  - Relaxed extraction_suspect guard for design-ambiguous cases (range-guarded)
+  - R-squared cross-pairing Signal 9 (large delta >0.5)
+  - Cramer's V multi-m candidate selection
+  - Extended unknown group sizes downgrade to z-tests
+  - 1013 tests passing, 0 failures
 
 ## Notes
 

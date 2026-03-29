@@ -870,6 +870,15 @@ d_from_z <- function(z, N) {
   2 * z / sqrt(N)
 }
 
+# Paired (within-subjects) d from z: dz = z/sqrt(N)
+# Analogous to dz_from_t = t/sqrt(n). When z comes from Wilcoxon signed-rank,
+# N is the number of pairs.
+#' @keywords internal
+dz_from_z <- function(z, N) {
+  if (is.na(z) || is.na(N) || N <= 0) return(NA_real_)
+  z / sqrt(N)
+}
+
 rank_biserial_r_from_z <- function(z, N) {
   if (any(is.na(c(z, N))) || N <= 0) {
     return(NA_real_)

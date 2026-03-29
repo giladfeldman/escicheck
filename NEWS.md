@@ -1,3 +1,40 @@
+# effectcheck 0.2.8
+
+## Design ambiguity improvements
+
+Addresses 399 remaining ERRORs from MetaESCI v0.2.7 audit (132,499 results).
+Philosophy: compute ALL plausible alternatives under different design assumptions;
+if ANY alternative matches, downgrade severity.
+
+### New features
+
+* z-test paired variants: added `dz = z/sqrt(N)` (paired/Wilcoxon assumption)
+  alongside existing `d = 2z/sqrt(N)` (independent/Mann-Whitney). Also computes
+  dav, drm via r-grid sweep and gz, gav, grm Hedges-corrected variants.
+* Phase 8A-bis: structural design ambiguity detection for t-tests, F(1,df), and
+  z-tests. When both independent and paired variant families are computed,
+  promotes ambiguity_level to "ambiguous" regardless of which variant matches best.
+* Phase 8D Signal 9: large R-squared delta (>0.5) with contextual signals now
+  triggers cross-pairing detection. R-squared is bounded [0,1], so delta>0.5
+  means F and R-squared are almost certainly from different models.
+* Cramer's V multi-m: when df allows multiple table dimensions, tries all m
+  candidates and picks the one producing V closest to reported value.
+
+### Bug fixes
+
+* Relaxed extraction_suspect guard in Phase 8B for design-ambiguous cases.
+  Large deltas are expected (d-from-t vs d-from-raw differs ~2x for paired
+  designs) and should not block the design-ambiguous downgrade. Range guard
+  ensures genuinely wrong values still produce ERROR.
+* Extended Phase 8C (unknown group sizes downgrade) to cover z-tests.
+* Relaxed Phase 8D ANOVA context guard for extreme R-squared deltas (>0.5)
+  when regression signals are also present.
+
+### Internal
+
+* New compute function: `dz_from_z(z, N)` — paired d from z-statistic
+* 27 new tests in test-v028-design-ambiguity.R (1013 total, 0 failures)
+
 # effectcheck 0.2.7
 
 ## Bug fixes and API improvements
