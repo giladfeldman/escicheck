@@ -655,7 +655,7 @@ compute_and_compare_one <- function(row,
       assumptions <- c(assumptions, "Welch's t-test assumed (unequal variances)")
     }
 
-    # Fix 2: Minimum N guard — reject implausibly small N for any t-test
+    # Fix 2: Minimum N guard -- reject implausibly small N for any t-test
     # Any t-test requires at least 2 observations; N < df+1 is impossible
     if (!is.na(N) && !is.na(df1) && df1 > 0 && N < round(df1) + 1) {
       uncertainty <- c(uncertainty,
@@ -667,7 +667,7 @@ compute_and_compare_one <- function(row,
     # Validate reported N against df
     if (!is.na(N) && !is.na(df1) && df1 > 0) {
       if (is_welch) {
-        # Fix 3: Welch validation — N >= round(df) + 2 guaranteed by
+        # Fix 3: Welch validation -- N >= round(df) + 2 guaranteed by
         # Welch-Satterthwaite equation (df_w <= n1+n2-2, so N >= df_w+2)
         min_N_welch <- round(df1) + 2
         if (N < min_N_welch) {
@@ -681,7 +681,7 @@ compute_and_compare_one <- function(row,
                     N > 1.5 * min_N_welch &&
                     !is.na(effect_reported) && abs(effect_reported) > 0.001 &&
                     !is.na(canonical_type) && canonical_type %in% c("d", "g")) {
-          # Global N is much larger than df+2 — likely from a different study.
+          # Global N is much larger than df+2 -- likely from a different study.
           # Cross-validate: back-compute N from reported d (equal-n assumption)
           N_from_d <- round(4 * stat^2 / effect_reported^2)
           # Allow small tolerance: back-computation assumes equal groups, which
@@ -839,7 +839,7 @@ compute_and_compare_one <- function(row,
       }
     }
 
-    # Fix 5A: Final N sanity check — if N is still < 2 after all inference,
+    # Fix 5A: Final N sanity check -- if N is still < 2 after all inference,
     # mark as unreliable rather than computing garbage effect sizes
     if (!is.na(N) && N < 2) {
       N <- NA_real_
@@ -857,7 +857,7 @@ compute_and_compare_one <- function(row,
         )
       }
 
-      # Also compute Hedges' g — promote to computed_variants when canonical_type is "g"
+      # Also compute Hedges' g -- promote to computed_variants when canonical_type is "g"
       g_ind <- tryCatch(g_ind_from_t(stat, n1, n2), error = function(e) NA_real_)
       if (!is.na(g_ind)) {
         if (!is.na(canonical_type) && canonical_type == "g") {
@@ -890,7 +890,7 @@ compute_and_compare_one <- function(row,
             )
           }
 
-          # Hedges' g for equal N — promote when canonical_type is "g"
+          # Hedges' g for equal N -- promote when canonical_type is "g"
           g_ind <- tryCatch(g_ind_from_t(stat, n1_eq, n2_eq), error = function(e) NA_real_)
           if (!is.na(g_ind)) {
             if (!is.na(canonical_type) && canonical_type == "g") {
@@ -1079,7 +1079,7 @@ compute_and_compare_one <- function(row,
         }
       }
     }
-    # Fix 5B: Graceful failure — when N is unknown and no variants computed,
+    # Fix 5B: Graceful failure -- when N is unknown and no variants computed,
     # set explicit message rather than showing garbage downstream
     if (tt == "t" && length(computed_variants) == 0 && is.na(N) && (is.na(n1) || is.na(n2))) {
       uncertainty <- c(uncertainty,
@@ -1259,7 +1259,7 @@ compute_and_compare_one <- function(row,
         )
       }
 
-      # R² as computed variant when reported type is R² (R² = eta² for single-factor)
+      # R2 as computed variant when reported type is R2 (R2 = eta2 for single-factor)
       if (!is.na(canonical_type) && canonical_type == "R2" && !is.na(anova_effects$eta2)) {
         computed_variants$R2 <- list(
           value = anova_effects$eta2,
@@ -1271,7 +1271,7 @@ compute_and_compare_one <- function(row,
         )
       }
 
-      # v0.2.7: Compute adjusted R² as alternative for F-tests
+      # v0.2.7: Compute adjusted R2 as alternative for F-tests
       if (!is.na(anova_effects$eta2) && !is.na(df1) && !is.na(df2)) {
         N_est <- df1 + df2 + 1
         adj_R2 <- tryCatch(adjusted_R2_from_R2(anova_effects$eta2, N_est, df1),
@@ -1300,12 +1300,12 @@ compute_and_compare_one <- function(row,
         }
       }
 
-      # v0.2.7: Compute Cohen's f² for F-tests (f² = R²/(1-R²) = F*df1/df2)
-      # v0.2.9 Fix 6: Also compute partial f² for within-subjects designs
+      # v0.2.7: Compute Cohen's f2 for F-tests (f2 = R2/(1-R2) = F*df1/df2)
+      # v0.2.9 Fix 6: Also compute partial f2 for within-subjects designs
       if (!is.na(anova_effects$eta2) && anova_effects$eta2 < 1) {
         f2_val <- tryCatch(cohens_f2_from_R2(anova_effects$eta2),
                            error = function(e) NA_real_)
-        # v0.2.9: Partial f² = F*df1/df2 (within-subjects error term)
+        # v0.2.9: Partial f2 = F*df1/df2 (within-subjects error term)
         partial_f2_val <- tryCatch(
           (stat * df1) / df2,
           error = function(e) NA_real_)
@@ -1415,7 +1415,7 @@ compute_and_compare_one <- function(row,
           )
           if (!any(is.na(ci_d_val))) computed_variants$d_ind_equalN$ci <- ci_d_val
 
-          # Hedges' g (bias-corrected d) — Issue A fix
+          # Hedges' g (bias-corrected d) -- Issue A fix
           J_factor <- 1 - 3 / (4 * df2 - 1)
           g_equiv <- d_equiv * J_factor
           computed_variants$g_ind <- list(
@@ -1746,7 +1746,7 @@ compute_and_compare_one <- function(row,
         # v0.2.8: When multiple m candidates exist and author reported V,
         # try ALL candidates and pick the one producing V closest to reported.
         # This handles cases where df allows multiple table dimensions
-        # (e.g., df=4 could be 5×2 with m=1 or 3×3 with m=2).
+        # (e.g., df=4 could be 5x2 with m=1 or 3x3 with m=2).
         V_val <- NA_real_
         if (length(m_candidates) > 1 && !is.na(canonical_type) &&
             canonical_type == "V" && !is.na(effect_reported)) {
@@ -1809,7 +1809,7 @@ compute_and_compare_one <- function(row,
     # v0.2.7: Compute d from z when N is available
     # v0.2.8: Compute BOTH independent (d = 2z/sqrt(N)) and paired (dz = z/sqrt(N))
     # variants. z-tests can come from Mann-Whitney (independent) or Wilcoxon
-    # signed-rank (paired) — we cannot tell from the statistic alone.
+    # signed-rank (paired) -- we cannot tell from the statistic alone.
     # v0.2.9 Fix 9: When reported |d| > 3 for z-test, the d likely belongs to
     # a different analysis (e.g., Bayesian posterior, different test). Skip
     # effect size computation to avoid false ERROR.
@@ -2269,7 +2269,7 @@ compute_and_compare_one <- function(row,
   status <- "WARN"
   has_effect_reported <- !is.na(effect_reported)
 
-  # Fix 5C: Graceful failure — if no variant could be computed and N is unknown,
+  # Fix 5C: Graceful failure -- if no variant could be computed and N is unknown,
   # don't flag as ERROR with misleading delta; report as NOTE
   if (is.na(matched_value) && is.na(N) && has_effect_reported) {
     status <- "NOTE"
@@ -2308,14 +2308,14 @@ compute_and_compare_one <- function(row,
         status <- "PASS"
         uncertainty <- c(uncertainty, "Design ambiguous but closest variant matches well")
       } else {
-        # highly_ambiguous (cross-type fallback, unknown type) — use cross_type_action param
+        # highly_ambiguous (cross-type fallback, unknown type) -- use cross_type_action param
         status <- cross_type_action
         uncertainty <- c(uncertainty, "Match is good but comparison is highly ambiguous (cross-type or unknown effect type)")
       }
     } else if (delta_effect_abs <= (3 * tol_eff)) {
       status <- "WARN"
     } else if (delta_effect_abs > (5 * tol_eff)) {
-      # Cross-type fallback should not produce ERROR — use cross_type_action (Issue 1D fix)
+      # Cross-type fallback should not produce ERROR -- use cross_type_action (Issue 1D fix)
       if (ambiguity_level == "highly_ambiguous" && grepl("No same-type", ambiguity_reason)) {
         status <- cross_type_action
         uncertainty <- c(uncertainty, "Cross-type comparison (no same-type variants available) \u2014 delta not meaningful")
@@ -2382,7 +2382,7 @@ compute_and_compare_one <- function(row,
   }
 
   # Garbled p-value detection: "p < X" where X > 0.5 is nonsensical
-  # (you wouldn't write "p < 0.645" — this is a PDF extraction artifact)
+  # (you wouldn't write "p < 0.645" -- this is a PDF extraction artifact)
   if (p_is_inequality && !is.na(p_reported) && p_reported > 0.5) {
     extraction_suspect <- TRUE
     uncertainty <- c(uncertainty,
@@ -2497,7 +2497,7 @@ compute_and_compare_one <- function(row,
       } else if (delta_effect_abs <= 3 * tol_eff) {
         status <- "WARN"
       }
-      # Keep extraction_suspect TRUE — the correction is still flagged
+      # Keep extraction_suspect TRUE -- the correction is still flagged
       uncertainty <- c(uncertainty,
         sprintf("Decimal recovery: reported %s = %.2f likely %s = %.4f (matches computed %s = %.4f, delta = %.4f)",
                 effect_reported_name, original_effect,
@@ -2656,7 +2656,7 @@ compute_and_compare_one <- function(row,
 
   # v0.2.8: Design ambiguity causes systematically large deltas that trigger
   # extraction_suspect (EXTREME_DELTA_THRESHOLD=1.0). But these are NOT extraction
-  # errors — they are design assumption artifacts. Relax the guard when both
+  # errors -- they are design assumption artifacts. Relax the guard when both
   # independent and paired variants exist (same pattern as Phase 8C n2_inflation_pattern).
   design_ambiguity_pattern <- FALSE
   if (ambiguity_level == "ambiguous" && !is.na(matched_value) && !is.na(effect_reported)) {
@@ -2734,7 +2734,7 @@ compute_and_compare_one <- function(row,
   # systematic direction of N/2 inflation). When equal-split assumption is used,
   # computed d/g is LARGER than actual because the minority group is smaller
   # than N/2. This triggers extraction_suspect for large deltas, but these are
-  # NOT extraction errors — they are N/2 assumption artifacts (MetaESCI audit:
+  # NOT extraction errors -- they are N/2 assumption artifacts (MetaESCI audit:
   # 84.8% of g errors from this pattern). However, when reported > computed
   # (the opposite direction), keep extraction_suspect guard since the error
   # pattern is inconsistent with N/2 inflation and may be a genuine extraction issue.
@@ -2806,7 +2806,7 @@ compute_and_compare_one <- function(row,
       full_ctx, ignore.case = TRUE
     )
 
-    # Signal 4: ANOVA keywords (negative signal — do NOT apply regression downgrades)
+    # Signal 4: ANOVA keywords (negative signal -- do NOT apply regression downgrades)
     anova_context <- grepl(
       "ANOVA|analysis\\s*of\\s*variance|partial\\s*eta|\\u03B7\\u00B2|\\u03B7p\\u00B2",
       full_ctx, ignore.case = TRUE
@@ -2828,7 +2828,7 @@ compute_and_compare_one <- function(row,
       full_ctx, ignore.case = TRUE
     )
 
-    # Signal 9 (v0.2.8→v0.2.9 Fix 2A): Large R2/f2 delta — R2 bounded [0,1].
+    # Signal 9 (v0.2.8->v0.2.9 Fix 2A): Large R2/f2 delta -- R2 bounded [0,1].
     # v0.2.9: Lowered threshold from 0.3 to 0.05 (5x R2 tolerance of 0.01).
     # Extended to f2 (Fix 3) since f2 = R2/(1-R2) amplifies R2 mismatches.
     large_r2_delta <- (!is.na(delta_effect_abs) && delta_effect_abs > 0.05 &&
@@ -2852,7 +2852,7 @@ compute_and_compare_one <- function(row,
       }
     }
 
-    # Signal 12 (v0.2.9 Fix 2C): Extreme ratio — computed/reported > 5x
+    # Signal 12 (v0.2.9 Fix 2C): Extreme ratio -- computed/reported > 5x
     extreme_ratio <- FALSE
     if (!is.na(effect_reported) && abs(effect_reported) > 0.001 &&
         !is.na(matched_value) && abs(matched_value) > 0.001) {
@@ -2860,7 +2860,7 @@ compute_and_compare_one <- function(row,
       extreme_ratio <- (ratio > 5 || ratio < 0.2)
     }
 
-    # Apply detection logic (priority order from V028→V029 simulation)
+    # Apply detection logic (priority order from V028->V029 simulation)
     # v0.2.9: Multiple independent signals for cross-pairing
     if (!r2_cross_pairing_detected) {
       # Signal 11: df1-based R2 mismatch is strong evidence alone
@@ -2899,30 +2899,30 @@ compute_and_compare_one <- function(row,
       # Signal 13 (v0.2.9b): Cohen's f / f2 standalone cross-pairing
       # Cohen's f and f2 are almost always reported alongside the F-test they
       # derive from. Large delta alone is sufficient evidence of cross-pairing
-      # because f = sqrt(F*df1/df2) is deterministic — any mismatch means wrong F.
+      # because f = sqrt(F*df1/df2) is deterministic -- any mismatch means wrong F.
       if (!r2_cross_pairing_detected &&
           !is.na(canonical_type) && canonical_type %in% c("cohens_f", "f2") &&
           !is.na(delta_effect_abs) && delta_effect_abs > 0.10) {
         status <- "WARN"
         r2_cross_pairing_detected <- TRUE
         uncertainty <- c(uncertainty,
-          sprintf("Cohen's %s delta=%.3f > 0.10: f/f2 derives deterministically from F — mismatch indicates cross-pairing",
+          sprintf("Cohen's %s delta=%.3f > 0.10: f/f2 derives deterministically from F -- mismatch indicates cross-pairing",
                   canonical_type, delta_effect_abs))
       }
     }
 
     if (!r2_cross_pairing_detected && !anova_context) {
       if (r2_before_F) {
-        # R2 before F is more reliable — only downgrade with strong evidence
+        # R2 before F is more reliable -- only downgrade with strong evidence
         if (hierarchical) {
           status <- "NOTE"
           r2_cross_pairing_detected <- TRUE
           uncertainty <- c(uncertainty,
             "Hierarchical regression: R2 may be incremental (delta-R2), not total")
         }
-        # Otherwise keep ERROR — position suggests correct pairing but values don't match
+        # Otherwise keep ERROR -- position suggests correct pairing but values don't match
       } else {
-        # R2 after F or unknown position — higher cross-pairing risk
+        # R2 after F or unknown position -- higher cross-pairing risk
         if (hierarchical) {
           status <- "NOTE"
           r2_cross_pairing_detected <- TRUE
@@ -3088,7 +3088,7 @@ compute_and_compare_one <- function(row,
     if (p_inequality_consistent) {
       decision_error <- FALSE
     }
-    # Decision error requires a reported p-value (v0.2.6) — without one,
+    # Decision error requires a reported p-value (v0.2.6) -- without one,
     # there is no author's significance decision to check. This prevents false
     # decision errors for extraction-only results (e.g., regression z-statistics
     # from coefficient tables where z = 9.47** but no p is reported).
@@ -3170,7 +3170,7 @@ compute_and_compare_one <- function(row,
         )
       }
       # v0.2.4: When effect size match is excellent (< 0.5x tolerance) AND
-      # ambiguity is clear, keep PASS — the p-value discrepancy is likely
+      # ambiguity is clear, keep PASS -- the p-value discrepancy is likely
       # rounding, not a genuine inconsistency.
       has_strong_effect_match <- !is.na(delta_effect_abs) && !is.na(tol_eff) &&
         delta_effect_abs < (0.5 * tol_eff) && ambiguity_level == "clear"
@@ -3271,7 +3271,7 @@ compute_and_compare_one <- function(row,
     }
   }
 
-  # Extraction-only results: nothing was checked → SKIP (not analyzed)
+  # Extraction-only results: nothing was checked -> SKIP (not analyzed)
   # Exclude p_ns cases: "ns"/"n.s." IS a form of p-value reporting that was verified
   if (check_type == "extraction_only" && !decision_error && !p_ns) {
     status <- "SKIP"
