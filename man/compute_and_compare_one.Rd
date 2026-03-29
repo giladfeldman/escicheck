@@ -9,7 +9,7 @@ compute_and_compare_one(
   ci_level = 0.95,
   alpha = 0.05,
   one_tailed = FALSE,
-  paired_r_grid = seq(0.1, 0.9, by = 0.1),
+  paired_r_grid = c(seq(0.1, 0.9, by = 0.1), 0.95),
   assume_equal_ns_when_missing = TRUE,
   tol_effect = list(d = 0.02, r = 0.005, phi = 0.02, V = 0.02),
   tol_ci = 0.02,

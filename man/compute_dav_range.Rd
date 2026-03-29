@@ -4,7 +4,7 @@
 \alias{compute_dav_range}
 \title{Compute range of plausible dav values}
 \usage{
-compute_dav_range(dz, r_grid = seq(0.1, 0.9, by = 0.1))
+compute_dav_range(dz, r_grid = c(seq(0.1, 0.9, by = 0.1), 0.95))
 }
 \arguments{
 \item{dz}{Cohen's dz}

@@ -10,7 +10,7 @@ check_text(
   ci_level = 0.95,
   alpha = 0.05,
   one_tailed = FALSE,
-  paired_r_grid = seq(0.1, 0.9, by = 0.1),
+  paired_r_grid = c(seq(0.1, 0.9, by = 0.1), 0.95),
   assume_equal_ns_when_missing = TRUE,
   ci_method_phi = "bonett_price",
   ci_method_V = "bonett_price",

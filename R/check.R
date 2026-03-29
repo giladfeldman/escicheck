@@ -351,7 +351,7 @@ compute_and_compare_one <- function(row,
                                     ci_level = 0.95,
                                     alpha = 0.05,
                                     one_tailed = FALSE,
-                                    paired_r_grid = seq(0.1, 0.9, by = 0.1),
+                                    paired_r_grid = c(seq(0.1, 0.9, by = 0.1), 0.95),
                                     assume_equal_ns_when_missing = TRUE,
                                     tol_effect = list(d = 0.02, r = 0.005, phi = 0.02, V = 0.02),
                                     tol_ci = 0.02,
@@ -633,6 +633,9 @@ compute_and_compare_one <- function(row,
   # ============================================================================
   # PHASE 4: Compute effect sizes based on test type
   # ============================================================================
+
+  mixed_model_F_detected <- FALSE  # v0.2.9: initialized for all test types
+  phi_to_v_reinterpreted <- FALSE  # v0.2.9: initialized for all test types
 
   if (tt == "t") {
     # ------ T-TEST COMPUTATIONS ------
@@ -1183,6 +1186,15 @@ compute_and_compare_one <- function(row,
     df2 <- as.numeric(df2[1])
     stat <- as.numeric(stat[1])
 
+    # v0.2.9 Fix 4: Non-integer df2 detection for F-tests
+    # Non-integer df2 indicates mixed-effects model or Satterthwaite/KR approximation
+    mixed_model_F_detected <- FALSE
+    if (!is.na(df2) && abs(df2 - round(df2)) > 0.01) {
+      mixed_model_F_detected <- TRUE
+      uncertainty <- c(uncertainty,
+        sprintf("Non-integer df2 (%.2f) suggests mixed-effects model; standard effect size formula may not apply", df2))
+    }
+
     if (!is.na(df1) && !is.na(df2) && df1 > 0 && df2 > 0) {
       # Infer design from context
       design <- "unclear"
@@ -1289,17 +1301,47 @@ compute_and_compare_one <- function(row,
       }
 
       # v0.2.7: Compute Cohen's f² for F-tests (f² = R²/(1-R²) = F*df1/df2)
+      # v0.2.9 Fix 6: Also compute partial f² for within-subjects designs
       if (!is.na(anova_effects$eta2) && anova_effects$eta2 < 1) {
         f2_val <- tryCatch(cohens_f2_from_R2(anova_effects$eta2),
                            error = function(e) NA_real_)
+        # v0.2.9: Partial f² = F*df1/df2 (within-subjects error term)
+        partial_f2_val <- tryCatch(
+          (stat * df1) / df2,
+          error = function(e) NA_real_)
         if (!is.na(f2_val)) {
           if (!is.na(canonical_type) && canonical_type == "f2") {
-            computed_variants$cohens_f2 <- list(
-              value = f2_val,
-              metadata = list(name = "Cohen's f\u00b2 (from F)",
-                              assumptions = "f\u00b2 = R\u00b2/(1-R\u00b2)",
-                              when_to_use = "Effect size for regression")
-            )
+            # For within-subjects, use whichever is closer to reported
+            if (design %in% c("within", "mixed") && !is.na(partial_f2_val) &&
+                !is.na(effect_reported)) {
+              delta_standard <- abs(f2_val - abs(effect_reported))
+              delta_partial <- abs(partial_f2_val - abs(effect_reported))
+              if (delta_partial < delta_standard) {
+                computed_variants$cohens_f2 <- list(
+                  value = partial_f2_val,
+                  metadata = list(
+                    name = "Partial f\u00b2 (within-subjects)",
+                    assumptions = "f\u00b2_partial = F*df1/df2 (within-subjects error)",
+                    when_to_use = "Within-subjects/repeated-measures designs"))
+                alternatives$cohens_f2_standard <- list(
+                  value = f2_val,
+                  metadata = list(name = "Cohen's f\u00b2 (standard)",
+                                  assumptions = "f\u00b2 = R\u00b2/(1-R\u00b2)"),
+                  why_consider = "Standard (between-subjects) formula")
+              } else {
+                computed_variants$cohens_f2 <- list(
+                  value = f2_val,
+                  metadata = list(name = "Cohen's f\u00b2 (from F)",
+                                  assumptions = "f\u00b2 = R\u00b2/(1-R\u00b2)",
+                                  when_to_use = "Effect size for regression"))
+              }
+            } else {
+              computed_variants$cohens_f2 <- list(
+                value = f2_val,
+                metadata = list(name = "Cohen's f\u00b2 (from F)",
+                                assumptions = "f\u00b2 = R\u00b2/(1-R\u00b2)",
+                                when_to_use = "Effect size for regression"))
+            }
           } else {
             alternatives$cohens_f2 <- list(
               value = f2_val,
@@ -1598,7 +1640,19 @@ compute_and_compare_one <- function(row,
       }
     }
 
-    if (!is.na(N) && N > 0) {
+    # v0.2.9 Fix 8: Zero chi-square extraction guard
+    # When chi2=0 but author reports V/phi > 0, the statistic was likely
+    # misextracted. Computing V from chi2=0 gives 0 regardless of N,
+    # guaranteeing a false ERROR. Skip effect size computation entirely.
+    skip_chisq_computation <- FALSE
+    if (!is.na(stat) && stat == 0 &&
+        !is.na(effect_reported) && abs(effect_reported) > 0) {
+      skip_chisq_computation <- TRUE
+      uncertainty <- c(uncertainty,
+        "chi-square = 0 but non-zero effect size reported; likely extraction artifact")
+    }
+
+    if (!is.na(N) && N > 0 && !skip_chisq_computation) {
       phi_val <- tryCatch(phi_from_chisq(stat, N), error = function(e) NA_real_)
       if (!is.na(phi_val)) {
         computed_variants$phi <- list(
@@ -1613,6 +1667,18 @@ compute_and_compare_one <- function(row,
         if (phi_ci_result$success) {
           computed_variants$phi$ci <- phi_ci_result$bounds
         }
+      }
+
+      # v0.2.9 Fix 7: Phi vs V disambiguation for non-2x2 tables
+      # When author reports phi but df >= 2, table is NOT 2x2.
+      # Phi is only valid for 2x2 (df=1). Reinterpret as Cramer's V.
+      if (!is.na(canonical_type) && canonical_type == "phi" &&
+          !is.na(df1) && df1 >= 2) {
+        canonical_type <- "V"
+        uncertainty <- c(uncertainty,
+          sprintf("df=%.0f implies non-2x2 table; phi reinterpreted as Cramer's V", df1))
+        # Cap confidence since we overrode the author's type label
+        phi_to_v_reinterpreted <- TRUE
       }
 
       # Cramer's V
@@ -1692,7 +1758,19 @@ compute_and_compare_one <- function(row,
     # v0.2.8: Compute BOTH independent (d = 2z/sqrt(N)) and paired (dz = z/sqrt(N))
     # variants. z-tests can come from Mann-Whitney (independent) or Wilcoxon
     # signed-rank (paired) — we cannot tell from the statistic alone.
-    if (!is.na(stat) && !is.na(N) && N > 0) {
+    # v0.2.9 Fix 9: When reported |d| > 3 for z-test, the d likely belongs to
+    # a different analysis (e.g., Bayesian posterior, different test). Skip
+    # effect size computation to avoid false ERROR.
+    skip_z_effect <- FALSE
+    if (!is.na(canonical_type) && canonical_type %in% c("d", "g") &&
+        !is.na(effect_reported) && abs(effect_reported) > 3.0) {
+      skip_z_effect <- TRUE
+      uncertainty <- c(uncertainty,
+        sprintf("|d| = %.2f unusually large for z-test; may be from a different analysis",
+                abs(effect_reported)))
+    }
+
+    if (!is.na(stat) && !is.na(N) && N > 0 && !skip_z_effect) {
       d_z <- tryCatch(d_from_z(stat, N), error = function(e) NA_real_)
       dz_z <- tryCatch(dz_from_z(stat, N), error = function(e) NA_real_)
       if (!is.na(d_z)) {
@@ -2522,6 +2600,7 @@ compute_and_compare_one <- function(row,
   # ============================================================================
 
   design_ambiguous_downgraded <- FALSE
+  mixed_model_downgraded <- FALSE
 
   # v0.2.8: Design ambiguity causes systematically large deltas that trigger
   # extraction_suspect (EXTREME_DELTA_THRESHOLD=1.0). But these are NOT extraction
@@ -2697,35 +2776,73 @@ compute_and_compare_one <- function(row,
       full_ctx, ignore.case = TRUE
     )
 
-    # Signal 9 (v0.2.8): Large R2 delta — R2 is bounded [0,1], so delta > 0.3
-    # is a strong signal of cross-pairing (wrong F matched to wrong R2).
-    # v0.2.8b: Lowered from 0.5 to 0.3 per MetaESCI verification (only 3/53 had
-    # delta > 0.5; lowering to 0.3 catches 5 while remaining conservative).
-    large_r2_delta <- (!is.na(delta_effect_abs) && delta_effect_abs > 0.3 &&
-                        !is.na(canonical_type) && canonical_type == "R2")
+    # Signal 9 (v0.2.8→v0.2.9 Fix 2A): Large R2/f2 delta — R2 bounded [0,1].
+    # v0.2.9: Lowered threshold from 0.3 to 0.05 (5x R2 tolerance of 0.01).
+    # Extended to f2 (Fix 3) since f2 = R2/(1-R2) amplifies R2 mismatches.
+    large_r2_delta <- (!is.na(delta_effect_abs) && delta_effect_abs > 0.05 &&
+                        !is.na(canonical_type) && canonical_type %in% c("R2", "adjusted_R2", "f2"))
 
-    # Signal 10 (v0.2.8): Extreme mismatch direction — small reported R2 (<0.10)
-    # but very large computed R2 (>0.80), or vice versa
+    # Signal 10 (v0.2.8): Extreme mismatch direction
     extreme_r2_mismatch <- (!is.na(effect_reported) && !is.na(matched_value) &&
                              ((abs(effect_reported) < 0.10 && abs(matched_value) > 0.80) ||
                               (abs(effect_reported) > 0.80 && abs(matched_value) < 0.10)))
 
-    # Apply detection logic (priority order from V028 simulation)
-    # v0.2.8: Allow extreme delta detection even with ANOVA context
-    if (large_r2_delta && !r2_cross_pairing_detected) {
-      # Very large R2 delta overrides ANOVA context guard
-      if (regression_context || hierarchical || df1_gt1 || multi_F_context || table_header) {
+    # Signal 11 (v0.2.9 Fix 2B): df1-based R2 estimation
+    # When df1>1, R2_from_F gives the ANOVA R2 (=eta2). If this matches our
+    # computed value but NOT the reported value, it confirms cross-pairing.
+    df1_r2_mismatch <- FALSE
+    if (!is.na(df1) && df1 > 1 && !is.na(matched_value) && !is.na(effect_reported)) {
+      r2_expected <- (stat * df1) / (stat * df1 + df2)
+      if (!is.na(r2_expected) &&
+          abs(r2_expected - abs(matched_value)) < 0.01 &&
+          abs(r2_expected - abs(effect_reported)) > 0.05) {
+        df1_r2_mismatch <- TRUE
+      }
+    }
+
+    # Signal 12 (v0.2.9 Fix 2C): Extreme ratio — computed/reported > 5x
+    extreme_ratio <- FALSE
+    if (!is.na(effect_reported) && abs(effect_reported) > 0.001 &&
+        !is.na(matched_value) && abs(matched_value) > 0.001) {
+      ratio <- abs(matched_value) / abs(effect_reported)
+      extreme_ratio <- (ratio > 5 || ratio < 0.2)
+    }
+
+    # Apply detection logic (priority order from V028→V029 simulation)
+    # v0.2.9: Multiple independent signals for cross-pairing
+    if (!r2_cross_pairing_detected) {
+      # Signal 11: df1-based R2 mismatch is strong evidence alone
+      if (df1_r2_mismatch) {
         status <- "WARN"
         r2_cross_pairing_detected <- TRUE
         uncertainty <- c(uncertainty,
-          sprintf("Very large R2 discrepancy (delta=%.2f > 0.5) with contextual signals: likely cross-paired from different model",
-                  delta_effect_abs))
-      } else if (extreme_r2_mismatch) {
+          sprintf("F-test R2 (eta2=%.3f) matches computed but not reported (%.3f): likely cross-paired",
+                  (stat * df1) / (stat * df1 + df2), abs(effect_reported)))
+      }
+      # Large delta with contextual signals
+      if (!r2_cross_pairing_detected && large_r2_delta) {
+        if (regression_context || hierarchical || df1_gt1 || multi_F_context ||
+            table_header || df1_r2_mismatch || extreme_ratio) {
+          status <- "WARN"
+          r2_cross_pairing_detected <- TRUE
+          uncertainty <- c(uncertainty,
+            sprintf("R2/f2 discrepancy (delta=%.3f) with cross-pairing signals: likely from different model",
+                    delta_effect_abs))
+        } else if (extreme_r2_mismatch) {
+          status <- "WARN"
+          r2_cross_pairing_detected <- TRUE
+          uncertainty <- c(uncertainty,
+            sprintf("Extreme R2 mismatch (reported=%.2f, computed=%.2f): likely from different analyses",
+                    abs(effect_reported), abs(matched_value)))
+        }
+      }
+      # Extreme ratio alone (Fix 2C)
+      if (!r2_cross_pairing_detected && extreme_ratio &&
+          !is.na(canonical_type) && canonical_type %in% c("R2", "adjusted_R2", "f2")) {
         status <- "WARN"
         r2_cross_pairing_detected <- TRUE
         uncertainty <- c(uncertainty,
-          sprintf("Extreme R2 mismatch (reported=%.2f, computed=%.2f): F-test and R2 likely from different analyses",
-                  abs(effect_reported), abs(matched_value)))
+          sprintf("Computed/reported ratio > 5x for %s: likely cross-paired", canonical_type))
       }
     }
 
@@ -2775,6 +2892,20 @@ compute_and_compare_one <- function(row,
       }
     }
     # Note: do NOT set confidence here (Phase 11 handles it via flag)
+  }
+
+  # ============================================================================
+  # PHASE 8E: Mixed-model F-test downgrade (v0.2.9 Fix 4)
+  # When F-test has non-integer df2 and status is ERROR for effect size,
+  # downgrade to WARN because standard formulas don't apply.
+  # ============================================================================
+
+  if (mixed_model_F_detected && status == "ERROR" &&
+      check_type == "effect_size" && tt == "F") {
+    status <- "WARN"
+    mixed_model_downgraded <- TRUE
+    uncertainty <- c(uncertainty,
+      "Mixed-effects model F-test: effect size formula assumes standard ANOVA error term")
   }
 
   # ============================================================================
@@ -3190,6 +3321,8 @@ compute_and_compare_one <- function(row,
   if (design_ambiguous_downgraded) confidence <- min(confidence, 4L)
   if (unknown_groups_downgraded) confidence <- min(confidence, 4L)
   if (r2_cross_pairing_detected) confidence <- min(confidence, 3L)
+  if (phi_to_v_reinterpreted) confidence <- min(confidence, 4L)
+  if (mixed_model_downgraded) confidence <- min(confidence, 4L)
 
   # Extraction quality signals
   if (extraction_suspect) confidence <- confidence - 2L
@@ -3518,7 +3651,7 @@ check_text <- function(text,
                        ci_level = 0.95,
                        alpha = 0.05,
                        one_tailed = FALSE,
-                       paired_r_grid = seq(0.1, 0.9, by = 0.1),
+                       paired_r_grid = c(seq(0.1, 0.9, by = 0.1), 0.95),
                        assume_equal_ns_when_missing = TRUE,
                        ci_method_phi = "bonett_price",
                        ci_method_V = "bonett_price",
@@ -3697,6 +3830,57 @@ check_text <- function(text,
 
   res$status[res$insufficient_data & (is.na(res$status) | res$status == "")] <- "INSUFFICIENT_DATA"
   res$source <- "text"
+
+  # ============================================================================
+  # PHASE 13: Cascading N sweep (v0.2.9 Fix 1)
+  # When multiple chi-square ERRORs share the same N and have diverse
+  # back-calculated N values, the N is likely from the overall study,
+  # not the individual tests. Downgrade to WARN.
+  # ============================================================================
+
+  if (nrow(res) >= 3 && "test_type" %in% names(res) &&
+      "status" %in% names(res) && "check_type" %in% names(res)) {
+    chisq_errors <- which(
+      res$test_type == "chisq" &
+      res$status == "ERROR" &
+      res$check_type == "effect_size" &
+      !is.na(res$N)
+    )
+    if (length(chisq_errors) >= 3) {
+      # Group by shared N
+      n_vals <- res$N[chisq_errors]
+      n_table <- table(n_vals)
+      for (shared_n in names(n_table)[n_table >= 3]) {
+        idx <- chisq_errors[n_vals == as.numeric(shared_n)]
+        # Back-calculate N from reported effect size
+        n_backs <- sapply(idx, function(i) {
+          eff <- abs(res$effect_reported[i])
+          sv <- res$stat_value[i]
+          if (is.na(eff) || eff == 0 || is.na(sv) || sv == 0) return(NA_real_)
+          round(sv / (eff^2))  # Simple N_back for phi/V with m=1
+        })
+        n_backs <- n_backs[!is.na(n_backs)]
+        if (length(n_backs) >= 3) {
+          # Diversity test: sd/mean > 0.1 means different subsamples
+          cv <- stats::sd(n_backs) / mean(n_backs)
+          if (!is.na(cv) && cv > 0.1) {
+            # Downgrade all to WARN
+            for (i in idx) {
+              res$status[i] <- "WARN"
+              res$confidence[i] <- min(res$confidence[i], 3L, na.rm = TRUE)
+              unc <- res$uncertainty_reasons[i]
+              note <- sprintf(
+                "N=%d appears to be from overall study (back-calc N varies: %s)",
+                as.integer(as.numeric(shared_n)),
+                paste(utils::head(sort(n_backs), 5), collapse = ","))
+              res$uncertainty_reasons[i] <- if (is.na(unc)) note
+                else paste(unc, note, sep = "; ")
+            }
+          }
+        }
+      }
+    }
+  }
 
   # v0.2.4: min_confidence filter
   if (min_confidence > 0 && "confidence" %in% names(res)) {

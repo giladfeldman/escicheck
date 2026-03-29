@@ -255,7 +255,7 @@ drm_from_dz <- function(dz, r = NA_real_) {
 #' @param r_grid Vector of correlations to test
 #' @return List with min, max, median, and values
 #' @keywords internal
-compute_dav_range <- function(dz, r_grid = seq(0.1, 0.9, by = 0.1)) {
+compute_dav_range <- function(dz, r_grid = c(seq(0.1, 0.9, by = 0.1), 0.95)) {
   if (is.na(dz)) {
     return(list(
       min = NA_real_,
