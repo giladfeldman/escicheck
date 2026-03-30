@@ -635,6 +635,7 @@ compute_and_compare_one <- function(row,
   # ============================================================================
 
   mixed_model_F_detected <- FALSE  # v0.2.9: initialized for all test types
+  n_much_larger_than_df <- FALSE   # v0.2.9d: N >> df+1 detection flag
   phi_to_v_reinterpreted <- FALSE  # v0.2.9: initialized for all test types
 
   if (tt == "t") {
@@ -730,6 +731,8 @@ compute_and_compare_one <- function(row,
           )
         } else if (N > max_expected_N + 10) {
           # N is much larger than expected - flag it but don't override
+          # v0.2.9d: Set flag for Phase 8F downgrade
+          n_much_larger_than_df <- TRUE
           uncertainty <- c(
             uncertainty,
             sprintf(
@@ -1660,16 +1663,18 @@ compute_and_compare_one <- function(row,
       }
     }
 
-    # v0.2.7: Cross-validate N against reported V when N from global_text
+    # v0.2.7: Cross-validate N against reported V
     # Back-calculate N_back = chi2 / (V^2 * m). If N_back is plausible and
     # substantially smaller than current N, override with back-calculated N.
-    # Only fires for global_text N_source (never overrides inline or adjacent N).
+    # v0.2.9d: Extended from global_text only to ALL N_source types when
+    # the delta would be large (> 0.15). chi_inline N is still protected
+    # by the N_back < 0.8*N guard (inline N is usually correct).
     if (!is.na(N) && !is.na(effect_reported) && abs(effect_reported) > 0 &&
         !is.na(stat) && stat > 0 &&
         !is.na(canonical_type) && canonical_type == "V") {
       n_source_val <- if ("N_source" %in% names(row) && length(row$N_source) > 0)
         as.character(row$N_source[1]) else NA_character_
-      if (!is.na(n_source_val) && n_source_val == "global_text") {
+      if (!is.na(n_source_val) && n_source_val != "chi_inline") {
         m_back <- if (!is.na(table_r) && !is.na(table_c)) {
           min(table_r - 1, table_c - 1)
         } else if (!is.na(df1)) {
@@ -1684,10 +1689,11 @@ compute_and_compare_one <- function(row,
           N_original_chisq <- N
           N <- N_back
           assumptions <- c(assumptions,
-            sprintf("N=%d back-calculated from V=%.3f (was %d from global text, m=%d)",
-                    as.integer(N), effect_reported, as.integer(N_original_chisq), as.integer(m_back)))
+            sprintf("N=%d back-calculated from V=%.3f (was %d from %s, m=%d)",
+                    as.integer(N), effect_reported, as.integer(N_original_chisq),
+                    n_source_val, as.integer(m_back)))
           uncertainty <- c(uncertainty,
-            "Global N overridden by back-calculation from reported Cramer's V")
+            sprintf("N overridden by back-calculation from reported Cramer's V (was %s)", n_source_val))
         }
       }
     }
@@ -2854,8 +2860,10 @@ compute_and_compare_one <- function(row,
 
     # Signal 12 (v0.2.9 Fix 2C): Extreme ratio -- computed/reported > 5x
     extreme_ratio <- FALSE
-    if (!is.na(effect_reported) && abs(effect_reported) > 0.001 &&
-        !is.na(matched_value) && abs(matched_value) > 0.001) {
+    # v0.2.9d: Lowered floor from 0.001 to 0.0001 -- R2 can be < 0.001 for
+    # single predictors in large-N studies (e.g., F(1,7892) gives R2=0.00066)
+    if (!is.na(effect_reported) && abs(effect_reported) > 0.0001 &&
+        !is.na(matched_value) && abs(matched_value) > 0.0001) {
       ratio <- abs(matched_value) / abs(effect_reported)
       extreme_ratio <- (ratio > 5 || ratio < 0.2)
     }
@@ -2971,6 +2979,51 @@ compute_and_compare_one <- function(row,
     mixed_model_downgraded <- TRUE
     uncertainty <- c(uncertainty,
       "Mixed-effects model F-test: effect size formula assumes standard ANOVA error term")
+  }
+
+  # ============================================================================
+  # PHASE 8D-bis: d cross-pairing detection for F-tests (v0.2.9d)
+  # When reported d is below half of the smallest computed d variant,
+  # the d likely comes from a different analysis than the F-test.
+  # ============================================================================
+
+  if (status == "ERROR" && tt == "F" && check_type == "effect_size" &&
+      !is.na(canonical_type) && canonical_type %in% c("d", "g", "dz", "dav", "drm") &&
+      !is.na(effect_reported) && length(computed_variants) > 0) {
+    # Filter to d-family variants only (not r, eta2, etc.)
+    d_family_names <- c("d_ind", "d_ind_equalN", "d_ind_min", "d_ind_max",
+                        "g_ind", "dz", "dav", "drm", "gz", "gav", "grm")
+    d_variant_values <- sapply(names(computed_variants), function(nm) {
+      if (nm %in% d_family_names && !is.null(computed_variants[[nm]]$value) &&
+          !is.na(computed_variants[[nm]]$value))
+        abs(computed_variants[[nm]]$value) else NA_real_
+    })
+    d_variant_values <- d_variant_values[!is.na(d_variant_values)]
+    if (length(d_variant_values) > 0) {
+      min_variant <- min(d_variant_values)
+      if (min_variant > 0 && abs(effect_reported) < min_variant * 0.5) {
+        status <- "WARN"
+        r2_cross_pairing_detected <- TRUE  # reuse flag for confidence cap
+        uncertainty <- c(uncertainty,
+          sprintf("Reported %s=%.2f below all computed variants (min=%.2f); likely from different analysis",
+                  canonical_type, abs(effect_reported), min_variant))
+      }
+    }
+  }
+
+  # ============================================================================
+  # PHASE 8F: N >> df+1 downgrade (v0.2.9d)
+  # When N is much larger than expected from df and design is ambiguous,
+  # all computed variants are unreliable. ERROR is inappropriate.
+  # ============================================================================
+
+  n_mismatch_downgraded <- FALSE
+  if (n_much_larger_than_df && status == "ERROR" &&
+      check_type == "effect_size" && tt %in% c("t", "F")) {
+    status <- "WARN"
+    n_mismatch_downgraded <- TRUE
+    uncertainty <- c(uncertainty,
+      "N much larger than expected from df; computed effect sizes may use wrong N")
   }
 
   # ============================================================================
@@ -3388,6 +3441,7 @@ compute_and_compare_one <- function(row,
   if (r2_cross_pairing_detected) confidence <- min(confidence, 3L)
   if (phi_to_v_reinterpreted) confidence <- min(confidence, 4L)
   if (mixed_model_downgraded) confidence <- min(confidence, 4L)
+  if (n_mismatch_downgraded) confidence <- min(confidence, 3L)
 
   # Extraction quality signals
   if (extraction_suspect) confidence <- confidence - 2L

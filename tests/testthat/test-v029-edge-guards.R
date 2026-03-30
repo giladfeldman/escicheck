@@ -138,3 +138,41 @@ test_that("Fix 9 edge: d=2.9 below threshold still computes", {
   expect_true(r$check_type[1] == "effect_size")
   expect_true(!is.na(r$matched_value[1]))
 })
+
+# ==== v0.2.9d Fixes ====
+
+test_that("v0.2.9d Fix 1: N >> df+1 gets WARN not ERROR", {
+  # t(262) with N=467 — N is 1.8x larger than expected (263-264)
+  # Use g value that won't be decimal-recovered
+  r <- check_text("In a sample of 467 participants, t(262) = 3.50, p < .001, g = 1.50")
+  # Should be WARN (N mismatch + design ambiguous) not ERROR
+  expect_true(r$status[1] %in% c("WARN", "NOTE"))
+})
+
+test_that("v0.2.9d Fix 1 regression: normal N stays unchanged", {
+  r <- check_text("t(28) = 2.50, p = .019, d = 0.92")
+  # N inferred from df, no mismatch
+  expect_true(!grepl("larger than expected", r$uncertainty_reasons[1]) ||
+              is.na(r$uncertainty_reasons[1]))
+})
+
+test_that("v0.2.9d Fix 2: Signal 12 fires for very small R2", {
+  # F(1,7892) → R2 = 5.2/7897.2 = 0.00066, reported 0.058
+  r <- check_text("F(1, 7892) = 5.20, p = .023, R2 = 0.058")
+  expect_true(r$status[1] %in% c("WARN", "NOTE"))
+})
+
+test_that("v0.2.9d Fix 3: V back-calc fires for non-global_text N_source", {
+  # Synthetic: V back-calc should fire when N is clearly wrong
+  r <- check_text("In the study (N = 1409), chi2(1) = 5.40, V = 0.22")
+  # V = sqrt(5.4/(N*1)). With N=1409: V=0.062. With N_back=112: V=0.220
+  # Back-calc should override N
+  expect_true(r$status[1] %in% c("PASS", "WARN"))
+})
+
+test_that("v0.2.9d Fix 4: d cross-pairing when reported < min_variant * 0.5", {
+  # F(1,49) = 190 → d_ind = 2*sqrt(190/49) ≈ 3.94, drm ≈ 1.88
+  # Reported d = 0.80 < 1.88 * 0.5 = 0.94 → cross-pairing
+  r <- check_text("F(1, 49) = 190.0, p < .001, d = 0.80")
+  expect_true(r$status[1] %in% c("WARN", "NOTE"))
+})
