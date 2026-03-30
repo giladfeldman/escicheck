@@ -2778,7 +2778,7 @@ compute_and_compare_one <- function(row,
   r2_cross_pairing_detected <- FALSE
 
   if (status == "ERROR" && tt == "F" && check_type == "effect_size" &&
-      !is.na(canonical_type) && canonical_type %in% c("R2", "adjusted_R2", "f2") &&
+      !is.na(canonical_type) && canonical_type %in% c("R2", "adjusted_R2", "f2", "cohens_f") &&
       !is.na(delta_effect_abs)) {
 
     raw <- if (!is.null(row$raw_text) && length(row$raw_text) > 0)

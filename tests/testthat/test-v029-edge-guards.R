@@ -111,6 +111,13 @@ test_that("Issue A: F(1,df) with matching g stays PASS", {
 
 # ==== Issue B: Cohen's f/f2 cross-pairing ====
 
+test_that("Issue B: cohens_f standalone cross-pairing detected", {
+  # Cohen's f = sqrt(F*df1/df2) = sqrt(12.5/131) = 0.309, reported 1.30, delta >> 0.10
+  r <- check_text("F(1, 131) = 12.5, p < .001, Cohen's f = 1.30")
+  expect_true(r$status[1] %in% c("WARN", "NOTE"))
+  expect_true(grepl("cross-pairing", r$uncertainty_reasons[1]))
+})
+
 test_that("Issue B: f2 standalone cross-pairing detected", {
   # f2 = F*df1/df2 = 30/386 = 0.0777, reported 0.80, delta = 0.722 >> 0.10
   r <- check_text("F(1, 386) = 30.0, p < .001, f2 = 0.80")
