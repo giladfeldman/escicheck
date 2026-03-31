@@ -69,6 +69,12 @@ EFFECT_SIZE_FAMILIES <- list(
     alternatives = c("eta2", "partial_eta2", "cohens_f"),
     description = "Omega-squared - population estimate (less biased)"
   ),
+  partial_omega2 = list(
+    family = "omega2",
+    variants = c("partial_omega2", "omega2"),
+    alternatives = c("eta2", "partial_eta2", "cohens_f"),
+    description = "Partial omega-squared - SPSS factorial ANOVA"
+  ),
   cohens_f = list(
     family = "f",
     variants = c("cohens_f", "cohens_f_omega"),
@@ -456,6 +462,8 @@ compute_and_compare_one <- function(row,
     "etap2" = "etap2", "partial eta2" = "etap2", "partial eta-squared" = "etap2",
     "partial eta squared" = "etap2", "\u03b7p\u00b2" = "etap2", "partial \u03b7\u00b2" = "etap2",
     "omega2" = "omega2", "omega-squared" = "omega2", "omega squared" = "omega2", "\u03c9\u00b2" = "omega2",
+    "partial_omega2" = "partial_omega2", "partial omega2" = "partial_omega2",
+    "partial omega-squared" = "partial_omega2", "partial omega squared" = "partial_omega2",
     "f" = "cohens_f", "cohen's f" = "cohens_f", "cohens f" = "cohens_f",
     "phi" = "phi", "\u03c6" = "phi",
     "v" = "V", "cramer's v" = "V", "cramers v" = "V",
@@ -515,7 +523,7 @@ compute_and_compare_one <- function(row,
     } else if (tt == "F") {
       # F-tests/ANOVA: eta\u00b2, partial eta\u00b2, omega\u00b2, Cohen's f, R\u00b2
       # When df1=1, F is equivalent to t\u00b2, so d/g/r are also valid
-      valid_types <- c("eta", "eta2", "etap2", "omega2", "cohens_f", "R2", "f2")
+      valid_types <- c("eta", "eta2", "etap2", "omega2", "partial_omega2", "epsilon_squared", "cohens_f", "R2", "f2")
       if (!is.na(df1) && df1 == 1) {
         valid_types <- c(valid_types, "d", "g", "dz", "dav", "drm", "r")
       }
@@ -2249,55 +2257,88 @@ compute_and_compare_one <- function(row,
     }
 
     # Find closest match among same-type variants
-    # v0.3.0: Range-aware matching for variants with $range (dav, drm, gav, grm)
+    # v0.3.0a: Two-pass range-aware matching for variants with $range
+    # Pass 1: In-range variants ALWAYS beat out-of-range variants
+    # Pass 2: Among in-range, prefer the one where value is most central
+    # Output delta uses median distance (for status determination)
     if (length(same_type_variants) > 0) {
       abs_reported <- abs(effect_reported)
-      diffs <- sapply(same_type_variants, function(v) {
-        if (is.null(v$value) || is.na(v$value)) {
-          return(Inf)
-        }
-        # v0.3.0: Range-aware matching for paired variants (dav, drm, gav, grm)
-        # When a variant has $range from r-grid sweep, use distance to the
-        # nearest range bound instead of distance to median. This improves
-        # matching for high-r paired designs without hiding design ambiguity.
+
+      # Compute deltas for each variant
+      # For variants WITH $range: use min(dist_to_median, dist_to_nearest_bound)
+      # For variants WITHOUT $range: use distance to value (standard)
+      # Track which variants contain the reported value in their range
+      range_contains <- logical(length(same_type_variants))
+      names(range_contains) <- names(same_type_variants)
+
+      selection_diffs <- sapply(seq_along(same_type_variants), function(i) {
+        v <- same_type_variants[[i]]
+        vname <- names(same_type_variants)[i]
+        if (is.null(v$value) || is.na(v$value)) return(Inf)
+        dist_to_median <- abs(abs(v$value) - abs_reported)
         if (!is.null(v$range) && length(v$range) == 2 &&
             !any(is.na(v$range))) {
           rng_min <- min(abs(v$range))
           rng_max <- max(abs(v$range))
-          dist_to_min <- abs(abs_reported - rng_min)
-          dist_to_max <- abs(abs_reported - rng_max)
-          dist_to_median <- abs(abs(v$value) - abs_reported)
-          # Use minimum of: distance to median, distance to nearest bound
-          return(min(dist_to_median, dist_to_min, dist_to_max))
+          if (abs_reported >= rng_min && abs_reported <= rng_max) {
+            range_contains[vname] <<- TRUE
+            # IN RANGE: use distance to nearest bound (always <= median dist)
+            return(min(dist_to_median,
+                       abs(abs_reported - rng_min),
+                       abs(abs_reported - rng_max)))
+          }
+          # OUT OF RANGE: use median distance (same as non-range variants)
+          # This preserves pre-v0.3.0 behavior for out-of-range cases
+          return(dist_to_median)
         }
+        dist_to_median
+      })
+      names(selection_diffs) <- names(same_type_variants)
+
+      # v0.3.0a: Among range-variants only, prefer in-range over out-of-range.
+      # Non-range variants (d_ind, g_ind, dz, etc.) compete normally.
+      if (any(range_contains)) {
+        for (vname in names(same_type_variants)) {
+          v <- same_type_variants[[vname]]
+          has_range <- !is.null(v$range) && length(v$range) == 2 && !any(is.na(v$range))
+          if (has_range && !range_contains[vname]) {
+            # This range-variant is out of range while another is in-range:
+            # penalize so it loses to the in-range variant
+            selection_diffs[vname] <- selection_diffs[vname] + 100
+          }
+        }
+      }
+
+      # Output deltas for status determination (always median distance)
+      output_diffs <- sapply(same_type_variants, function(v) {
+        if (is.null(v$value) || is.na(v$value)) return(Inf)
         abs(abs(v$value) - abs_reported)
       })
 
-      if (any(is.finite(diffs))) {
-        k <- which.min(diffs)
+      if (any(is.finite(selection_diffs))) {
+        k <- which.min(selection_diffs)
         matched_variant <- names(same_type_variants)[k]
         mv <- same_type_variants[[k]]
-        delta_effect_abs <- diffs[k]
-
+        # Use output delta (median distance) for status, not selection delta
+        delta_effect_abs <- output_diffs[k]
         matched_value <- mv$value
 
-        # v0.3.0: Add assumption note when range-aware matching improved delta
+        # v0.3.0: Add assumption note when matched via range
         if (!is.null(mv$range) && length(mv$range) == 2 &&
             !any(is.na(mv$range))) {
           rng_min <- min(abs(mv$range))
           rng_max <- max(abs(mv$range))
-          dist_to_median <- abs(abs(mv$value) - abs(effect_reported))
-          if (delta_effect_abs < dist_to_median) {
+          if (abs_reported >= rng_min && abs_reported <= rng_max) {
             assumptions <- c(assumptions,
-              paste0("Range-aware match: ", matched_variant,
-                     " range [", round(rng_min, 3), ", ",
+              paste0("Matched ", matched_variant,
+                     " within r-grid range [", round(rng_min, 3), ", ",
                      round(rng_max, 3),
                      "] (correlation-dependent)"))
           }
         }
 
         # Check if multiple variants are close (ambiguous)
-        close_variants <- names(diffs)[diffs <= max(delta_effect_abs * 1.5, 0.001) & is.finite(diffs)]
+        close_variants <- names(selection_diffs)[selection_diffs <= max(selection_diffs[k] * 1.5, 0.001) & is.finite(selection_diffs)]
         if (length(close_variants) > 1) {
           ambiguity_level <- "ambiguous"
           ambiguity_reason <- paste0("Multiple variants match similarly: ", paste(close_variants, collapse = ", "))
@@ -3614,7 +3655,8 @@ compute_and_compare_one <- function(row,
         round(if ("omega2" %in% names(alternatives)) alternatives$omega2$value
               else if ("omega2" %in% names(computed_variants)) computed_variants$omega2$value
               else NA_real_, 3),
-        "), which is less biased than eta-squared (", round(eta2, 3),
+        "), which is less biased than eta-squared (",
+        round(if (!is.null(anova_effects) && !is.na(anova_effects$eta2)) anova_effects$eta2 else NA_real_, 3),
         "). If your software used omega-squared, that may explain the difference.")
     } else if (tt == "F" && canonical_type == "cohens_f") {
       software_notes <- paste0(

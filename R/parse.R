@@ -147,6 +147,8 @@ normalize_text <- function(x) {
   x <- gsub("(?:eta2p|\u03b72p|etap2|\u03b7p2|eta_p2|eta_p\\^2|\u03b7_p2|\u03b7_p\\^2)\\s*=", "partial eta-squared =", x, perl = TRUE)
   # Also handle n2p (PDF corruption of eta2p) but only if followed by = and a number
   x <- gsub("(?<![a-zA-Z])n2p\\s*=\\s*(\\d)", "partial eta-squared = \\1", x, perl = TRUE)
+  # v0.3.0a: omega2p / omegap2 notation -> partial omega-squared = value
+  x <- gsub("(?:omega2p|\u03c92p|omegap2|\u03c9p2)\\s*=", "partial omega-squared =", x, perl = TRUE)
   # Superscript 2 (U+00B2) to caret notation (e.g., chi squared, eta squared)
   x <- gsub("\u00B2", "^2", x)
 
@@ -584,10 +586,14 @@ parse_text <- function(text, context_window_size = 2) {
   pat_phi <- "(?:phi|\u03c6)\\s*=\\s*([-+]?\\d*\\.?\\d+)"
   pat_V <- "(?:Cramer'?s?\\s*V|\\bV\\b)\\s*=\\s*([-+]?\\d*\\.?\\d+)"
   pat_eta <- "(?:eta|\u03b7)\\s*=\\s*([-+]?\\d*\\.?\\d+)"
-  pat_eta2 <- "(?:eta\\s*[-]?squared|\u03b7\u00b2|eta\\^2|\u03b7\\^2)\\s*=\\s*([-+]?\\d*\\.?\\d+)"
-  pat_etap2 <- "(?:partial\\s*eta\\s*[-]?squared|partial\\s*\u03b7\u00b2|\u03b7p\u00b2|partial\\s*eta\\^2)\\s*=\\s*([-+]?\\d*\\.?\\d+)"
+  # v0.3.0a: Added eta[-]?2, omega[-]?2, partial eta[-]?2, eta p^2 forms
+  # Handles plain text (eta2=), caret (eta^2=), Unicode (eta-squared=), superscript (after normalize_text)
+  pat_eta2 <- "(?:eta\\s*[-]?squared|eta[-]?2|\u03b7\u00b2|eta\\^2|\u03b7\\^2)\\s*=\\s*([-+]?\\d*\\.?\\d+)"
+  pat_etap2 <- "(?:partial\\s*eta\\s*[-]?squared|partial\\s*eta[-]?2|partial\\s*\u03b7\u00b2|\u03b7p\u00b2|partial\\s*\u03b7\\^2|\u03b7p\\^2)\\s*=\\s*([-+]?\\d*\\.?\\d+)"
   pat_eta2_corrupted <- "(?:2G|n2G|\u03b72G|etaG2)\\s*=\\s*([-+]?\\d*\\.?\\d+)" # PDF corruption: 2G = generalized eta^2
-  pat_omega2 <- "(?:omega\\s*[-]?squared|\u03c9\u00b2|omega\\^2|\u03c9\\^2)\\s*=\\s*([-+]?\\d*\\.?\\d+)"
+  pat_omega2 <- "(?:omega\\s*[-]?squared|omega[-]?2|\u03c9\u00b2|omega\\^2|\u03c9\\^2)\\s*=\\s*([-+]?\\d*\\.?\\d+)"
+  pat_partial_omega2 <- "(?:partial\\s*omega\\s*[-]?squared|partial\\s*omega[-]?2|partial\\s*\u03c9\u00b2|\u03c9p\u00b2|partial\\s*\u03c9\\^2|\u03c9p\\^2)\\s*=\\s*([-+]?\\d*\\.?\\d+)"
+  pat_epsilon2 <- "(?:epsilon\\s*[-]?squared|epsilon[-]?2|\u03b5\u00b2|epsilon\\^2|\u03b5\\^2|\u03b5[-]?2)\\s*=\\s*([-+]?\\d*\\.?\\d+)"
 
   # Cohen's f - only match explicit labels to avoid false positives with bare "f"
   pat_cohens_f <- "(?:Cohen'?s?\\s*f|effect\\s*size\\s*f)\\s*=\\s*([-+]?\\d*\\.?\\d+)"
@@ -764,6 +770,8 @@ parse_text <- function(text, context_window_size = 2) {
     m_etap2 <- stringr::str_match(s, pat_etap2)
     m_eta2_corrupted <- stringr::str_match(s, pat_eta2_corrupted)
     m_omega2 <- stringr::str_match(s, pat_omega2)
+    m_partial_omega2 <- stringr::str_match(s, pat_partial_omega2)
+    m_epsilon2 <- stringr::str_match(s, pat_epsilon2)
     m_cohens_f <- stringr::str_match(s, pat_cohens_f)
     m_beta <- stringr::str_match(s, pat_beta)
     m_f2 <- stringr::str_match(s, pat_f2)
@@ -923,9 +931,15 @@ parse_text <- function(text, context_window_size = 2) {
     } else if (!all(is.na(m_eta))) {
       effect_name <- "eta"
       effect_reported <- numify(m_eta[2])
+    } else if (!all(is.na(m_partial_omega2))) {
+      effect_name <- "partial_omega2"
+      effect_reported <- numify(m_partial_omega2[2])
     } else if (!all(is.na(m_omega2))) {
       effect_name <- "omega2"
       effect_reported <- numify(m_omega2[2])
+    } else if (!all(is.na(m_epsilon2))) {
+      effect_name <- "epsilon_squared"
+      effect_reported <- numify(m_epsilon2[2])
     } else if (!all(is.na(m_cohens_f))) {
       effect_name <- "f"
       effect_reported <- numify(m_cohens_f[2])

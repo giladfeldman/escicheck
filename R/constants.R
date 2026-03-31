@@ -50,7 +50,7 @@ EXTREME_DELTA_THRESHOLD <- 1.0
 EFFECT_PLAUSIBILITY <- list(
     d = 5, g = 5, dz = 5, dav = 5, drm = 5,
     r = 1, phi = 1, V = 1,
-    eta2 = 1, etap2 = 1, omega2 = 1,
+    eta2 = 1, etap2 = 1, omega2 = 1, partial_omega2 = 1, epsilon2_anova = 1,
     cohens_f = 10, f2 = 100,
     beta = 10, R2 = 1,
     OR = 100, RR = 100, IRR = 100, h = 3.15,
