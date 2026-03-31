@@ -1000,6 +1000,7 @@ compute_and_compare_one <- function(row,
           computed_variants$dav <- list(
             value = stats::median(d_av_grid),
             range = c(min(d_av_grid), max(d_av_grid)),
+            grid_values = d_av_grid,
             metadata = VARIANT_METADATA$dav
           )
         }
@@ -1014,6 +1015,7 @@ compute_and_compare_one <- function(row,
           computed_variants$drm <- list(
             value = stats::median(drm_grid),
             range = c(min(drm_grid), max(drm_grid)),
+            grid_values = drm_grid,
             metadata = VARIANT_METADATA$drm
           )
         }
@@ -1565,6 +1567,7 @@ compute_and_compare_one <- function(row,
             computed_variants$dav <- list(
               value = stats::median(d_av_grid),
               range = c(min(d_av_grid), max(d_av_grid)),
+              grid_values = d_av_grid,
               metadata = VARIANT_METADATA$dav
             )
           }
@@ -1576,6 +1579,7 @@ compute_and_compare_one <- function(row,
             computed_variants$drm <- list(
               value = stats::median(drm_grid),
               range = c(min(drm_grid), max(drm_grid)),
+              grid_values = drm_grid,
               metadata = VARIANT_METADATA$drm
             )
           }
@@ -1959,6 +1963,7 @@ compute_and_compare_one <- function(row,
               computed_variants$dav <- list(
                 value = stats::median(d_av_grid),
                 range = c(min(d_av_grid), max(d_av_grid)),
+                grid_values = d_av_grid,
                 metadata = VARIANT_METADATA$dav
               )
             }
@@ -1971,6 +1976,7 @@ compute_and_compare_one <- function(row,
               computed_variants$drm <- list(
                 value = stats::median(drm_grid),
                 range = c(min(drm_grid), max(drm_grid)),
+                grid_values = drm_grid,
                 metadata = VARIANT_METADATA$drm
               )
             }
@@ -2309,10 +2315,29 @@ compute_and_compare_one <- function(row,
         }
       }
 
-      # Output deltas for status determination (always median distance)
+      # Output deltas for status determination
+      # v0.3.0b: When value is within a variant's r-grid range, find the
+      # nearest grid point and use that distance. This is much more precise
+      # than using min/max/median anchors.
       output_diffs <- sapply(same_type_variants, function(v) {
         if (is.null(v$value) || is.na(v$value)) return(Inf)
-        abs(abs(v$value) - abs_reported)
+        dist_to_median <- abs(abs(v$value) - abs_reported)
+        if (!is.null(v$range) && length(v$range) == 2 &&
+            !any(is.na(v$range))) {
+          rng_min <- min(abs(v$range))
+          rng_max <- max(abs(v$range))
+          if (abs_reported >= rng_min && abs_reported <= rng_max) {
+            # In range: use distance to nearest grid point if available
+            if (!is.null(v$grid_values) && length(v$grid_values) > 0) {
+              return(min(abs(abs(v$grid_values) - abs_reported)))
+            }
+            # Fallback to nearest of {min, median, max}
+            return(min(dist_to_median,
+                       abs(abs_reported - rng_min),
+                       abs(abs_reported - rng_max)))
+          }
+        }
+        dist_to_median
       })
 
       if (any(is.finite(selection_diffs))) {
