@@ -5,7 +5,7 @@
 \alias{DEFAULT_TOL_EFFECT}
 \title{Constants for EffectCheck}
 \format{
-An object of class \code{list} of length 24.
+An object of class \code{list} of length 27.
 }
 \usage{
 DEFAULT_TOL_EFFECT

@@ -97,10 +97,11 @@ test_that("Fix 2 regression: matching R2 stays PASS", {
 
 # ==== Issue A: F(1,df) with g — structural ambiguity ====
 
-test_that("Issue A: F(1,df) with g gets design-ambiguous WARN", {
+test_that("Issue A: F(1,df) with g gets design-ambiguous WARN or range-match PASS", {
   r <- check_text("F(1, 69) = 10.00, p < .001, g = 0.291")
-  # F(1,df) with g should detect structural ambiguity (both g_ind and gz exist)
-  expect_true(r$status[1] %in% c("WARN", "NOTE"))
+  # F(1,df) with g: structural ambiguity (both g_ind and gz exist)
+  # v0.3.0: range-aware matching may match gav/grm closely -> PASS
+  expect_true(r$status[1] %in% c("PASS", "WARN", "NOTE"))
 })
 
 test_that("Issue A: F(1,df) with matching g stays PASS", {

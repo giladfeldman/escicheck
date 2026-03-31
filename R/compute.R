@@ -560,6 +560,53 @@ omega2_from_F <- function(F_val, df1, df2) {
   max(0, result)
 }
 
+# Epsilon-squared from F-statistic (Kelley formula for ANOVA)
+# Less biased than eta2; default in JASP/jamovi
+# Formula: epsilon2 = (F * df1 - df1) / (F * df1 + df2)
+# Compare: omega2 = (F * df1 - df1) / (F * df1 + df2 + 1)
+epsilon2_anova_from_F <- function(F_val, df1, df2) {
+  F_val <- as.numeric(F_val[1])
+  df1 <- as.numeric(df1[1])
+  df2 <- as.numeric(df2[1])
+  if (any(is.na(c(F_val, df1, df2))) || F_val < 0 || df1 <= 0 || df2 <= 0) {
+    return(NA_real_)
+  }
+  numerator <- F_val * df1 - df1
+  denominator <- F_val * df1 + df2
+  if (denominator <= 0) return(NA_real_)
+  max(0, numerator / denominator)
+}
+
+# Partial omega-squared from F-statistic (for factorial ANOVA)
+# Used by SPSS for multi-factor designs
+# Formula: partial_omega2 = (df1 * (F - 1)) / (df1 * (F - 1) + N)
+# where N = df1 + df2 + 1 (total sample size for one-way)
+partial_omega2_from_F <- function(F_val, df1, df2) {
+  F_val <- as.numeric(F_val[1])
+  df1 <- as.numeric(df1[1])
+  df2 <- as.numeric(df2[1])
+  if (any(is.na(c(F_val, df1, df2))) || F_val < 0 || df1 <= 0 || df2 <= 0) {
+    return(NA_real_)
+  }
+  N <- df1 + df2 + 1
+  numerator <- df1 * (F_val - 1)
+  denominator <- df1 * (F_val - 1) + N
+  if (denominator <= 0) return(NA_real_)
+  max(0, numerator / denominator)
+}
+
+# Bias-corrected eta-squared (epsilon-hat-squared)
+# Small-sample correction for eta2; used by R effectsize package
+# Formula: epsilon_hat2 = 1 - (1 - eta2) * (N - 1) / (N - df1 - 1)
+bias_corrected_eta2 <- function(eta2, N, df1) {
+  if (any(is.na(c(eta2, N, df1))) || eta2 < 0 || eta2 > 1 ||
+      N <= df1 + 1) {
+    return(NA_real_)
+  }
+  result <- 1 - (1 - eta2) * (N - 1) / (N - df1 - 1)
+  max(0, result)
+}
+
 # Cohen's f from F-statistic
 # Formula: f = sqrt(\u03b7\u00b2 / (1 - \u03b7\u00b2))
 # Or directly: f = sqrt((F * df1) / df2)
@@ -582,6 +629,16 @@ cohens_f_from_eta2 <- function(eta2) {
     return(NA_real_)
   }
   sqrt(eta2 / (1 - eta2))
+}
+
+# Cohen's f from omega-squared
+# Some software (G*Power, JASP) derives f from omega2 rather than eta2
+# Since omega2 < eta2, f_omega < f_eta for the same F-test
+cohens_f_from_omega2 <- function(omega2) {
+  if (is.na(omega2) || omega2 < 0 || omega2 >= 1) {
+    return(NA_real_)
+  }
+  sqrt(omega2 / (1 - omega2))
 }
 
 # Compute all ANOVA effect size variants when design is unclear

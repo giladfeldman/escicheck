@@ -15,7 +15,7 @@ EFFECT_SIZE_FAMILIES <- list(
   ),
   g = list(
     family = "g",
-    variants = c("g_ind", "gz", "gav", "grm"),
+    variants = c("g_ind", "g_ind_Nm1", "gz", "gav", "grm"),
     alternatives = c("d_ind"),
     description = "Hedges' g - bias-corrected standardized mean difference"
   ),
@@ -71,7 +71,7 @@ EFFECT_SIZE_FAMILIES <- list(
   ),
   cohens_f = list(
     family = "f",
-    variants = c("cohens_f"),
+    variants = c("cohens_f", "cohens_f_omega"),
     alternatives = c("eta2", "partial_eta2", "omega2"),
     description = "Cohen's f - ANOVA effect size"
   ),
@@ -874,6 +874,22 @@ compute_and_compare_one <- function(row,
         }
       }
 
+      # v0.3.0: J(N-1) variant of Hedges' g (some software convention)
+      # Standard uses J(df) where df=n1+n2-2; some use J(N-1) where N=n1+n2
+      if (!is.na(d_ind) && !is.na(n1) && !is.na(n2)) {
+        N_total <- n1 + n2
+        J_Nm1 <- hedges_J(N_total - 1)
+        if (!is.na(J_Nm1)) {
+          g_Nm1 <- d_ind * J_Nm1
+          alternatives$g_ind_Nm1 <- list(
+            value = g_Nm1,
+            metadata = list(name = "Hedges' g (J with N-1)",
+                            assumptions = "J = 1-3/(4(N-1)-1); some SAS/SPSS versions"),
+            why_consider = "Software convention: J(N-1) vs J(N-2) for independent samples"
+          )
+        }
+      }
+
       # Compute CI for d_ind
       if (!is.na(d_ind)) {
         d_ci <- tryCatch(ci_d_ind(d_ind, n1, n2, ci_level_used), error = function(e) list(success = FALSE))
@@ -903,6 +919,20 @@ compute_and_compare_one <- function(row,
                 value = g_ind,
                 metadata = VARIANT_METADATA$g_ind,
                 why_consider = "Bias-corrected version of d, recommended for small samples"
+              )
+            }
+          }
+
+          # v0.3.0: J(N-1) variant for equal-N case
+          if (!is.na(d_ind_equalN)) {
+            J_Nm1 <- hedges_J(N - 1)
+            if (!is.na(J_Nm1)) {
+              g_Nm1 <- d_ind_equalN * J_Nm1
+              alternatives$g_ind_Nm1 <- list(
+                value = g_Nm1,
+                metadata = list(name = "Hedges' g (J with N-1)",
+                                assumptions = "J = 1-3/(4(N-1)-1)"),
+                why_consider = "Software convention: J(N-1) vs J(N-2)"
               )
             }
           }
@@ -1392,6 +1422,72 @@ compute_and_compare_one <- function(row,
           } else if (!is.null(alternatives$cohens_f)) {
             alternatives$cohens_f$ci <- f_ci$bounds
           }
+        }
+      }
+
+      # v0.3.0: Cohen's f from omega2 (some software derives f this way)
+      if (!is.na(anova_effects$omega2) && anova_effects$omega2 > 0) {
+        f_omega <- cohens_f_from_omega2(anova_effects$omega2)
+        if (!is.na(f_omega)) {
+          if (!is.na(canonical_type) && canonical_type == "cohens_f") {
+            # When author reports Cohen's f, include omega2-derived f as variant
+            computed_variants$cohens_f_omega <- list(
+              value = f_omega,
+              metadata = list(name = "Cohen's f (from omega-squared)",
+                              assumptions = "f = sqrt(omega2/(1-omega2))")
+            )
+          } else {
+            alternatives$cohens_f_omega <- list(
+              value = f_omega,
+              metadata = list(name = "Cohen's f (from omega-squared)",
+                              assumptions = "f = sqrt(omega2/(1-omega2))"),
+              why_consider = "G*Power and JASP derive f from omega2, not eta2"
+            )
+          }
+        }
+      }
+
+      # v0.3.0: ANOVA epsilon-squared (Kelley formula, JASP/jamovi default)
+      eps2_anova <- epsilon2_anova_from_F(stat, df1, df2)
+      if (!is.na(eps2_anova)) {
+        if (!is.na(canonical_type) && canonical_type == "epsilon_squared") {
+          computed_variants$epsilon2_anova <- list(
+            value = eps2_anova,
+            metadata = list(name = "Epsilon-squared (ANOVA, Kelley)",
+                            assumptions = "eps2 = (F*df1 - df1) / (F*df1 + df2)")
+          )
+        } else {
+          alternatives$epsilon2_anova <- list(
+            value = eps2_anova,
+            metadata = list(name = "Epsilon-squared (ANOVA, Kelley)",
+                            assumptions = "eps2 = (F*df1 - df1) / (F*df1 + df2)"),
+            why_consider = "Less biased than eta2; JASP/jamovi default"
+          )
+        }
+      }
+
+      # v0.3.0: Partial omega-squared (SPSS for factorial ANOVA)
+      p_omega2 <- partial_omega2_from_F(stat, df1, df2)
+      if (!is.na(p_omega2)) {
+        alternatives$partial_omega2 <- list(
+          value = p_omega2,
+          metadata = list(name = "Partial omega-squared",
+                          assumptions = "p_omega2 = df1*(F-1) / (df1*(F-1) + N)"),
+          why_consider = "SPSS reports this for factorial ANOVA designs"
+        )
+      }
+
+      # v0.3.0: Bias-corrected eta-squared (R effectsize package)
+      if (!is.na(anova_effects$eta2)) {
+        N_est <- df1 + df2 + 1
+        bc_eta2 <- bias_corrected_eta2(anova_effects$eta2, N_est, df1)
+        if (!is.na(bc_eta2)) {
+          alternatives$bias_corrected_eta2 <- list(
+            value = bc_eta2,
+            metadata = list(name = "Bias-corrected eta-squared",
+                            assumptions = "bc_eta2 = 1 - (1-eta2)*(N-1)/(N-df1-1)"),
+            why_consider = "Small-sample correction used by R effectsize package"
+          )
         }
       }
 
@@ -2125,9 +2221,22 @@ compute_and_compare_one <- function(row,
 
       # v0.2.4: Also include same-type variants from alternatives
       # (e.g., g_ind is stored as alternative for t-tests but IS same-type for reported "d")
+      # v0.3.0: Also check family_info$alternatives for cross-formula matches
+      # Only for ANOVA/chi-square families where alternatives are different formulas
+      # for the same quantity (e.g., omega2 for eta2, V for phi).
+      # NOT for d/g families where alternatives are different-design variants.
+      cross_formula_families <- c("eta2", "omega2", "f", "phi", "V",
+                                  "rank_biserial_r", "cliffs_delta",
+                                  "epsilon_squared", "kendalls_W",
+                                  "R2", "f2")
+      family_alts <- character(0)
+      if (!is.null(family_info$family) && family_info$family %in% cross_formula_families) {
+        family_alts <- if (!is.null(family_info$alternatives)) family_info$alternatives else character(0)
+      }
       for (vname in names(alternatives)) {
         base_name <- gsub("_equalN|_min|_max", "", vname)
-        if ((base_name %in% valid_variants || vname %in% valid_variants) &&
+        if ((base_name %in% valid_variants || vname %in% valid_variants ||
+             base_name %in% family_alts || vname %in% family_alts) &&
             !(vname %in% names(same_type_variants))) {
           same_type_variants[[vname]] <- alternatives[[vname]]
         }
@@ -2140,22 +2249,55 @@ compute_and_compare_one <- function(row,
     }
 
     # Find closest match among same-type variants
+    # v0.3.0: Range-aware matching for variants with $range (dav, drm, gav, grm)
     if (length(same_type_variants) > 0) {
+      abs_reported <- abs(effect_reported)
       diffs <- sapply(same_type_variants, function(v) {
         if (is.null(v$value) || is.na(v$value)) {
           return(Inf)
         }
-        abs(abs(v$value) - abs(effect_reported))
+        # v0.3.0: Range-aware matching for paired variants (dav, drm, gav, grm)
+        # When a variant has $range from r-grid sweep, use distance to the
+        # nearest range bound instead of distance to median. This improves
+        # matching for high-r paired designs without hiding design ambiguity.
+        if (!is.null(v$range) && length(v$range) == 2 &&
+            !any(is.na(v$range))) {
+          rng_min <- min(abs(v$range))
+          rng_max <- max(abs(v$range))
+          dist_to_min <- abs(abs_reported - rng_min)
+          dist_to_max <- abs(abs_reported - rng_max)
+          dist_to_median <- abs(abs(v$value) - abs_reported)
+          # Use minimum of: distance to median, distance to nearest bound
+          return(min(dist_to_median, dist_to_min, dist_to_max))
+        }
+        abs(abs(v$value) - abs_reported)
       })
 
       if (any(is.finite(diffs))) {
         k <- which.min(diffs)
         matched_variant <- names(same_type_variants)[k]
-        matched_value <- same_type_variants[[k]]$value
+        mv <- same_type_variants[[k]]
         delta_effect_abs <- diffs[k]
 
+        matched_value <- mv$value
+
+        # v0.3.0: Add assumption note when range-aware matching improved delta
+        if (!is.null(mv$range) && length(mv$range) == 2 &&
+            !any(is.na(mv$range))) {
+          rng_min <- min(abs(mv$range))
+          rng_max <- max(abs(mv$range))
+          dist_to_median <- abs(abs(mv$value) - abs(effect_reported))
+          if (delta_effect_abs < dist_to_median) {
+            assumptions <- c(assumptions,
+              paste0("Range-aware match: ", matched_variant,
+                     " range [", round(rng_min, 3), ", ",
+                     round(rng_max, 3),
+                     "] (correlation-dependent)"))
+          }
+        }
+
         # Check if multiple variants are close (ambiguous)
-        close_variants <- names(diffs)[diffs <= delta_effect_abs * 1.5 & is.finite(diffs)]
+        close_variants <- names(diffs)[diffs <= max(delta_effect_abs * 1.5, 0.001) & is.finite(diffs)]
         if (length(close_variants) > 1) {
           ambiguity_level <- "ambiguous"
           ambiguity_reason <- paste0("Multiple variants match similarly: ", paste(close_variants, collapse = ", "))
@@ -2612,7 +2754,10 @@ compute_and_compare_one <- function(row,
   # ============================================================================
 
   structural_design_ambiguous <- FALSE
-  if (status == "ERROR" && check_type == "effect_size" &&
+  # v0.3.0: Also detect structural ambiguity for WARN (not just ERROR)
+  # Range-aware matching can reduce deltas, making ERROR->WARN, but the
+  # design ambiguity is still real and should be flagged
+  if (status %in% c("ERROR", "WARN") && check_type == "effect_size" &&
       !is.na(canonical_type) && canonical_type %in% c("d", "g", "dz", "dav", "drm")) {
     ind_variant_names <- c("d_ind", "d_ind_equalN", "d_ind_min", "d_ind_max", "g_ind")
     paired_variant_names <- c("dz", "dav", "drm", "gz", "gav", "grm")
@@ -3453,6 +3598,79 @@ compute_and_compare_one <- function(row,
   confidence <- max(0L, min(10L, as.integer(confidence)))
 
   # ============================================================================
+  # PHASE 11C: User feedback assembly (v0.3.0)
+  # Generate software_notes, alternative_formulas, best_practice_notes
+  # ============================================================================
+
+  software_notes <- NA_character_
+  alternative_formulas <- NA_character_
+  best_practice_notes <- NA_character_
+
+  if (!is.na(check_type) && check_type == "effect_size" && !is.na(canonical_type)) {
+    # Software notes: explain why values might differ across tools
+    if (tt == "F" && canonical_type %in% c("eta2", "etap2", "partial_eta2", "eta")) {
+      software_notes <- paste0(
+        "JASP and jamovi report omega-squared by default (computed: ",
+        round(if ("omega2" %in% names(alternatives)) alternatives$omega2$value
+              else if ("omega2" %in% names(computed_variants)) computed_variants$omega2$value
+              else NA_real_, 3),
+        "), which is less biased than eta-squared (", round(eta2, 3),
+        "). If your software used omega-squared, that may explain the difference.")
+    } else if (tt == "F" && canonical_type == "cohens_f") {
+      software_notes <- paste0(
+        "Cohen's f can be derived from eta-squared (f=",
+        round(if ("cohens_f" %in% names(computed_variants)) computed_variants$cohens_f$value else NA_real_, 3),
+        ") or from omega-squared (f=",
+        round(if ("cohens_f_omega" %in% names(computed_variants)) computed_variants$cohens_f_omega$value
+              else if ("cohens_f_omega" %in% names(alternatives)) alternatives$cohens_f_omega$value
+              else NA_real_, 3),
+        "). G*Power uses omega-squared; SPSS uses eta-squared.")
+    } else if (tt %in% c("t", "F") && canonical_type %in% c("d", "g") &&
+               !is.na(ambiguity_level) && ambiguity_level == "ambiguous") {
+      software_notes <- paste0(
+        "For paired designs, three d variants exist: ",
+        "dz (divides by sqrt(n)), dav (by average SD), ",
+        "drm (repeated measures). ",
+        "The choice depends on the correlation between measures.")
+    } else if (tt %in% c("t", "F") && canonical_type == "g") {
+      software_notes <- paste0(
+        "Hedges' g correction factor J differs across software: ",
+        "J(N-2) is standard for independent samples, but some packages use J(N-1). ",
+        "For your sample size, this produces a difference of ~",
+        round(abs(if ("g_ind" %in% names(computed_variants)) computed_variants$g_ind$value
+                  else if ("g_ind" %in% names(alternatives)) alternatives$g_ind$value
+                  else 0) -
+              abs(if ("g_ind_Nm1" %in% names(alternatives)) alternatives$g_ind_Nm1$value
+                  else 0), 3), ".")
+    } else if (tt == "chisq" && canonical_type %in% c("phi", "V")) {
+      if (!is.na(df1) && df1 >= 2) {
+        software_notes <- "For tables larger than 2x2, Cramer's V is preferred over phi for comparability across table sizes."
+      }
+    }
+
+    # Alternative formulas: what else the author could consider
+    if (tt == "F" && canonical_type %in% c("eta2", "etap2", "partial_eta2")) {
+      alternative_formulas <- "Consider reporting omega-squared alongside eta-squared. Omega-squared is less biased, especially for small samples."
+    } else if (tt %in% c("t", "F") && canonical_type %in% c("d", "g") &&
+               !is.na(ambiguity_level) && ambiguity_level == "ambiguous") {
+      alternative_formulas <- paste0(
+        "Multiple d variants apply: d_ind (independent), dz (paired), ",
+        "dav (average SD), drm (repeated measures). ",
+        "If the design is paired, specifying the pre-post correlation ",
+        "would resolve the ambiguity.")
+    }
+
+    # Best practice notes
+    if (canonical_type == "d" && !is.na(N) && N < 30) {
+      best_practice_notes <- "For small samples (N < 30), Hedges' g corrects the upward bias in Cohen's d."
+    } else if (tt == "F" && canonical_type %in% c("eta2", "etap2", "partial_eta2")) {
+      best_practice_notes <- "APA recommends reporting effect sizes with confidence intervals. For factorial ANOVA, partial eta-squared controls for other factors."
+    } else if (tt == "chisq" && canonical_type == "phi" && !is.na(df1) && df1 >= 2) {
+      best_practice_notes <- "For chi-square tables larger than 2x2, Cramer's V is the standard measure for comparability."
+    }
+  }
+
+  # ============================================================================
   # PHASE 12: Assemble output tibble
   # ============================================================================
 
@@ -3573,9 +3791,16 @@ compute_and_compare_one <- function(row,
     cohens_f = cohens_f,
     standardized_beta = standardized_beta,
     partial_r = partial_r,
-    semi_partial_r = NA_real_,
-    cohens_f2 = NA_real_,
-    R2 = NA_real_,
+    semi_partial_r = if ("semi_partial_r" %in% names(computed_variants)) computed_variants$semi_partial_r$value
+                     else if ("semi_partial_r" %in% names(alternatives)) alternatives$semi_partial_r$value
+                     else NA_real_,
+    cohens_f2 = if ("cohens_f2" %in% names(computed_variants)) computed_variants$cohens_f2$value
+                else if ("cohens_f2" %in% names(alternatives)) alternatives$cohens_f2$value
+                else if ("cohens_f2_standard" %in% names(alternatives)) alternatives$cohens_f2_standard$value
+                else NA_real_,
+    R2 = if ("R2" %in% names(computed_variants)) computed_variants$R2$value
+         else if ("R2" %in% names(alternatives)) alternatives$R2$value
+         else NA_real_,
 
     # Nonparametric effect sizes
     rank_biserial_r = if ("rank_biserial_r" %in% names(computed_variants)) computed_variants$rank_biserial_r$value else NA_real_,
@@ -3726,7 +3951,12 @@ compute_and_compare_one <- function(row,
     uncertainty_level = uncertainty_level,
     uncertainty_reasons = if (length(uncertainty)) paste(uncertainty, collapse = "; ") else "",
     assumptions_used = if (length(assumptions)) paste(assumptions, collapse = "; ") else "",
-    insufficient_data = (length(computed_variants) == 0)
+    insufficient_data = (length(computed_variants) == 0),
+
+    # v0.3.0: User feedback fields
+    software_notes = software_notes,
+    alternative_formulas = alternative_formulas,
+    best_practice_notes = best_practice_notes
   )
 }
 
@@ -3913,6 +4143,9 @@ check_text <- function(text,
           uncertainty_reasons = paste0("Processing error: ", error_msg),
           assumptions_used = "",
           insufficient_data = TRUE,
+          software_notes = NA_character_,
+          alternative_formulas = NA_character_,
+          best_practice_notes = NA_character_,
           unknown_groups_downgraded = FALSE,
           r2_cross_pairing_detected = FALSE,
           decision_error_downgraded = FALSE,
