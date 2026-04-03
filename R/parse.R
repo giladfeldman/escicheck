@@ -261,8 +261,12 @@ normalize_text <- function(x) {
   # Pattern: "p = " or "p<" or "p>" followed by newline and optional text, then a number
   # This fixes cases like "p = \n0.837" or "p = on social distance\n0.837" -> "p = 0.837"
   # Allow up to 50 chars of text between p= and the number (to handle OCR errors)
-  # Guard: if there's already a number right after p= (valid p-value), don't replace
-  x <- gsub("(p\\s*[<=>]\\s*)(?![.0]?\\d)([^\\n]{0,50})\\n\\s*([.\\d]+)", "\\1\\3", x, perl = TRUE)
+  # Guard: if there's already a valid p-value right after p=, don't replace
+  # v0.3.0d fix: old (?![.0]?\d) failed on "0.001" — [.0]? ate '0', then \d couldn't match '.'
+  # Fix uses [ \t]*+ (possessive horizontal whitespace) after [<=>] to prevent two bugs:
+  # 1. Backtracking: \s* would backtrack past space, lookahead sees space not digit, fires
+  # 2. Newline eating: \s*+ would consume \n, leaving nothing for the \n literal in pattern
+  x <- gsub("(p\\s*[<=>][ \\t]*+)(?!\\d|[.]\\d)([^\\n]{0,50})\\n\\s*([.\\d]+)", "\\1\\3", x, perl = TRUE)
 
   # Fix line breaks between test statistic and p-value
   # Pattern: "t(df) = value,\n p = value" -> "t(df) = value, p = value"
