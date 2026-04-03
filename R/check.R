@@ -2558,6 +2558,29 @@ compute_and_compare_one <- function(row,
   } else {
     "extraction_only"
   }
+  # v0.3.0c: Correlation guard — r-tests without df or N cannot be verified
+  # For r-tests, stat IS the r-value, so computed_variants$r trivially matches
+  # the reported effect. Without df (for p-value) or N (for CI), this is a
+  # self-referential match with no independent verification. Route to extraction_only.
+  # Also keep a generic guard for any other test type where stat is truly NA.
+  if (tt == "r" && is.na(df1) && is.na(df2) && is.na(N) && check_type == "effect_size") {
+    check_type <- "extraction_only"
+    matched_value <- NA_real_
+    matched_variant <- NA_character_
+    delta_effect_abs <- NA_real_
+    if (status %in% c("ERROR", "WARN", "PASS")) status <- "NOTE"
+    uncertainty <- c(uncertainty,
+      "Correlation without df or N \u2014 cannot independently verify effect size")
+  } else if (is.na(stat) && is.na(df1) && is.na(df2) && check_type == "effect_size") {
+    check_type <- "extraction_only"
+    matched_value <- NA_real_
+    matched_variant <- NA_character_
+    delta_effect_abs <- NA_real_
+    if (status %in% c("ERROR", "WARN", "PASS")) status <- "NOTE"
+    uncertainty <- c(uncertainty,
+      "Effect size reported but no test statistic or df to verify against \u2014 treating as extraction only")
+  }
+
   # CI mismatch overrides check_type when it downgrades status
   if (ci_affects_status && !is.na(ci_match) && !ci_match && status == "NOTE" && has_effect_reported) {
     check_type <- "ci"

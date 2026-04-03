@@ -212,3 +212,56 @@ test_that("column-merged context text doesn't corrupt stat parsing", {
   expect_equal(res$stat_value[1], 2.99)
   expect_equal(res$df1[1], 97)
 })
+
+# =============================================================================
+# SECTION 8: U+FFFD eta-squared recovery (PDF corruption)
+# =============================================================================
+
+test_that("U+FFFD in effect size context is recovered as eta-squared", {
+  # pdftotext corrupts \u03b7\u00b2 to U+FFFD; should recover as eta-squared
+  res <- check_text("F(1, 1180) = 55.90, p < .001, \uFFFD = 0.04, 90% CI [0.02, 0.06]")
+  expect_equal(res$test_type[1], "F")
+  expect_equal(res$stat_value[1], 55.90)
+  expect_equal(res$effect_reported_name[1], "eta2")
+  expect_equal(res$effect_reported[1], 0.04)
+})
+
+test_that("U+FFFD recovery works with multiple F-tests in paragraph", {
+  text <- paste0(
+    "main effect of fame (F(1, 1180) = 55.90, p < .001, \uFFFD = 0.04, 90% CI [0.02, 0.06]) ",
+    "and valence (F(2, 1180) = 181.2, p < .001, \uFFFD = 0.22, 90% CI [0.19, 0.26])")
+  res <- check_text(text)
+  expect_equal(nrow(res), 2)
+  expect_true(all(res$effect_reported_name == "eta2"))
+  expect_equal(res$effect_reported[1], 0.04)
+  expect_equal(res$effect_reported[2], 0.22)
+})
+
+test_that("U+FFFD still works as minus sign outside effect size context", {
+  # Non-effect-size U+FFFD should become dash (minus sign)
+  res <- check_text("t(50) = \uFFFD2.50, p = .015, d = 0.70")
+  expect_equal(res$test_type[1], "t")
+  expect_equal(res$stat_value[1], -2.50)  # preserved as negative
+})
+
+# =============================================================================
+# SECTION 9: Orphaned superscript 2 recovery
+# =============================================================================
+
+test_that("orphaned '2 = value' with 90% CI is recovered as eta-squared", {
+  res <- check_text("F(1.97, 2337) = 46.96, p < .001, 2 = 0.01, 90% CI [0.00, 0.02]")
+  expect_equal(res$test_type[1], "F")
+  expect_equal(res$effect_reported_name[1], "eta2")
+  expect_equal(res$effect_reported[1], 0.01)
+})
+
+# =============================================================================
+# SECTION 10: DOCX pipe-delimited table normalization
+# =============================================================================
+
+test_that("pipe-delimited table stats are parsed correctly", {
+  text <- "Inferential statistics | \u03c7\u00b2 (1) = 12.484, p < .001 | Cramer's V = .31"
+  res <- check_text(text)
+  expect_true(any(res$test_type == "chisq"))
+  expect_true(any(res$stat_value == 12.484, na.rm = TRUE))
+})

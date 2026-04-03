@@ -51,3 +51,50 @@ test_that("matched_value is R NA_real_ not string 'NA' for p-value-only", {
     expect_false(identical(as.character(res$matched_value[1]), "NA"))
   }
 })
+
+# v0.3.0c: Correlation guard — r-tests without df or N cannot be verified
+test_that("r-test without df or N is extraction_only (correlation guard)", {
+  # r without parenthetical df, no N in context — the r value trivially matches
+  # itself but nothing can be independently verified
+  res <- check_text("r = .39, p = .04, R2 = .15")
+  if (nrow(res) > 0) {
+    # Find the r-test result
+    r_rows <- res[res$test_type == "r", ]
+    if (nrow(r_rows) > 0) {
+      expect_equal(r_rows$check_scope[1], "extraction_only")
+      expect_true(is.na(r_rows$delta_effect_abs[1]))
+      expect_equal(r_rows$check_type[1], "extraction_only")
+    }
+  }
+})
+
+test_that("r-test WITH df is still effect_size_checked (not affected by guard)", {
+  res <- check_text("r(50) = .394, p = .004, R2 = .155")
+  if (nrow(res) > 0) {
+    r_rows <- res[res$test_type == "r", ]
+    if (nrow(r_rows) > 0 && r_rows$check_type[1] == "effect_size") {
+      expect_equal(r_rows$check_scope[1], "effect_size_checked")
+      expect_false(is.na(r_rows$matched_value[1]))
+    }
+  }
+})
+
+test_that("z-test without df still works (not affected by correlation guard)", {
+  # z-tests legitimately compute d from z and N, without needing df
+  res <- check_text("In a sample of N = 200 participants, z = 2.50, p = .012, d = 0.35")
+  if (nrow(res) > 0) {
+    z_rows <- res[res$test_type == "z", ]
+    if (nrow(z_rows) > 0) {
+      # z-test should NOT be downgraded by the guard
+      expect_true(z_rows$check_type[1] %in% c("effect_size", "p_value"))
+    }
+  }
+})
+
+test_that("guard does not affect normal results with valid stats", {
+  # Normal t-test with effect size — should still be effect_size_checked
+  res <- check_text("t(50) = 3.12, p = .003, d = 0.88")
+  expect_equal(res$check_scope[1], "effect_size_checked")
+  expect_equal(res$check_type[1], "effect_size")
+  expect_false(is.na(res$delta_effect_abs[1]))
+})

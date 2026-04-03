@@ -31,7 +31,11 @@ normalize_text <- function(x) {
   # Unicode normalization (simple replacements)
   # --- Minus/dash variants (all to ASCII hyphen-minus) ---
   x <- gsub("\u2212", "-", x)  # Unicode minus sign (U+2212)
-  x <- gsub("\uFFFD", "-", x)  # Replacement character (U+FFFD) -- PDF corruption
+  # U+FFFD context-aware recovery: in effect-size context, likely corrupted eta-squared
+  # Pattern: ", FFFD = 0.04" or ", FFFD = 0.04, 90% CI" (pdftotext corrupts η² to U+FFFD)
+  x <- gsub(",\\s*\uFFFD\\s*=\\s*([-+]?\\d)", ", eta-squared = \\1", x, perl = TRUE)
+  x <- gsub("\\b\uFFFD\\s*=\\s*([-+]?\\d)", "eta-squared = \\1", x, perl = TRUE)
+  x <- gsub("\uFFFD", "-", x)  # Remaining U+FFFD to dash (genuine minus signs)
   x <- gsub("[\u2013\u2014]", "-", x)  # En dash (U+2013) and em dash (U+2014)
   x <- gsub("[\u2010\u2011\u2012]", "-", x)  # Hyphen (U+2010), non-breaking hyphen (U+2011), figure dash (U+2012)
   x <- gsub("\uFE63", "-", x)  # Small hyphen-minus (U+FE63)
@@ -151,6 +155,10 @@ normalize_text <- function(x) {
   x <- gsub("(?:omega2p|\u03c92p|omegap2|\u03c9p2)\\s*=", "partial omega-squared =", x, perl = TRUE)
   # Superscript 2 (U+00B2) to caret notation (e.g., chi squared, eta squared)
   x <- gsub("\u00B2", "^2", x)
+
+  # Orphaned superscript 2 in ANOVA context: pdftotext sometimes loses η, leaving
+  # ", 2 = 0.04, 90% CI" — recover as eta-squared when followed by 90% CI
+  x <- gsub(",\\s+2\\s*=\\s*(\\d+\\.\\d+),\\s*90%", ", eta-squared = \\1, 90%", x, perl = TRUE)
 
   # Fix stripped chi-square symbol: PDF extraction sometimes strips chi/X leaving
   # bare " 2 (df) = value" or " 2(df) = value" for chi-squared tests.
@@ -313,6 +321,10 @@ normalize_text <- function(x) {
   x <- gsub("\uFB02", "fl", x, useBytes = TRUE)
   x <- gsub("\uFB03", "ffi", x, useBytes = TRUE)
   x <- gsub("\uFB04", "ffl", x, useBytes = TRUE)
+
+  # DOCX table pipe normalization: pandoc outputs tables with | delimiters
+  # which can split stats across cells. | has no meaning in APA notation.
+  x <- gsub("\\|", " ", x)
 
   # Final UTF-8 validation before returning (suppress warnings)
   if (requireNamespace("stringi", quietly = TRUE)) {
