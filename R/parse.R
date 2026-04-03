@@ -611,8 +611,11 @@ parse_text <- function(text, context_window_size = 2) {
   pat_partial_omega2 <- "(?:partial\\s*omega\\s*[-]?squared|partial\\s*omega[-]?2|partial\\s*\u03c9\u00b2|\u03c9p\u00b2|partial\\s*\u03c9\\^2|\u03c9p\\^2)\\s*=\\s*([-+]?\\d*\\.?\\d+)"
   pat_epsilon2 <- "(?:epsilon\\s*[-]?squared|epsilon[-]?2|\u03b5\u00b2|epsilon\\^2|\u03b5\\^2|\u03b5[-]?2)\\s*=\\s*([-+]?\\d*\\.?\\d+)"
 
-  # Cohen's f - only match explicit labels to avoid false positives with bare "f"
+  # Cohen's f - explicit labels (always safe)
   pat_cohens_f <- "(?:Cohen'?s?\\s*f|effect\\s*size\\s*f)\\s*=\\s*([-+]?\\d*\\.?\\d+)"
+  # Bare "f = value" in statistical context: preceded by comma/semicolon + optional space
+  # Safe because in "p < .001, f = 0.16" the bare f is unambiguously Cohen's f
+  pat_bare_f <- "[,;]\\s*f\\s*=\\s*([-+]?\\d*\\.?\\d+)"
 
   # Generic/Fallback effect size pattern (Phase 2F - RESTRICTED)
   # Only matches explicit Greek symbols to avoid false positives and PDF corruption char
@@ -789,6 +792,7 @@ parse_text <- function(text, context_window_size = 2) {
     m_partial_omega2 <- stringr::str_match(s, pat_partial_omega2)
     m_epsilon2 <- stringr::str_match(s, pat_epsilon2)
     m_cohens_f <- stringr::str_match(s, pat_cohens_f)
+    m_bare_f <- stringr::str_match(s, pat_bare_f)
     m_beta <- stringr::str_match(s, pat_beta)
     m_f2 <- stringr::str_match(s, pat_f2)
     m_R2 <- stringr::str_match(s, pat_R2)
@@ -959,6 +963,10 @@ parse_text <- function(text, context_window_size = 2) {
     } else if (!all(is.na(m_cohens_f))) {
       effect_name <- "f"
       effect_reported <- numify(m_cohens_f[2])
+    } else if (!all(is.na(m_bare_f)) && !is.na(test_type) && test_type == "F") {
+      # Bare "f = value" after comma in F-test context — unambiguously Cohen's f
+      effect_name <- "f"
+      effect_reported <- numify(m_bare_f[2])
     } else if (!all(is.na(m_dz))) {
       effect_name <- "dz"
       effect_reported <- numify(m_dz[2])
