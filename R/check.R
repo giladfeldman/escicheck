@@ -169,6 +169,13 @@ EFFECT_SIZE_FAMILIES <- list(
     variants = character(0),
     alternatives = c("phi"),
     description = "Cohen's h - effect size for comparing proportions"
+  ),
+  # v0.3.0f: Cohen's w (chi-square effect size, = phi for 2x2)
+  cohens_w = list(
+    family = "cohens_w",
+    variants = c("cohens_w"),
+    alternatives = c("phi", "V"),
+    description = "Cohen's w - chi-square effect size, equivalent to phi"
   )
 )
 
@@ -479,7 +486,12 @@ compute_and_compare_one <- function(row,
     "or" = "OR", "odds ratio" = "OR",
     "rr" = "RR", "risk ratio" = "RR",
     "irr" = "IRR", "incidence rate ratio" = "IRR",
-    "h" = "h", "cohen's h" = "h", "cohens h" = "h"
+    "h" = "h", "cohen's h" = "h", "cohens h" = "h",
+    "w" = "cohens_w", "cohen's w" = "cohens_w", "cohens w" = "cohens_w",
+    "cohens_w" = "cohens_w",
+    "generalized_eta2" = "generalized_eta2",
+    "generalized eta2" = "generalized_eta2",
+    "generalized eta-squared" = "generalized_eta2"
   )
 
   canonical_type <- if (length(reported_type) > 0 && !is.na(reported_type) && reported_type %in% names(type_mapping)) {
@@ -1112,6 +1124,71 @@ compute_and_compare_one <- function(row,
       }
     }
 
+    # ----- v0.3.0f: Compute ANOVA-family alternatives from t-test -----
+    # A t-test is equivalent to F(1,df), so eta2/omega2/f/R2 are computable.
+    # Authors sometimes report these for 2-group designs.
+    if (!is.na(stat) && !is.na(df1) && df1 > 0) {
+      t2 <- stat^2
+      eta2_from_t <- t2 / (t2 + df1)
+      omega2_from_t <- (t2 - 1) / (t2 + df1 + 1)
+      if (omega2_from_t < 0) omega2_from_t <- 0
+      f_from_t <- abs(stat) / sqrt(df1)
+      # R2 = eta2 for simple t-test (one predictor)
+
+      if (!is.na(canonical_type) &&
+          canonical_type %in% c("eta2", "eta", "etap2",
+                                "partial_eta2")) {
+        computed_variants$partial_eta2 <- list(
+          value = eta2_from_t,
+          metadata = list(
+            name = "Partial eta-squared (from t-test)",
+            description = "eta2 = t2/(t2+df), equivalent to F(1,df)"
+          ))
+      } else {
+        alternatives$partial_eta2_from_t <- list(
+          value = eta2_from_t,
+          why_consider = "Equivalent to partial eta-squared from F(1,df) = t-squared"
+        )
+      }
+
+      if (!is.na(canonical_type) && canonical_type == "omega2") {
+        computed_variants$omega2 <- list(
+          value = omega2_from_t,
+          metadata = list(
+            name = "Omega-squared (from t-test)",
+            description = "omega2 = (t2-1)/(t2+df+1)"
+          ))
+      } else {
+        alternatives$omega2_from_t <- list(
+          value = omega2_from_t,
+          why_consider = "Population-level effect size from t-test"
+        )
+      }
+
+      if (!is.na(canonical_type) && canonical_type == "cohens_f") {
+        # Already handled by conversion at line 496 (f -> d = 2f)
+        # But also add as alternative for cross-type matching
+        alternatives$cohens_f_from_t <- list(
+          value = f_from_t,
+          why_consider = "Cohen's f = |t|/sqrt(df), equiv to F(1,df)"
+        )
+      }
+
+      if (!is.na(canonical_type) && canonical_type == "R2") {
+        computed_variants$R2 <- list(
+          value = eta2_from_t,
+          metadata = list(
+            name = "R-squared (from t-test)",
+            description = "R2 = t2/(t2+df), single-predictor model"
+          ))
+      } else {
+        alternatives$R2_from_t <- list(
+          value = eta2_from_t,
+          why_consider = "R-squared for single-predictor model (= eta2)"
+        )
+      }
+    }
+
     # If reported type is d/g but we don't know design, add paired variants as alternatives
     # v0.2.7: also move dav, drm, gz, gav, grm (not just dz)
     if (!is.na(canonical_type) && canonical_type %in% c("d", "g")) {
@@ -1219,6 +1296,26 @@ compute_and_compare_one <- function(row,
               when_to_use = "Effect size for regression/correlation"
             ),
             why_consider = "Alternative effect size measure for correlations"
+          )
+        }
+      }
+
+      # v0.3.0f: Compute d from r (standard meta-analysis conversion)
+      if (abs(r_value) < 1) {
+        d_from_r <- 2 * r_value / sqrt(1 - r_value^2)
+        if (!is.na(canonical_type) &&
+            canonical_type %in% c("d", "g")) {
+          computed_variants$d_from_r <- list(
+            value = d_from_r,
+            metadata = list(
+              name = "Cohen's d (from r)",
+              description = "d = 2r/sqrt(1-r^2)",
+              when_to_use = "Converting correlation to d for meta-analysis"
+            ))
+        } else {
+          alternatives$d_from_r <- list(
+            value = d_from_r,
+            why_consider = "Cohen's d equivalent: d = 2r/sqrt(1-r^2)"
           )
         }
       }
@@ -1898,6 +1995,56 @@ compute_and_compare_one <- function(row,
           }
         }
       }
+
+      # v0.3.0f: Additional contingency table effect sizes
+      # Cohen's w = sqrt(chi2/N) — same as phi, different label
+      if (!is.na(stat) && !is.na(N) && N > 0) {
+        w_val <- sqrt(stat / N)
+        if (!is.na(canonical_type) && canonical_type == "cohens_w") {
+          computed_variants$cohens_w <- list(
+            value = w_val,
+            metadata = list(
+              name = "Cohen's w",
+              description = "w = sqrt(chi2/N)",
+              when_to_use = "Chi-square effect size (= phi for 2x2)"
+            ))
+        } else {
+          alternatives$cohens_w <- list(
+            value = w_val,
+            why_consider = "Cohen's w = sqrt(chi2/N), equivalent to phi"
+          )
+        }
+
+        # Contingency coefficient C = sqrt(chi2/(chi2+N))
+        c_val <- sqrt(stat / (stat + N))
+        alternatives$contingency_C <- list(
+          value = c_val,
+          why_consider = paste0("Pearson's contingency coefficient ",
+                                "C = sqrt(chi2/(chi2+N))")
+        )
+
+        # phi -> d conversion (for 2x2 tables, df1 == 1)
+        if (!is.na(phi_val) && abs(phi_val) < 1 &&
+            !is.na(df1) && df1 == 1) {
+          d_from_phi <- 2 * phi_val / sqrt(1 - phi_val^2)
+          if (!is.na(canonical_type) &&
+              canonical_type %in% c("d", "g")) {
+            computed_variants$d_from_phi <- list(
+              value = d_from_phi,
+              metadata = list(
+                name = "Cohen's d (from phi, 2x2)",
+                description = "d = 2*phi/sqrt(1-phi^2)"
+              ))
+          } else {
+            alternatives$d_from_phi <- list(
+              value = d_from_phi,
+              why_consider = paste0(
+                "Cohen's d equivalent for 2x2 table: ",
+                "d = 2*phi/sqrt(1-phi^2)")
+            )
+          }
+        }
+      }
     }
   } else if (tt == "z") {
     # ------ Z-TEST COMPUTATIONS ------
@@ -2049,6 +2196,47 @@ compute_and_compare_one <- function(row,
         }
       }
     }
+
+    # ----- v0.3.0f: Compute r from z-test -----
+    # r = z/sqrt(z^2 + N) for independent; r = z/sqrt(N) for paired
+    if (!is.na(stat) && !is.na(N) && N > 0) {
+      r_from_z_ind <- stat / sqrt(stat^2 + N)
+      r_from_z_paired <- stat / sqrt(N)
+      if (!is.na(canonical_type) && canonical_type == "r") {
+        # Try both interpretations, use the one closer to reported
+        if (!is.na(effect_reported)) {
+          if (abs(abs(effect_reported) - abs(r_from_z_ind)) <=
+              abs(abs(effect_reported) - abs(r_from_z_paired))) {
+            computed_variants$r <- list(
+              value = r_from_z_ind,
+              metadata = list(
+                name = "r from z (independent)",
+                description = "r = z/sqrt(z^2 + N)"
+              ))
+          } else {
+            computed_variants$r <- list(
+              value = r_from_z_paired,
+              metadata = list(
+                name = "r from z (paired/Wilcoxon)",
+                description = "r = z/sqrt(N)"
+              ))
+          }
+        } else {
+          computed_variants$r <- list(
+            value = r_from_z_ind,
+            metadata = list(
+              name = "r from z (independent)",
+              description = "r = z/sqrt(z^2 + N)"
+            ))
+        }
+      } else {
+        alternatives$r_from_z <- list(
+          value = r_from_z_ind,
+          why_consider = "Correlation equivalent: r = z/sqrt(z^2 + N)"
+        )
+      }
+    }
+
   } else if (tt == "regression") {
     # ------ REGRESSION COEFFICIENT COMPUTATIONS ------
     # Extract regression-specific fields
@@ -2581,6 +2769,22 @@ compute_and_compare_one <- function(row,
       "Effect size reported but no test statistic or df to verify against \u2014 treating as extraction only")
   }
 
+  # v0.3.0f: Generalized eta-squared is mathematically unverifiable from F/df
+  # (requires full SS decomposition; Bakeman 2005, Olejnik & Algina 2003).
+  # Route to NOTE with explanation rather than false ERROR.
+  if (!is.na(canonical_type) && canonical_type == "generalized_eta2" &&
+      check_type == "effect_size") {
+    check_type <- "extraction_only"
+    matched_value <- NA_real_
+    matched_variant <- NA_character_
+    delta_effect_abs <- NA_real_
+    if (status %in% c("ERROR", "WARN", "PASS")) status <- "NOTE"
+    uncertainty <- c(uncertainty,
+      paste0("Generalized eta-squared cannot be verified from summary ",
+             "statistics (requires full SS decomposition; Bakeman 2005). ",
+             "Only partial eta-squared is computable from F and df."))
+  }
+
   # CI mismatch overrides check_type when it downgrades status
   if (ci_affects_status && !is.na(ci_match) && !ci_match && status == "NOTE" && has_effect_reported) {
     check_type <- "ci"
@@ -2662,6 +2866,28 @@ compute_and_compare_one <- function(row,
     extraction_suspect <- TRUE
     uncertainty <- c(uncertainty,
       sprintf("Degrees of freedom df1 = %.0f appears implausible \u2014 possible extraction artifact", df1))
+  }
+
+  # v0.3.0f: d-vs-t cross-check for extraction artifacts
+  # For t-tests: expected d ≈ t/sqrt(df+1) (paired) or 2t/sqrt(df+2) (ind).
+  # When reported |d| > 3 AND > 3× the maximum plausible d, it's garbled
+  # (typically from two-column PDF interleaving).
+  if (!is.na(canonical_type) &&
+      canonical_type %in% c("d", "g", "dz", "dav", "drm") &&
+      !is.na(effect_reported) && !is.na(stat) && tt == "t" &&
+      !is.na(df1) && abs(effect_reported) > 3) {
+    # Maximum plausible d: use independent formula (gives larger value)
+    max_plausible_d <- abs(stat) * 2 / sqrt(max(df1 + 2, 2))
+    if (abs(effect_reported) > max(3 * max_plausible_d, 3)) {
+      extraction_suspect <- TRUE
+      uncertainty <- c(uncertainty,
+        sprintf(paste0("|%s| = %.2f far exceeds maximum plausible ",
+                       "d = %.2f (from t=%.2f, df=%.0f). ",
+                       "Likely extraction artifact."),
+                canonical_type, abs(effect_reported),
+                max_plausible_d, abs(stat), df1))
+      if (status == "ERROR") status <- "NOTE"
+    }
   }
 
   # ============================================================================
@@ -3261,6 +3487,31 @@ compute_and_compare_one <- function(row,
   }
 
   # ============================================================================
+  # PHASE 8G: Heuristic generalized eta-squared detection (v0.3.0f)
+  # When reported eta2 < computed partial_eta2 with ratio 0.10-0.95,
+  # the author may be reporting generalized eta-squared (unlabeled).
+  # Cannot verify, so downgrade ERROR to WARN.
+  # ============================================================================
+
+  gen_eta2_heuristic <- FALSE
+  if (status == "ERROR" && tt == "F" && check_type == "effect_size" &&
+      !is.na(canonical_type) && canonical_type %in% c("eta2", "eta") &&
+      !is.na(effect_reported) && !is.na(matched_value) &&
+      effect_reported < matched_value && effect_reported > 0) {
+    ratio <- effect_reported / matched_value
+    if (ratio >= 0.10 && ratio <= 0.95) {
+      status <- "WARN"
+      gen_eta2_heuristic <- TRUE
+      uncertainty <- c(uncertainty,
+        sprintf(paste0("Reported eta-squared (%.3f) is below computed ",
+                       "partial eta-squared (%.3f), ratio=%.2f. Possibly ",
+                       "generalized eta-squared, which cannot be verified ",
+                       "from summary statistics"),
+                effect_reported, matched_value, ratio))
+    }
+  }
+
+  # ============================================================================
   # PHASE 9: P-value and decision error detection
   # ============================================================================
 
@@ -3676,6 +3927,7 @@ compute_and_compare_one <- function(row,
   if (phi_to_v_reinterpreted) confidence <- min(confidence, 4L)
   if (mixed_model_downgraded) confidence <- min(confidence, 4L)
   if (n_mismatch_downgraded) confidence <- min(confidence, 3L)
+  if (gen_eta2_heuristic) confidence <- min(confidence, 3L)
 
   # Extraction quality signals
   if (extraction_suspect) confidence <- confidence - 2L
@@ -4319,6 +4571,267 @@ check_text <- function(text,
                 else paste(unc, note, sep = "; ")
             }
           }
+        }
+      }
+    }
+  }
+
+  # ============================================================================
+  # PHASE 14: Cross-Result Effect Size Sweep (v0.3.0f)
+  # When a result has ERROR status for effect_size, try matching its reported
+  # effect size against ALL other test statistics in the same article.
+  # If a match is found with a different statistic, downgrade to WARN with
+  # detailed cross-pairing note. If no match found across any statistic,
+  # keep ERROR but report all attempts.
+  #
+  # This implements a universal strategy: escicheck should always do its best
+  # to find a match before flagging an error. Every attempt is reported to
+  # the user so they can make an informed judgment.
+  # ============================================================================
+
+  if (nrow(res) >= 2 && "test_type" %in% names(res) &&
+      "status" %in% names(res) && "check_type" %in% names(res)) {
+
+    error_idx <- which(
+      res$status == "ERROR" &
+      res$check_type == "effect_size" &
+      !is.na(res$effect_reported) &
+      !is.na(res$reported_type)
+    )
+
+    if (length(error_idx) > 0) {
+      # Collect all other results that have valid test statistics
+      all_stats <- which(
+        !is.na(res$test_type) &
+        !is.na(res$stat_value) &
+        !is.na(res$df1)
+      )
+
+      for (ei in error_idx) {
+        eff_rep <- res$effect_reported[ei]
+        eff_type <- res$reported_type[ei]
+        # Skip if already handled by earlier phases
+        if (is.na(eff_rep) || is.na(eff_type)) next
+
+        cross_matches <- list()
+
+        for (si in all_stats) {
+          if (si == ei) next  # skip self
+
+          other_tt <- res$test_type[si]
+          other_stat <- res$stat_value[si]
+          other_df1 <- res$df1[si]
+          other_df2 <- res$df2[si]
+          other_N <- res$N[si]
+
+          candidate_val <- NA_real_
+          candidate_name <- NA_character_
+
+          # Compute effect size from the OTHER statistic for THIS type
+          tryCatch({
+            if (eff_type %in% c("eta2", "eta", "etap2",
+                                "partial_eta2") && other_tt == "F") {
+              candidate_val <- (other_stat * other_df1) /
+                (other_stat * other_df1 + other_df2)
+              candidate_name <- sprintf(
+                "partial_eta2 from F(%.0f,%.0f)=%.2f",
+                other_df1, other_df2, other_stat)
+
+            } else if (eff_type %in% c("omega2") && other_tt == "F") {
+              candidate_val <- (other_stat - 1) * other_df1 /
+                (other_stat * other_df1 + other_df2 + 1)
+              candidate_name <- sprintf(
+                "omega2 from F(%.0f,%.0f)=%.2f",
+                other_df1, other_df2, other_stat)
+
+            } else if (eff_type %in% c("cohens_f") && other_tt == "F") {
+              eta2_cand <- (other_stat * other_df1) /
+                (other_stat * other_df1 + other_df2)
+              candidate_val <- sqrt(eta2_cand / (1 - eta2_cand))
+              candidate_name <- sprintf(
+                "cohens_f from F(%.0f,%.0f)=%.2f",
+                other_df1, other_df2, other_stat)
+
+            } else if (eff_type %in% c("R2") && other_tt == "F") {
+              candidate_val <- (other_stat * other_df1) /
+                (other_stat * other_df1 + other_df2)
+              candidate_name <- sprintf(
+                "R2 from F(%.0f,%.0f)=%.2f",
+                other_df1, other_df2, other_stat)
+
+            } else if (eff_type %in% c("d", "g") && other_tt == "t") {
+              # d_ind = 2t / sqrt(df)
+              candidate_val <- 2 * abs(other_stat) / sqrt(other_df1)
+              candidate_name <- sprintf(
+                "d_ind from t(%.0f)=%.2f",
+                other_df1, other_stat)
+
+            } else if (eff_type %in% c("dz") && other_tt == "t") {
+              # dz = t / sqrt(N) where N = df+1
+              n_est <- other_df1 + 1
+              candidate_val <- abs(other_stat) / sqrt(n_est)
+              candidate_name <- sprintf(
+                "dz from t(%.0f)=%.2f",
+                other_df1, other_stat)
+
+            } else if (eff_type %in% c("d", "g", "dz") &&
+                       other_tt == "F" && !is.na(other_df1) &&
+                       other_df1 == 1) {
+              # F(1,df2): t_equiv = sqrt(F), d = 2*t/sqrt(df2)
+              t_eq <- sqrt(other_stat)
+              candidate_val <- 2 * t_eq / sqrt(other_df2)
+              candidate_name <- sprintf(
+                "d from F(1,%.0f)=%.2f",
+                other_df2, other_stat)
+
+            } else if (eff_type %in% c("V", "phi") &&
+                       other_tt == "chisq") {
+              # Try with this result's N and the other's chi-sq
+              n_try <- if (!is.na(other_N)) other_N
+                       else if (!is.na(res$N[ei])) res$N[ei]
+                       else NA_real_
+              if (!is.na(n_try) && n_try > 0) {
+                if (eff_type == "phi") {
+                  candidate_val <- sqrt(other_stat / n_try)
+                  candidate_name <- sprintf(
+                    "phi from chi2(%.0f)=%.2f, N=%d",
+                    other_df1, other_stat, as.integer(n_try))
+                } else {
+                  m <- if (!is.na(other_df1)) {
+                    floor(other_df1 / max(1, other_df1)) + 1
+                  } else 2
+                  # Better: try m from 2 to 5
+                  best_m_val <- NA_real_
+                  best_m <- NA_integer_
+                  for (try_m in 2:5) {
+                    v_try <- sqrt(other_stat / (n_try * (try_m - 1)))
+                    if (is.na(best_m_val) ||
+                        abs(v_try - abs(eff_rep)) <
+                        abs(best_m_val - abs(eff_rep))) {
+                      best_m_val <- v_try
+                      best_m <- try_m
+                    }
+                  }
+                  candidate_val <- best_m_val
+                  candidate_name <- sprintf(
+                    "V from chi2(%.0f)=%.2f, N=%d, m=%d",
+                    other_df1, other_stat,
+                    as.integer(n_try), best_m)
+                }
+              }
+
+            } else if (eff_type %in% c("r") && other_tt == "t") {
+              candidate_val <- abs(other_stat) /
+                sqrt(other_stat^2 + other_df1)
+              candidate_name <- sprintf(
+                "r from t(%.0f)=%.2f",
+                other_df1, other_stat)
+            }
+          }, error = function(e) NULL)
+
+          if (!is.na(candidate_val) && !is.na(candidate_name)) {
+            delta <- abs(abs(eff_rep) - candidate_val)
+            cross_matches[[length(cross_matches) + 1]] <- list(
+              source_idx = si,
+              candidate_name = candidate_name,
+              candidate_val = candidate_val,
+              delta = delta
+            )
+          }
+        }
+
+        # Also try alternative N values for chi-square V/phi
+        if (eff_type %in% c("V", "phi") &&
+            res$test_type[ei] == "chisq" &&
+            !is.na(res$stat_value[ei])) {
+          # Collect all N values from other results
+          all_N <- unique(stats::na.omit(res$N))
+          for (n_try in all_N) {
+            if (n_try <= 0 || (!is.na(res$N[ei]) &&
+                               n_try == res$N[ei])) next
+            chi_stat <- res$stat_value[ei]
+            chi_df <- res$df1[ei]
+            if (is.na(chi_stat) || is.na(chi_df)) next
+
+            if (eff_type == "phi") {
+              v_try <- sqrt(chi_stat / n_try)
+            } else {
+              # Try best m
+              best_v <- NA_real_
+              best_m <- 2L
+              for (try_m in 2:5) {
+                v <- sqrt(chi_stat / (n_try * (try_m - 1)))
+                if (is.na(best_v) ||
+                    abs(v - abs(eff_rep)) <
+                    abs(best_v - abs(eff_rep))) {
+                  best_v <- v
+                  best_m <- try_m
+                }
+              }
+              v_try <- best_v
+            }
+            delta <- abs(abs(eff_rep) - v_try)
+            cross_matches[[length(cross_matches) + 1]] <- list(
+              source_idx = ei,
+              candidate_name = sprintf(
+                "%s from same chi2 with N=%d%s",
+                eff_type, as.integer(n_try),
+                if (eff_type == "V") sprintf(", m=%d", best_m)
+                else ""),
+              candidate_val = v_try,
+              delta = delta
+            )
+          }
+        }
+
+        if (length(cross_matches) > 0) {
+          # Sort by delta (best match first)
+          deltas <- sapply(cross_matches, `[[`, "delta")
+          cross_matches <- cross_matches[order(deltas)]
+          best <- cross_matches[[1]]
+
+          # Tolerance for effect sizes (use default)
+          tol_eff <- if (exists("TOLERANCE_EFFECT",
+                                where = asNamespace("effectcheck"))) {
+            get("TOLERANCE_EFFECT",
+                envir = asNamespace("effectcheck"))
+          } else 0.05
+
+          # Build attempts summary for user
+          attempts_str <- paste(sapply(
+            utils::head(cross_matches, 5), function(cm) {
+              sprintf("%s = %.3f (delta=%.3f)",
+                      cm$candidate_name, cm$candidate_val,
+                      cm$delta)
+            }), collapse = "; ")
+
+          if (best$delta <= tol_eff * 3) {
+            # Match found with another statistic -> WARN
+            res$status[ei] <- "WARN"
+            res$confidence[ei] <- min(
+              res$confidence[ei], 3L, na.rm = TRUE)
+            note <- sprintf(
+              paste0("Cross-result match: reported %s=%.3f ",
+                     "matches %s (delta=%.3f). Likely ",
+                     "cross-paired with a different test. ",
+                     "All attempts: %s"),
+              eff_type, eff_rep,
+              best$candidate_name, best$delta,
+              attempts_str)
+          } else {
+            # No close match but report attempts
+            note <- sprintf(
+              paste0("No cross-result match found for ",
+                     "reported %s=%.3f. Closest: %s ",
+                     "(delta=%.3f). All attempts: %s"),
+              eff_type, eff_rep,
+              best$candidate_name, best$delta,
+              attempts_str)
+          }
+
+          unc <- res$uncertainty_reasons[ei]
+          res$uncertainty_reasons[ei] <- if (is.na(unc) || unc == "")
+            note else paste(unc, note, sep = "; ")
         }
       }
     }

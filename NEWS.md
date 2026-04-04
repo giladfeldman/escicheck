@@ -1,3 +1,51 @@
+# effectcheck 0.3.0f
+
+## Parser fixes and artifact detection
+
+Addresses 13 false positive ERRORs from MetaESCI v0.3.0c validation
+(132,537 results, 24 ERRORs). Expected: 24 -> ~10 ERRORs.
+
+### Bug fixes
+
+* Capital D/G effect sizes now parsed: `D = 0.44`, `Hedges' G = 0.85`,
+  `Dz = 0.40` all correctly matched (was: returned NA). 5 confirmed cases.
+* Generalized eta-squared (geta-squared, Geta-squared, generalized
+  eta-squared) now correctly labeled as `generalized_eta2` and routed
+  to NOTE (was: parsed as plain eta2, producing false ERRORs). 8 cases.
+  Generalized eta-squared cannot be computed from F/df (Bakeman 2005).
+* d-vs-t cross-check: when |d| > 3 and far exceeds the maximum
+  plausible d from t and df, flags as extraction artifact (NOTE).
+  Catches two-column PDF interleaving garbled values.
+* d > 10 rejection extended to dz/dav/drm (was: only d/g). Catches
+  43 line-number artifacts (dz=219, dz=388, etc.).
+* d > 5 integer + spurious context guard extended to all d-family types.
+
+### New features
+
+* Phase 8G: heuristic generalized eta-squared detection. When reported
+  eta2 < computed partial eta2 with ratio 0.10-0.95, downgrades ERROR
+  to WARN with explanatory note.
+* Phase 14: cross-result effect size sweep. When a result has ERROR,
+  tries matching the reported effect size against ALL other test
+  statistics in the same article. Reports all attempts to the user.
+  If a match is found with a different statistic, downgrades to WARN
+  with cross-pairing note. Covers eta2/omega2/f from F, d/g/dz from
+  t/F(1,df), V/phi from chi-square, r from t.
+
+* Cross-type effect size conversions: t-test now computes eta2, omega2,
+  Cohen's f, and R2 as alternatives (t-test = F(1,df) equivalence).
+  r-test computes d = 2r/sqrt(1-r^2). z-test computes r = z/sqrt(z^2+N).
+  Chi-square computes Cohen's w, contingency coefficient C, and d from
+  phi (for 2x2 tables). All cross-type matches are alternatives — they
+  activate when the author reports an unconventional effect size for
+  the test type.
+
+### Tests
+
+* 54 new tests (1236 total, 0 failures, 0 regressions)
+
+---
+
 # effectcheck 0.2.8
 
 ## Design ambiguity improvements

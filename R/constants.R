@@ -32,7 +32,8 @@ DEFAULT_TOL_EFFECT <- list(
     h = 0.02,
     OR = 0.5,
     RR = 0.5,
-    IRR = 0.5
+    IRR = 0.5,
+    cohens_w = 0.02
 )
 
 # Other Tolerances
@@ -55,7 +56,8 @@ EFFECT_PLAUSIBILITY <- list(
     beta = 10, R2 = 1,
     OR = 100, RR = 100, IRR = 100, h = 3.15,
     rank_biserial_r = 1, cliffs_delta = 1,
-    epsilon_squared = 1, kendalls_W = 1
+    epsilon_squared = 1, kendalls_W = 1,
+    cohens_w = 10
 )
 
 # Default cross-type action — status when no same-type variant can be computed

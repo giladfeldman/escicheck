@@ -337,11 +337,12 @@ test_that("p-value recomputed correctly for z-test", {
 # Error detection
 # ===========================================================================
 
-test_that("grossly wrong effect size produces ERROR status", {
-  # Report d = 5.00 for a modest t-test -> should flag as ERROR
-  # t(28) = 2.21: real d ~ 0.83 (equal n), 5.00 is off by ~4.17 >> 5*tol
+test_that("grossly wrong effect size flagged as extraction artifact", {
+  # v0.3.0f: d=5.00 with t(28)=2.21 gives expected d~0.83
+  # d is 6x expected -> extraction artifact (NOTE), not ERROR
   res <- check_text("t(28) = 2.21, p = .035, d = 5.00, N = 30")
-  expect_equal(res$status[1], "ERROR")
+  expect_equal(res$status[1], "NOTE")
+  expect_true(res$extraction_suspect[1])
 })
 
 # ===========================================================================

@@ -5,7 +5,7 @@
 \alias{EFFECT_SIZE_FAMILIES}
 \title{Effect Size Type Definitions}
 \format{
-An object of class \code{list} of length 26.
+An object of class \code{list} of length 27.
 }
 \usage{
 EFFECT_SIZE_FAMILIES

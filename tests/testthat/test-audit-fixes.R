@@ -230,15 +230,14 @@ test_that("extraction_suspect is TRUE for extreme deltas", {
   }
 })
 
-test_that("extraction_suspect does NOT change status", {
-  # Status should still be ERROR for large deltas (not downgraded)
+test_that("extraction artifact d >> expected downgrades to NOTE", {
+  # v0.3.0f: d=5.00 with t(28)=2.21 gives expected d≈0.81
+  # d is 6× expected — flagged as extraction artifact, NOTE not ERROR
   text <- "t(28) = 2.21, p = .035, d = 5.00"
   result <- check_text(text)
 
   expect_true(nrow(result) > 0)
-  if (!is.na(result$delta_effect[1]) && result$delta_effect[1] > 1.0) {
-    # Status should still be ERROR (not downgraded to NOTE)
-    expect_equal(result$status[1], "ERROR",
-      info = "extraction_suspect should not change status")
-  }
+  expect_true(result$extraction_suspect[1])
+  expect_equal(result$status[1], "NOTE",
+    info = "d far exceeding expected from t-stat should be NOTE (artifact)")
 })

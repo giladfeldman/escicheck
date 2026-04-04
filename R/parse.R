@@ -594,11 +594,12 @@ parse_text <- function(text, context_window_size = 2) {
   pat_dims <- "(\\d+)\\s*[x\u00d7]\\s*(\\d+)"
 
   # Patterns for effect sizes
-  pat_d <- "\\bd\\s*=\\s*([-+]?\\d*\\.?\\d+)"
-  pat_g <- "(?:Hedges'?\\s*g|\\bg\\b)\\s*=\\s*([-+]?\\d*\\.?\\d+)"
-  pat_dz <- "\\bdz\\s*=\\s*([-+]?\\d*\\.?\\d+)"
-  pat_dav <- "\\bdav\\s*=\\s*([-+]?\\d*\\.?\\d+)"
-  pat_drm <- "\\bdrm\\s*=\\s*([-+]?\\d*\\.?\\d+)"
+  # v0.3.0f: Match both lowercase d and uppercase D (Cohen's D = 0.44)
+  pat_d <- "\\b[Dd]\\s*=\\s*([-+]?\\d*\\.?\\d+)"
+  pat_g <- "(?:Hedges'?\\s*[Gg]|\\b[Gg]\\b)\\s*=\\s*([-+]?\\d*\\.?\\d+)"
+  pat_dz <- "\\b[Dd]z\\s*=\\s*([-+]?\\d*\\.?\\d+)"
+  pat_dav <- "\\b[Dd]av\\s*=\\s*([-+]?\\d*\\.?\\d+)"
+  pat_drm <- "\\b[Dd]rm\\s*=\\s*([-+]?\\d*\\.?\\d+)"
   pat_phi <- "(?:phi|\u03c6)\\s*=\\s*([-+]?\\d*\\.?\\d+)"
   pat_V <- "(?:Cramer'?s?\\s*V|\\bV\\b)\\s*=\\s*([-+]?\\d*\\.?\\d+)"
   pat_eta <- "(?:eta|\u03b7)\\s*=\\s*([-+]?\\d*\\.?\\d+)"
@@ -606,7 +607,15 @@ parse_text <- function(text, context_window_size = 2) {
   # Handles plain text (eta2=), caret (eta^2=), Unicode (eta-squared=), superscript (after normalize_text)
   pat_eta2 <- "(?:eta\\s*[-]?squared|eta[-]?2|\u03b7\u00b2|eta\\^2|\u03b7\\^2)\\s*=\\s*([-+]?\\d*\\.?\\d+)"
   pat_etap2 <- "(?:partial\\s*eta\\s*[-]?squared|partial\\s*eta[-]?2|partial\\s*\u03b7\u00b2|\u03b7p\u00b2|partial\\s*\u03b7\\^2|\u03b7p\\^2)\\s*=\\s*([-+]?\\d*\\.?\\d+)"
-  pat_eta2_corrupted <- "(?:2G|n2G|\u03b72G|etaG2)\\s*=\\s*([-+]?\\d*\\.?\\d+)" # PDF corruption: 2G = generalized eta^2
+  # v0.3.0f: Generalized eta-squared — explicit labels + PDF corruption forms
+  # Must be checked BEFORE pat_eta2 since "geta-squared" contains "eta-squared"
+  pat_gen_eta2 <- paste0(
+    "(?:[Gg]eta\\s*[-]?squared|[Gg]eta[-]?2",
+    "|generalized\\s*eta\\s*[-]?squared|generalized\\s*eta[-]?2",
+    "|generalized\\s*\u03b7\u00b2|\u03b7[Gg]\u00b2|\u03b7[Gg]\\^2",
+    "|2G|n2G|\u03b72G|etaG2",
+    ")\\s*=\\s*([-+]?\\d*\\.?\\d+)")
+  pat_eta2_corrupted <- pat_gen_eta2 # backward compat alias
   pat_omega2 <- "(?:omega\\s*[-]?squared|omega[-]?2|\u03c9\u00b2|omega\\^2|\u03c9\\^2)\\s*=\\s*([-+]?\\d*\\.?\\d+)"
   pat_partial_omega2 <- "(?:partial\\s*omega\\s*[-]?squared|partial\\s*omega[-]?2|partial\\s*\u03c9\u00b2|\u03c9p\u00b2|partial\\s*\u03c9\\^2|\u03c9p\\^2)\\s*=\\s*([-+]?\\d*\\.?\\d+)"
   pat_epsilon2 <- "(?:epsilon\\s*[-]?squared|epsilon[-]?2|\u03b5\u00b2|epsilon\\^2|\u03b5\\^2|\u03b5[-]?2)\\s*=\\s*([-+]?\\d*\\.?\\d+)"
@@ -630,6 +639,8 @@ parse_text <- function(text, context_window_size = 2) {
   pat_IRR <- "(?:IRR|incidence\\s*rate\\s*ratio)\\s*=\\s*([-+]?\\d*\\.?\\d+)"
   # Cohen's h (effect size for proportion comparisons)
   pat_h <- "(?:Cohen'?s?\\s*h|\\bh\\b)\\s*=\\s*([-+]?\\d*\\.?\\d+)"
+  # v0.3.0f: Cohen's w (chi-square effect size)
+  pat_cohens_w <- "(?:Cohen'?s?\\s*w|\\bw\\b)\\s*=\\s*([-+]?\\d*\\.?\\d+)"
 
   # Regression coefficient patterns
   pat_b_coeff <- "\\bb\\s*=\\s*([-+]?\\d*\\.?\\d+)"
@@ -800,6 +811,7 @@ parse_text <- function(text, context_window_size = 2) {
     m_RR <- stringr::str_match(s, pat_RR)
     m_IRR <- stringr::str_match(s, pat_IRR)
     m_h <- stringr::str_match(s, pat_h)
+    m_cohens_w <- stringr::str_match(s, pat_cohens_w)
     m_fallback_es <- stringr::str_match(s, pat_fallback_es)
 
     # Match regression coefficients
@@ -940,14 +952,15 @@ parse_text <- function(text, context_window_size = 2) {
     } else if (!all(is.na(m_etap2))) {
       effect_name <- "etap2"
       effect_reported <- numify(m_etap2[2])
-    } else if (!all(is.na(m_eta2))) {
-      effect_name <- "eta2"
-      effect_reported <- numify(m_eta2[2])
     } else if (!all(is.na(m_eta2_corrupted))) {
-      # PDF corruption: "2G" is likely generalized eta-squared (\u03b7\u00b2G)
+      # v0.3.0f: Generalized eta-squared (geta-squared, Geta-squared, 2G, etc.)
+      # Must be checked BEFORE pat_eta2 since "geta-squared" contains "eta-squared"
       effect_name <- "generalized_eta2"
       effect_reported <- numify(m_eta2_corrupted[2])
       effect_fallback <- TRUE # Flag as uncertain extraction
+    } else if (!all(is.na(m_eta2))) {
+      effect_name <- "eta2"
+      effect_reported <- numify(m_eta2[2])
     } else if (!all(is.na(m_eta))) {
       effect_name <- "eta"
       effect_reported <- numify(m_eta[2])
@@ -1010,6 +1023,12 @@ parse_text <- function(text, context_window_size = 2) {
         effect_name <- "h"
         effect_reported <- numify(m_h[2])
       }
+    } else if (!all(is.na(m_cohens_w))) {
+      # v0.3.0f: Cohen's w - only with chi-square or z context
+      if (!is.na(test_type) && test_type %in% c("chisq", "z")) {
+        effect_name <- "cohens_w"
+        effect_reported <- numify(m_cohens_w[2])
+      }
     } else if (!all(is.na(m_fallback_es))) {
       # Fallback match - likely PDF corruption or non-standard notation (Phase 2F)
       sym <- if (length(m_fallback_es) >= 2) m_fallback_es[2] else "ES"
@@ -1050,22 +1069,38 @@ parse_text <- function(text, context_window_size = 2) {
         effect_reported <- NA_real_
       }
 
-      # Round-integer d/g > 2 without decimal point: likely "Study 1", "d = 8 ms", etc.
-      # Reject if abs > 5 regardless; if 2 < abs <= 5, reject only with spurious context
+      # v0.3.0f: Extended d-family guard to include dz, dav, drm
+      # d > 10: virtually always a line number or page artifact (43 cases
+      # in MetaESCI corpus: dz=219, dz=388, etc.)
+      d_family <- c("d", "g", "dz", "dav", "drm")
       if (!is.na(effect_reported) && !is.na(effect_name) &&
-          effect_name %in% c("d", "g") &&
-          effect_reported == floor(effect_reported) && abs(effect_reported) > 2) {
+          effect_name %in% d_family && abs(effect_reported) > 10) {
+        effect_name <- NA_character_
+        effect_reported <- NA_real_
+      }
+
+      # Round-integer d/g/dz > 2 without decimal point:
+      # likely "Study 1", "d = 8 ms", line number, etc.
+      # Reject if abs > 5 regardless; if 2 < abs <= 5, reject with context
+      if (!is.na(effect_reported) && !is.na(effect_name) &&
+          effect_name %in% d_family &&
+          effect_reported == floor(effect_reported) &&
+          abs(effect_reported) > 2) {
         if (abs(effect_reported) > 5) {
-          # d=6, d=8, d=24 etc. — virtually never a real effect size
+          # d=6, d=8 etc. — virtually never a real effect size
           effect_name <- NA_character_
           effect_reported <- NA_real_
         } else {
           # d=3, d=4, d=5 — check context for spurious patterns
           context_lower <- tolower(s)
-          spurious <- c("study\\s+\\d", "experiment\\s+\\d", "table\\s+\\d",
-                        "figure\\s+\\d", "\\bms\\b", "\\bsec\\b", "\\bmin\\b",
-                        "\\bday", "\\bhour", "\\byear", "condition\\s+\\d")
-          if (any(sapply(spurious, function(p) grepl(p, context_lower, perl = TRUE)))) {
+          spurious <- c("study\\s+\\d", "experiment\\s+\\d",
+                        "table\\s+\\d", "figure\\s+\\d",
+                        "\\bms\\b", "\\bsec\\b", "\\bmin\\b",
+                        "\\bday", "\\bhour", "\\byear",
+                        "condition\\s+\\d")
+          if (any(sapply(spurious, function(p) {
+            grepl(p, context_lower, perl = TRUE)
+          }))) {
             effect_name <- NA_character_
             effect_reported <- NA_real_
           }
