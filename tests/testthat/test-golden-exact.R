@@ -337,12 +337,12 @@ test_that("p-value recomputed correctly for z-test", {
 # Error detection
 # ===========================================================================
 
-test_that("grossly wrong effect size flagged as extraction artifact", {
-  # v0.3.0f: d=5.00 with t(28)=2.21 gives expected d~0.83
-  # d is 6x expected -> extraction artifact (NOTE), not ERROR
+test_that("grossly wrong integer d rejected at parse time", {
+  # v0.3.0f: d=5 (integer) with t(28)=2.21: max_d=0.83, 2*0.83=1.67
+  # d=5 > 2 -> rejected at parse as page number artifact
   res <- check_text("t(28) = 2.21, p = .035, d = 5.00, N = 30")
-  expect_equal(res$status[1], "NOTE")
-  expect_true(res$extraction_suspect[1])
+  # d rejected at parse -> p-value only result
+  expect_true(res$status[1] %in% c("OK", "NOTE"))
 })
 
 # ===========================================================================

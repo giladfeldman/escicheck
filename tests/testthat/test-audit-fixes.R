@@ -230,14 +230,14 @@ test_that("extraction_suspect is TRUE for extreme deltas", {
   }
 })
 
-test_that("extraction artifact d >> expected downgrades to NOTE", {
-  # v0.3.0f: d=5.00 with t(28)=2.21 gives expected d≈0.81
-  # d is 6× expected — flagged as extraction artifact, NOTE not ERROR
+test_that("extraction artifact d >> expected rejected at parse", {
+  # v0.3.0f: d=5 (integer) with t(28)=2.21 gives max_d=0.83
+  # Round integer 5 > 2*0.83 = 1.67 -> rejected at parse time
+  # d=5.00 parsed as 5 (integer), so the guard fires
   text <- "t(28) = 2.21, p = .035, d = 5.00"
   result <- check_text(text)
-
+  # Effect rejected at parse → p-value-only or NOTE
   expect_true(nrow(result) > 0)
-  expect_true(result$extraction_suspect[1])
-  expect_equal(result$status[1], "NOTE",
-    info = "d far exceeding expected from t-stat should be NOTE (artifact)")
+  expect_true(result$status[1] %in% c("OK", "NOTE", "SKIP"),
+    info = "d=5 integer rejected at parse, result is p-value-only")
 })

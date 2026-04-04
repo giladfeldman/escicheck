@@ -105,18 +105,18 @@ test_that("partial eta2 still matches correctly", {
 # Fix 3A: d-vs-t cross-check for extraction artifacts
 # =========================================================================
 
-test_that("dz far exceeding expected d flagged as artifact", {
-  # dz=4 with t(298)=10.50: expected dz~0.61, reported 6.6x higher
-  r <- check_text("t(298) = 10.50, p < .001, dz = 4")
-  expect_equal(r$status[1], "NOTE")
-  expect_true(r$extraction_suspect[1])
+test_that("dz integer far exceeding expected rejected at parse time", {
+  # v0.3.0f: dz=4 (integer) with t(298)=10.50: max_d=1.22, 2*1.22=2.43
+  # dz=4 > 2.43 -> rejected at parse time as page number artifact
+  r <- parse_text("t(298) = 10.50, p < .001, dz = 4")
+  expect_true(is.na(r$effect_reported[1]))
 })
 
-test_that("d far exceeding expected flagged as artifact", {
-  # d=5 with t(246)=2.98: expected d~0.19, reported 26x higher
-  r <- check_text("t(246) = 2.98, p = .010, d = 5")
-  expect_equal(r$status[1], "NOTE")
-  expect_true(r$extraction_suspect[1])
+test_that("d integer far exceeding expected rejected at parse time", {
+  # d=5 (integer) with t(246)=2.98: max_d=0.38, 2*0.38=0.76
+  # d=5 > 2 -> rejected at parse time
+  r <- parse_text("t(246) = 2.98, p = .010, d = 5")
+  expect_true(is.na(r$effect_reported[1]))
 })
 
 test_that("legitimate large d not falsely flagged", {

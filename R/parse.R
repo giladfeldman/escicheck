@@ -248,6 +248,13 @@ normalize_text <- function(x) {
   # them from being captured as p-values when joined across line breaks
   x <- gsub("(^|\\n)([ \\t]*)\\d+(\\.\\d+)+\\.?[ \\t]+", "\\1\\2", x, perl = TRUE)
 
+  # v0.3.0f: Remove standalone page/section numbers BEFORE line-break joining.
+  # Must run here (not later at line ~317) because the joiner below would
+  # concatenate "dz =\n3\n" into "dz = 3" before the later stripper runs.
+  # Pattern: a line containing only 1-3 digits (optionally with period)
+  # preceded and followed by blank lines or text lines.
+  x <- gsub("\\n[ \\t]*\\d{1,3}[ \\t]*\\n", "\n", x, perl = TRUE)
+
   # General line-break joining for statistical expressions (v0.2.5)
   # When a line ends with = < > and the next line starts with a digit or minus,
   # join them. This catches edge cases that the stat-specific patterns below miss.
@@ -1092,6 +1099,7 @@ parse_text <- function(text, context_window_size = 2) {
           effect_reported <- NA_real_
         } else {
           # d=3, d=4, d=5 — check context for spurious patterns
+          reject <- FALSE
           context_lower <- tolower(s)
           spurious <- c("study\\s+\\d", "experiment\\s+\\d",
                         "table\\s+\\d", "figure\\s+\\d",
@@ -1101,6 +1109,22 @@ parse_text <- function(text, context_window_size = 2) {
           if (any(sapply(spurious, function(p) {
             grepl(p, context_lower, perl = TRUE)
           }))) {
+            reject <- TRUE
+          }
+          # v0.3.0f: Parse-time t-stat plausibility for round integers.
+          # Round-integer d/dz with a t-stat: check if d is plausible.
+          # Real d values reported as exact integers are extremely rare
+          # (authors write "d = 3.00" not "d = 3"). When d is integer
+          # AND > 2x the max plausible d from the t-stat, reject it
+          # as a likely page number or extraction artifact.
+          if (!reject && !is.na(stat_value) && !is.na(df1) &&
+              test_type == "t" && df1 > 0) {
+            max_d <- abs(stat_value) * 2 / sqrt(max(df1, 1))
+            if (abs(effect_reported) > max(2 * max_d, 2)) {
+              reject <- TRUE
+            }
+          }
+          if (reject) {
             effect_name <- NA_character_
             effect_reported <- NA_real_
           }

@@ -20,7 +20,10 @@ test_that("reported d outside dav range still gets nonzero delta", {
   # t(20) = 2.0: dz = 2/sqrt(21) = 0.436
   # dav at r=0.95: 0.436/sqrt(0.1) = 1.379
   # Report d = 3.00 — well outside any range
-  res <- check_text("t(20) = 2.00, p = .059, d = 3.00")
+  # v0.3.0f: d=3 is integer, rejected at parse when > 2*max_d
+  # max_d = 2*2/sqrt(20) = 0.894, 2*0.894=1.79, d=3 > 1.79 -> rejected
+  # Use d = 3.10 (non-integer) to test range matching
+  res <- check_text("t(20) = 2.00, p = .059, d = 3.10")
   r <- res[!is.na(res$matched_variant), ]
   expect_true(nrow(r) > 0)
   # Should have significant delta (not in range)
