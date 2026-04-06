@@ -462,6 +462,86 @@ ci_V <- function(V, N, m, level = 0.95) {
   return(ci_result(reason = "No valid CI method available for Cramer's V"))
 }
 
+# ============================================================================
+# Multi-method CI computation functions
+# Return ALL successful CI methods (not just the first) for multi-method matching.
+# ============================================================================
+
+#' Compute CIs for independent d via all available methods
+#' @param d Cohen's d
+#' @param n1 Sample size 1
+#' @param n2 Sample size 2
+#' @param level Confidence level
+#' @return Named list of ci_result objects (one per successful method)
+#' @keywords internal
+ci_d_ind_all <- function(d, n1, n2, level = 0.95) {
+  if (any(is.na(c(d, n1, n2)))) return(list())
+  results <- list()
+  # Method 1: Noncentral t (most accurate)
+  bounds_nct <- tryCatch(ci_d_ind_noncentral_t(d, n1, n2, level),
+                         error = function(e) c(NA_real_, NA_real_))
+  if (!any(is.na(bounds_nct)))
+    results$noncentral_t <- ci_result(bounds = bounds_nct, method = "noncentral_t", success = TRUE)
+  # Method 2: Normal approximation (symmetric)
+  bounds_na <- ci_d_ind_approx(d, n1, n2, level)
+  if (!any(is.na(bounds_na)))
+    results$normal_approx <- ci_result(bounds = bounds_na, method = "normal_approx", success = TRUE)
+  results
+}
+
+#' Compute CIs for paired dz via all available methods
+#' @param dz Cohen's dz
+#' @param n Sample size (number of pairs)
+#' @param level Confidence level
+#' @return Named list of ci_result objects
+#' @keywords internal
+ci_dz_all <- function(dz, n, level = 0.95) {
+  if (any(is.na(c(dz, n))) || n <= 1) return(list())
+  results <- list()
+  # Method 1: Noncentral t
+  ncp <- dz * sqrt(n)
+  df <- n - 1
+  tryCatch({
+    alpha <- 1 - level
+    t_lo <- suppressWarnings(stats::qt(1 - alpha / 2, df = df, ncp = ncp))
+    t_hi <- suppressWarnings(stats::qt(alpha / 2, df = df, ncp = ncp))
+    if (!is.na(t_lo) && !is.na(t_hi) && is.finite(t_lo) && is.finite(t_hi)) {
+      bounds <- c(t_hi / sqrt(n), t_lo / sqrt(n))
+      results$noncentral_t <- ci_result(bounds = bounds, method = "noncentral_t", success = TRUE)
+    }
+  }, error = function(e) NULL)
+  # Method 2: Normal approximation (symmetric)
+  se_dz <- sqrt(1 / n + dz^2 / (2 * n))
+  z <- stats::qnorm(1 - (1 - level) / 2)
+  bounds_na <- c(dz - z * se_dz, dz + z * se_dz)
+  results$normal_approx <- ci_result(bounds = bounds_na, method = "normal_approx", success = TRUE)
+  results
+}
+
+#' Compute CIs for partial eta-squared at multiple confidence levels
+#' @param F_val F statistic
+#' @param df1 df1
+#' @param df2 df2
+#' @param level Primary confidence level (default 0.95)
+#' @return Named list of ci_result objects (95% + 90% per Steiger 2004)
+#' @keywords internal
+ci_etap2_all <- function(F_val, df1, df2, level = 0.95) {
+  if (any(is.na(c(F_val, df1, df2)))) return(list())
+  results <- list()
+  # Method 1: NCP F-inversion at primary level
+  res <- ci_etap2(F_val, df1, df2, level)
+  if (res$success) results$ncf_inversion <- res
+  # Method 2: NCP F-inversion at 90% (Steiger 2004 recommendation for eta2)
+  if (level != 0.90) {
+    res_90 <- ci_etap2(F_val, df1, df2, 0.90)
+    if (res_90$success) {
+      res_90$method <- "ncf_90pct"
+      results$ncf_90pct <- res_90
+    }
+  }
+  results
+}
+
 # Enumerate plausible m = min(r-1, c-1) given df
 enumerate_m_from_df <- function(df) {
   if (is.na(df) || df < 1) {

@@ -914,6 +914,8 @@ compute_and_compare_one <- function(row,
       if (!is.na(d_ind)) {
         d_ci <- tryCatch(ci_d_ind(d_ind, n1, n2, ci_level_used), error = function(e) list(success = FALSE))
         if (d_ci$success) computed_variants$d_ind$ci <- d_ci$bounds
+        computed_variants$d_ind$ci_all <- tryCatch(
+          ci_d_ind_all(d_ind, n1, n2, ci_level_used), error = function(e) list())
       }
     } else if (!is.na(N) && N > 0) {
       # No explicit group sizes - compute with assumptions
@@ -961,6 +963,8 @@ compute_and_compare_one <- function(row,
           if (!is.na(d_ind_equalN)) {
             d_ci <- tryCatch(ci_d_ind(d_ind_equalN, n1_eq, n2_eq, ci_level_used), error = function(e) list(success = FALSE))
             if (d_ci$success) computed_variants$d_ind_equalN$ci <- d_ci$bounds
+            computed_variants$d_ind_equalN$ci_all <- tryCatch(
+              ci_d_ind_all(d_ind_equalN, n1_eq, n2_eq, ci_level_used), error = function(e) list())
           }
         }
         assumptions <- c(assumptions, "Assumed equal group sizes (n1=n2=N/2) for d_ind computation")
@@ -1036,6 +1040,8 @@ compute_and_compare_one <- function(row,
         if (!is.na(dz)) {
           dz_ci <- tryCatch(ci_dz(dz, n_paired, ci_level_used), error = function(e) list(success = FALSE))
           if (dz_ci$success) computed_variants$dz$ci <- dz_ci$bounds
+          computed_variants$dz$ci_all <- tryCatch(
+            ci_dz_all(dz, n_paired, ci_level_used), error = function(e) list())
         }
 
         # v0.2.7: Compute Hedges-corrected paired variants (gz, gav, grm)
@@ -1620,6 +1626,8 @@ compute_and_compare_one <- function(row,
             metadata = VARIANT_METADATA$d_ind_equalN
           )
           if (!any(is.na(ci_d_val))) computed_variants$d_ind_equalN$ci <- ci_d_val
+          computed_variants$d_ind_equalN$ci_all <- tryCatch(
+            ci_d_ind_all(d_equiv, n1_eq, n2_eq, ci_level_used), error = function(e) list())
 
           # Hedges' g (bias-corrected d) -- Issue A fix
           J_factor <- 1 - 3 / (4 * df2 - 1)
@@ -1653,6 +1661,8 @@ compute_and_compare_one <- function(row,
           )
           dz_ci <- tryCatch(ci_dz(dz_equiv, df2 + 1, ci_level_used), error = function(e) list(success = FALSE))
           if (isTRUE(dz_ci$success)) computed_variants$dz$ci <- dz_ci$bounds
+          computed_variants$dz$ci_all <- tryCatch(
+            ci_dz_all(dz_equiv, df2 + 1, ci_level_used), error = function(e) list())
 
           # v0.2.9b: Compute dav/drm via r-grid + Hedges-corrected gz/gav/grm
           # Without these, Phase 8A-bis can't detect structural ambiguity for g
@@ -1749,14 +1759,18 @@ compute_and_compare_one <- function(row,
         }
       }
 
-      # Compute CIs for eta-squared variants
+      # Compute CIs for eta-squared variants (with multi-method including 90% per Steiger 2004)
       if (!is.na(anova_effects$partial_eta2)) {
         pe_ci <- tryCatch(ci_etap2(stat, df1, df2, ci_level_used), error = function(e) list(success = FALSE))
         if (pe_ci$success) computed_variants$partial_eta2$ci <- pe_ci$bounds
+        computed_variants$partial_eta2$ci_all <- tryCatch(
+          ci_etap2_all(stat, df1, df2, ci_level_used), error = function(e) list())
       }
       if (!is.na(anova_effects$eta2)) {
         e_ci <- tryCatch(ci_eta2(stat, df1, df2, ci_level_used), error = function(e) list(success = FALSE))
         if (e_ci$success) computed_variants$eta2$ci <- e_ci$bounds
+        computed_variants$eta2$ci_all <- tryCatch(
+          ci_etap2_all(stat, df1, df2, ci_level_used), error = function(e) list())
       }
 
       if (design == "unclear") {
@@ -1981,17 +1995,24 @@ compute_and_compare_one <- function(row,
         }
 
         if (!is.na(V_val)) {
+          # Compute CI for Cramer's V
+          v_ci_result <- tryCatch(
+            ci_V(V_val, N, m_candidates[1], ci_level_used),
+            error = function(e) list(success = FALSE))
+
           if (!is.na(canonical_type) && canonical_type == "V") {
             computed_variants$V <- list(
               value = V_val,
               metadata = VARIANT_METADATA$V
             )
+            if (v_ci_result$success) computed_variants$V$ci <- v_ci_result$bounds
           } else {
             alternatives$V <- list(
               value = V_val,
               metadata = VARIANT_METADATA$V,
               why_consider = "Better for tables larger than 2x2"
             )
+            if (v_ci_result$success) alternatives$V$ci <- v_ci_result$bounds
           }
         }
       }
@@ -2601,7 +2622,10 @@ compute_and_compare_one <- function(row,
   }
 
   # ============================================================================
-  # PHASE 6: CI consistency checking
+  # PHASE 6: Multi-method CI consistency checking
+  # Tries all available CI computation methods (noncentral t, normal approx,
+  # 90% CI for eta-squared) and picks the best match. This catches papers
+  # that used a different CI method than our primary computation.
   # ============================================================================
 
   ci_match <- as.logical(NA)
@@ -2609,30 +2633,110 @@ compute_and_compare_one <- function(row,
   ci_delta_upper <- NA_real_
   computed_ciL <- NA_real_
   computed_ciU <- NA_real_
+  ci_check_status <- NA_character_
+  ci_method_match <- NA_character_
+  ci_width_ratio <- NA_real_
+  ci_symmetry <- NA_character_
 
-  if (!is.na(ciL_rep) && !is.na(ciU_rep) && !is.na(matched_variant)) {
-    # Get CI from matched variant if available
-    if (matched_variant %in% names(computed_variants) &&
-      !is.null(computed_variants[[matched_variant]]$ci)) {
-      computed_ciL <- computed_variants[[matched_variant]]$ci[1]
-      computed_ciU <- computed_variants[[matched_variant]]$ci[2]
-    } else if (matched_variant %in% names(same_type_variants) &&
-      !is.null(same_type_variants[[matched_variant]]$ci)) {
-      computed_ciL <- same_type_variants[[matched_variant]]$ci[1]
-      computed_ciU <- same_type_variants[[matched_variant]]$ci[2]
+  # Helper: collect all CI candidates from a variant
+  collect_ci_candidates <- function(variant, name_prefix) {
+    candidates <- list()
+    if (!is.null(variant$ci_all) && length(variant$ci_all) > 0) {
+      for (m in names(variant$ci_all)) {
+        entry <- variant$ci_all[[m]]
+        if (!is.null(entry$bounds) && !any(is.na(entry$bounds)))
+          candidates[[paste0(name_prefix, ":", m)]] <- entry$bounds
+      }
+    } else if (!is.null(variant$ci) && !any(is.na(variant$ci))) {
+      candidates[[paste0(name_prefix, ":primary")]] <- variant$ci
     }
-
-    if (!is.na(computed_ciL) && !is.na(computed_ciU)) {
-      ci_delta_lower <- abs(computed_ciL - ciL_rep)
-      ci_delta_upper <- abs(computed_ciU - ciU_rep)
-      ci_match <- (ci_delta_lower <= tol_ci) && (ci_delta_upper <= tol_ci)
-    }
+    candidates
   }
 
-  # If no effect was reported but we computed some, extract the "primary" CI
-  # This ensures computed CIs are shown even when user didn't report an effect
+  if (!is.na(ciL_rep) && !is.na(ciU_rep)) {
+    # Gather all CI candidates from matched variant and all same-type variants
+    ci_candidates <- list()
+
+    # From matched variant (highest priority source)
+    if (!is.na(matched_variant)) {
+      if (matched_variant %in% names(computed_variants))
+        ci_candidates <- c(ci_candidates, collect_ci_candidates(
+          computed_variants[[matched_variant]], matched_variant))
+      if (matched_variant %in% names(same_type_variants))
+        ci_candidates <- c(ci_candidates, collect_ci_candidates(
+          same_type_variants[[matched_variant]], matched_variant))
+    }
+
+    # From all computed variants (in case matched variant has no CI but others do)
+    for (vname in names(computed_variants)) {
+      ci_candidates <- c(ci_candidates, collect_ci_candidates(
+        computed_variants[[vname]], vname))
+    }
+    # From alternatives
+    for (vname in names(alternatives)) {
+      ci_candidates <- c(ci_candidates, collect_ci_candidates(
+        alternatives[[vname]], vname))
+    }
+
+    # De-duplicate by name
+    ci_candidates <- ci_candidates[!duplicated(names(ci_candidates))]
+
+    # Find best match across all CI candidates
+    best_delta <- Inf
+    for (cname in names(ci_candidates)) {
+      cL <- ci_candidates[[cname]][1]
+      cU <- ci_candidates[[cname]][2]
+      if (is.na(cL) || is.na(cU)) next
+      dL <- abs(cL - ciL_rep)
+      dU <- abs(cU - ciU_rep)
+      max_delta <- max(dL, dU)
+      if (max_delta < best_delta) {
+        best_delta <- max_delta
+        ci_delta_lower <- dL
+        ci_delta_upper <- dU
+        computed_ciL <- cL
+        computed_ciU <- cU
+        ci_method_match <- cname
+      }
+    }
+
+    if (is.finite(best_delta)) {
+      ci_match <- (ci_delta_lower <= tol_ci) && (ci_delta_upper <= tol_ci)
+      if (ci_match) {
+        ci_check_status <- "MATCH"
+      } else if (best_delta <= 3 * tol_ci) {
+        ci_check_status <- "PLAUSIBLE"
+      } else {
+        ci_check_status <- "INCONSISTENT"
+      }
+    } else {
+      ci_check_status <- "UNVERIFIABLE"
+    }
+
+    # CI diagnostics
+    reported_width <- ciU_rep - ciL_rep
+    if (!is.na(computed_ciL) && !is.na(computed_ciU) && reported_width != 0) {
+      computed_width <- computed_ciU - computed_ciL
+      ci_width_ratio <- round(computed_width / reported_width, 3)
+    }
+
+    # Symmetry check
+    if (!is.na(effect_reported) && !is.na(ciL_rep) && !is.na(ciU_rep)) {
+      lower_arm <- abs(effect_reported - ciL_rep)
+      upper_arm <- abs(ciU_rep - effect_reported)
+      if (lower_arm > 0 && upper_arm > 0) {
+        ratio <- min(lower_arm, upper_arm) / max(lower_arm, upper_arm)
+        ci_symmetry <- if (ratio > 0.95) "symmetric" else "asymmetric"
+      }
+    }
+  } else if (!is.na(ciL_rep) || !is.na(ciU_rep)) {
+    ci_check_status <- "UNVERIFIABLE"  # Only one bound reported
+  } else {
+    ci_check_status <- "MISSING"  # No CI reported
+  }
+
+  # If no CI was matched but we computed some, extract the "primary" CI for display
   if (is.na(computed_ciL) || is.na(computed_ciU)) {
-    # Try to find the primary computed effect's CI based on test type
     primary_effects <- if (tt == "t") {
       c("d_ind", "d_ind_equalN", "dz")
     } else if (tt == "F") {
@@ -4166,6 +4270,11 @@ compute_and_compare_one <- function(row,
     ciL_computed = computed_ciL,
     ciU_computed = computed_ciU,
     ci_delta_lower = ci_delta_lower,
+    ci_delta_upper = ci_delta_upper,
+    ci_check_status = ci_check_status,
+    ci_method_match = ci_method_match,
+    ci_width_ratio = ci_width_ratio,
+    ci_symmetry = ci_symmetry,
     # Status and metadata
 
     # REPRO code generation
@@ -4507,7 +4616,9 @@ check_text <- function(text,
           b_coeff = NA_real_, SE_coeff = NA_real_, adj_R2 = NA_real_,
           closest_method = NA_character_,
           delta_effect_abs = NA_real_, ci_match = as.logical(NA),
-          ci_delta_lower = NA_real_, ci_delta_upper = NA_real_
+          ci_delta_lower = NA_real_, ci_delta_upper = NA_real_,
+          ci_check_status = NA_character_, ci_method_match = NA_character_,
+          ci_width_ratio = NA_real_, ci_symmetry = NA_character_
         )
       }
     )

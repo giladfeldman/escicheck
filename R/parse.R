@@ -826,12 +826,6 @@ parse_text <- function(text, context_window_size = 2) {
     m_SE <- stringr::str_match(s, pat_SE)
     m_adj_R2 <- stringr::str_match(s, pat_adj_R2)
 
-    # Match CI patterns (try all variants)
-    m_CI1 <- stringr::str_match(s, pat_CI1)
-    m_CI2 <- stringr::str_match(s, pat_CI2)
-    m_CI3 <- stringr::str_match(s, pat_CI3)
-    m_CI4 <- stringr::str_match(s, pat_CI4)
-
     # Determine test type and extract values
     test_type <- NA_character_
     df1 <- NA_real_
@@ -983,8 +977,8 @@ parse_text <- function(text, context_window_size = 2) {
     } else if (!all(is.na(m_cohens_f))) {
       effect_name <- "f"
       effect_reported <- numify(m_cohens_f[2])
-    } else if (!all(is.na(m_bare_f)) && !is.na(test_type) && test_type == "F") {
-      # Bare "f = value" after comma in F-test context — unambiguously Cohen's f
+    } else if (!all(is.na(m_bare_f))) {
+      # Bare "f = value" after comma — Cohen's f (for F-tests or t-tests reporting f)
       effect_name <- "f"
       effect_reported <- numify(m_bare_f[2])
     } else if (!all(is.na(m_dz))) {
@@ -1147,7 +1141,7 @@ parse_text <- function(text, context_window_size = 2) {
     m_CI1 <- stringr::str_match(s, pat_CI1)
     m_CI2 <- stringr::str_match(s, pat_CI2)
     m_CI3 <- stringr::str_match(s, pat_CI3)
-    m_CI4 <- stringr::str_match(s, pat_CI4)
+    m_CI4_all <- stringr::str_match_all(s, pat_CI4)[[1]]
     m_CI_level <- stringr::str_match(s, pat_CI_level)
 
     if (!all(is.na(m_CI1))) {
@@ -1176,18 +1170,37 @@ parse_text <- function(text, context_window_size = 2) {
         ci_level <- 0.95
         ci_level_source <- "assumed_95"
       }
-    } else if (!all(is.na(m_CI4))) {
+    } else if (nrow(m_CI4_all) > 0) {
       # Pattern 4: Bounds without level (parentheses)
-      ciL <- numify(m_CI4[2])
-      ciU <- numify(m_CI4[3])
+      # Use str_match_all to find ALL matches, then skip F-test df notation.
+      # F(df1, df2) matches CI4 pattern but is NOT a CI — skip that match
+      # and use the next one if present (e.g., the actual CI after effect size).
+      ci4_found <- FALSE
+      for (ci4_row_idx in seq_len(nrow(m_CI4_all))) {
+        ci4_val1 <- numify(m_CI4_all[ci4_row_idx, 2])
+        ci4_val2 <- numify(m_CI4_all[ci4_row_idx, 3])
 
-      # Look for level stated separately
-      if (!all(is.na(m_CI_level))) {
-        ci_level <- numify(m_CI_level[2]) / 100
-        ci_level_source <- "inferred_from_context"
-      } else {
-        ci_level <- 0.95
-        ci_level_source <- "assumed_95"
+        is_f_test_df <- (!is.na(test_type) && test_type == "F" &&
+                         !is.na(df1) && !is.na(df2) &&
+                         isTRUE(ci4_val1 == df1) && isTRUE(ci4_val2 == df2))
+
+        if (!is_f_test_df) {
+          ciL <- ci4_val1
+          ciU <- ci4_val2
+          ci4_found <- TRUE
+          break
+        }
+      }
+
+      if (ci4_found) {
+        # Look for level stated separately
+        if (!all(is.na(m_CI_level))) {
+          ci_level <- numify(m_CI_level[2]) / 100
+          ci_level_source <- "inferred_from_context"
+        } else {
+          ci_level <- 0.95
+          ci_level_source <- "assumed_95"
+        }
       }
     }
 

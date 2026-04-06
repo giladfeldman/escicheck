@@ -83,9 +83,12 @@ test_that("generalized eta-squared (spelled out) parsed correctly", {
   expect_equal(r$effect_reported[1], 0.12)
 })
 
-test_that("generalized_eta2 gets NOTE not ERROR in check_text", {
+test_that("generalized_eta2 gets SKIP (extraction_only) not ERROR in check_text", {
+  # generalized_eta2 is mathematically unverifiable from summary statistics
+  # (Bakeman 2005) — routed to extraction_only, which becomes SKIP
   r <- check_text("F(1, 100) = 5.0, p = .028, geta-squared = 0.04")
-  expect_equal(r$status[1], "NOTE")
+  expect_equal(r$status[1], "SKIP")
+  expect_true(any(grepl("Generalized eta-squared cannot be verified", r$uncertainty_reasons)))
 })
 
 test_that("regular eta2 still matches correctly", {
@@ -283,4 +286,49 @@ test_that("t-test + eta2 not confused with d", {
   # eta2 should be matched as eta2, not as d
   r <- check_text("t(100) = 3.0, p = .003, eta-squared = 0.083")
   expect_equal(r$reported_type[1], "eta2")
+})
+
+# =========================================================================
+# Fix 7: F-test df falsely parsed as CI bounds (pat_CI4 false positive)
+# F(df1, df2) = val matches pat_CI4's (number, number) pattern
+# Bug: 53,780 false CIs in MetaESCI where ciL=df1, ciU=df2
+# =========================================================================
+
+test_that("F-test df NOT parsed as CI bounds", {
+  r <- parse_text("F(2, 76) = 3.45, p = .036")
+  expect_equal(r$test_type[1], "F")
+  expect_equal(r$df1[1], 2)
+  expect_equal(r$df2[1], 76)
+  expect_true(is.na(r$ciL_reported[1]),
+    info = "F-test df1 should NOT be captured as CI lower bound")
+  expect_true(is.na(r$ciU_reported[1]),
+    info = "F-test df2 should NOT be captured as CI upper bound")
+})
+
+test_that("F-test with real parenthesized CI still works", {
+  r <- parse_text("F(2, 76) = 3.45, p = .036, d = 0.56, (0.12, 0.98)")
+  expect_equal(r$test_type[1], "F")
+  expect_equal(r$ciL_reported[1], 0.12)
+  expect_equal(r$ciU_reported[1], 0.98)
+})
+
+test_that("F-test with explicit labeled CI unaffected", {
+  r <- parse_text("F(1, 98) = 4.12, p = .045, eta2 = .04, 95% CI [.00, .13]")
+  expect_equal(r$test_type[1], "F")
+  expect_equal(r$ciL_reported[1], 0.00)
+  expect_equal(r$ciU_reported[1], 0.13)
+})
+
+test_that("t-test CI4 pattern unaffected by F-test guard", {
+  r <- parse_text("t(28) = 2.21, p = .035, d = 0.80, (0.12, 0.45)")
+  expect_equal(r$test_type[1], "t")
+  expect_equal(r$ciL_reported[1], 0.12)
+  expect_equal(r$ciU_reported[1], 0.45)
+})
+
+test_that("F-test with GG-corrected decimal df not falsely matched as CI", {
+  r <- parse_text("F(1.87, 654.3) = 37.32, p < .001")
+  expect_equal(r$test_type[1], "F")
+  expect_true(is.na(r$ciL_reported[1]),
+    info = "Decimal df should NOT be captured as CI bounds")
 })
