@@ -79,7 +79,7 @@ extract_pdf_text_robust <- function(pdf_path, suppress_warnings = TRUE) {
   )
 
   system2(pdftotext_path,
-    args = c(shQuote(pdf_path), shQuote(temp_txt)),
+    args = c("-enc", "UTF-8", shQuote(pdf_path), shQuote(temp_txt)),
     stdout = TRUE, stderr = TRUE
   )
 

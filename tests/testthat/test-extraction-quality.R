@@ -245,14 +245,42 @@ test_that("U+FFFD still works as minus sign outside effect size context", {
 })
 
 # =============================================================================
-# SECTION 9: Orphaned superscript 2 recovery
+# SECTION 9: Greek letter + digit 2 normalization (pdftotext -enc UTF-8 output)
 # =============================================================================
 
-test_that("orphaned '2 = value' with 90% CI is recovered as eta-squared", {
-  res <- check_text("F(1.97, 2337) = 46.96, p < .001, 2 = 0.01, 90% CI [0.00, 0.02]")
+test_that("\u03b72 = value is recognized as eta-squared", {
+  res <- check_text("F(1, 31) = 12.1, p = 0.001, \u03b72 = 0.11")
   expect_equal(res$test_type[1], "F")
   expect_equal(res$effect_reported_name[1], "eta2")
+  expect_equal(res$effect_reported[1], 0.11)
+})
+
+test_that("\u03b72 with p < inequality is recognized as eta-squared", {
+  res <- check_text("F(1, 45) = 156.2, p < 0.0001, \u03b72 = 0.78")
+  expect_equal(res$effect_reported_name[1], "eta2")
+  expect_equal(res$effect_reported[1], 0.78)
+})
+
+test_that("\u03b72 with small value is recognized as eta-squared", {
+  res <- check_text("F(1, 50) = 0.50, p = 0.48, \u03b72 = 0.01")
+  expect_equal(res$effect_reported_name[1], "eta2")
   expect_equal(res$effect_reported[1], 0.01)
+})
+
+test_that("multiple \u03b72 in same paragraph are all recognized", {
+  text <- paste0(
+    "F(1, 31) = 12.1, p = 0.001, \u03b72 = 0.11. ",
+    "F(1, 31) = 7.4, p = 0.011, \u03b72 = 0.09."
+  )
+  res <- check_text(text)
+  expect_true(nrow(res) >= 2)
+  expect_true(all(res$effect_reported_name == "eta2"))
+})
+
+test_that("\u03c92 = value is recognized as omega-squared", {
+  res <- check_text("F(2, 57) = 5.12, p = .009, \u03c92 = 0.12")
+  expect_equal(res$effect_reported_name[1], "omega2")
+  expect_equal(res$effect_reported[1], 0.12)
 })
 
 # =============================================================================

@@ -156,9 +156,11 @@ normalize_text <- function(x) {
   # Superscript 2 (U+00B2) to caret notation (e.g., chi squared, eta squared)
   x <- gsub("\u00B2", "^2", x)
 
-  # Orphaned superscript 2 in ANOVA context: pdftotext sometimes loses η, leaving
-  # ", 2 = 0.04, 90% CI" — recover as eta-squared when followed by 90% CI
-  x <- gsub(",\\s+2\\s*=\\s*(\\d+\\.\\d+),\\s*90%", ", eta-squared = \\1, 90%", x, perl = TRUE)
+  # Greek letter + regular digit 2 (pdftotext -enc UTF-8 output):
+  # η2 → eta-squared, ω2 → omega-squared, ε2 → epsilon-squared
+  x <- gsub("\u03b7\\s*2\\s*=", "eta-squared =", x, perl = TRUE)
+  x <- gsub("\u03c9\\s*2\\s*=", "omega-squared =", x, perl = TRUE)
+  x <- gsub("\u03b5\\s*2\\s*=", "epsilon-squared =", x, perl = TRUE)
 
   # Fix stripped chi-square symbol: PDF extraction sometimes strips chi/X leaving
   # bare " 2 (df) = value" or " 2(df) = value" for chi-squared tests.
