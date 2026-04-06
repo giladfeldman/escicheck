@@ -657,12 +657,12 @@ parse_text <- function(text, context_window_size = 2) {
   pat_adj_R2 <- "(?:adjusted\\s*R\\^?2|adj\\.?\\s*R\\^?2|R\\^?2\\s*adj)\\s*=\\s*([-+]?\\d*\\.?\\d+)"
 
   # Comprehensive CI patterns (Phase 2H - Enhanced with level detection)
-  pat_CI1 <- "(\\d+)%\\s*(?:CI|C\\.I\\.|confidence\\s*interval)\\s*\\[\\s*([-+]?\\d*\\.?\\d+)\\s*,\\s*([-+]?\\d*\\.?\\d+)\\s*\\]"
-  pat_CI2 <- "(?:CI|C\\.I\\.|confidence\\s*interval)\\s*(\\d+)%\\s*\\[\\s*([-+]?\\d*\\.?\\d+)\\s*,\\s*([-+]?\\d*\\.?\\d+)\\s*\\]"
+  pat_CI1 <- "(\\d+\\.?\\d*)%\\s*(?:CI|C\\.I\\.|confidence\\s*interval)\\s*\\[\\s*([-+]?\\d*\\.?\\d+)\\s*,\\s*([-+]?\\d*\\.?\\d+)\\s*\\]"
+  pat_CI2 <- "(?:CI|C\\.I\\.|confidence\\s*interval)\\s*(\\d+\\.?\\d*)%\\s*\\[\\s*([-+]?\\d*\\.?\\d+)\\s*,\\s*([-+]?\\d*\\.?\\d+)\\s*\\]"
   pat_CI3 <- "\\[\\s*([-+]?\\d*\\.?\\d+)\\s*,\\s*([-+]?\\d*\\.?\\d+)\\s*\\]"
   pat_CI4 <- "\\(\\s*([-+]?\\d*\\.?\\d+)\\s*[;,]\\s*([-+]?\\d*\\.?\\d+)\\s*\\)"
   # Pattern for standalone CI level (when stated separately from bounds)
-  pat_CI_level <- "(\\d+)%\\s*(?:CI|C\\.I\\.|confidence\\s*interval)"
+  pat_CI_level <- "(\\d+\\.?\\d*)%\\s*(?:CI|C\\.I\\.|confidence\\s*interval)"
   # Pattern 5: "90% CI [-0.3, 1.2]" (with negative values)
   # (covered by pat_CI1, but ensure it handles negatives)
 
@@ -1204,6 +1204,12 @@ parse_text <- function(text, context_window_size = 2) {
           ci_level_source <- "assumed_95"
         }
       }
+    }
+
+    # Guard: CI level < 0.50 is implausible (likely parsing artifact)
+    if (!is.na(ci_level) && ci_level < 0.50) {
+      ci_level_source <- "implausible_level"
+      ci_level <- 0.95
     }
 
     # Only return row if we found a test statistic

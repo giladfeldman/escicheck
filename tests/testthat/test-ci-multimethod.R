@@ -139,3 +139,46 @@ test_that("badly wrong CI still gets ci_match=FALSE", {
   expect_false(isTRUE(r$ci_match[1]))
   expect_equal(r$ci_check_status[1], "INCONSISTENT")
 })
+
+# =========================================================================
+# Decimal CI level parsing (v0.3.0j fix)
+# Bug: (\d+)% regex couldn't match "99.9%" — captured "9" → ci_level=0.09
+# =========================================================================
+
+test_that("99.9% CI level parsed correctly (not 0.09)", {
+  r <- check_text("t(50) = 2.50, p = .016, d = 0.71, 99.9% CI [0.14, 1.27]")
+  expect_equal(r$ci_level[1], 0.999)
+  expect_equal(r$ci_level_source[1], "explicit_with_bounds")
+})
+
+test_that("99.5% CI level parsed correctly (not 0.05)", {
+  r <- check_text("t(50) = 2.50, p = .016, d = 0.71, 99.5% CI [0.14, 1.27]")
+  expect_equal(r$ci_level[1], 0.995)
+})
+
+test_that("99% CI level parsed correctly", {
+  r <- check_text("t(50) = 2.50, p = .016, d = 0.71, 99% CI [0.14, 1.27]")
+  expect_equal(r$ci_level[1], 0.99)
+})
+
+test_that("95% CI level still works after regex change", {
+  r <- check_text("t(50) = 2.50, p = .016, d = 0.71, 95% CI [0.14, 1.27]")
+  expect_equal(r$ci_level[1], 0.95)
+})
+
+test_that("90% CI level still works after regex change", {
+  r <- check_text("F(2, 100) = 5.50, p = .005, eta-squared = .10, 90% CI [.02, .18]")
+  expect_equal(r$ci_level[1], 0.90)
+})
+
+test_that("CI level < 0.50 falls back to 0.95 with implausible_level source", {
+  # Simulate edge case: if somehow "5% CI" appears (meaning 5% sig level)
+  r <- check_text("t(50) = 2.50, p = .016, d = 0.71, 5% CI [0.14, 1.27]")
+  expect_equal(r$ci_level[1], 0.95)
+  expect_equal(r$ci_level_source[1], "implausible_level")
+})
+
+test_that("CI 99.9% alternate format parsed correctly", {
+  r <- check_text("t(50) = 2.50, p = .016, d = 0.71, CI 99.9% [0.14, 1.27]")
+  expect_equal(r$ci_level[1], 0.999)
+})
