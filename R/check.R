@@ -2684,8 +2684,8 @@ compute_and_compare_one <- function(row,
     # Find best match across all CI candidates
     best_delta <- Inf
     for (cname in names(ci_candidates)) {
-      cL <- ci_candidates[[cname]][1]
-      cU <- ci_candidates[[cname]][2]
+      cL <- as.numeric(ci_candidates[[cname]][1])
+      cU <- as.numeric(ci_candidates[[cname]][2])
       if (is.na(cL) || is.na(cU)) next
       dL <- abs(cL - ciL_rep)
       dU <- abs(cU - ciU_rep)
@@ -2754,8 +2754,8 @@ compute_and_compare_one <- function(row,
     for (eff_name in primary_effects) {
       if (eff_name %in% names(computed_variants) &&
         !is.null(computed_variants[[eff_name]]$ci)) {
-        computed_ciL <- computed_variants[[eff_name]]$ci[1]
-        computed_ciU <- computed_variants[[eff_name]]$ci[2]
+        computed_ciL <- as.numeric(computed_variants[[eff_name]]$ci[1])
+        computed_ciU <- as.numeric(computed_variants[[eff_name]]$ci[2])
         break
       }
     }
@@ -4267,8 +4267,8 @@ compute_and_compare_one <- function(row,
     p_computed = p_computed,
     decision_error = decision_error,
     ci_match = ci_match,
-    ciL_computed = computed_ciL,
-    ciU_computed = computed_ciU,
+    ciL_computed = as.numeric(computed_ciL),
+    ciU_computed = as.numeric(computed_ciU),
     ci_delta_lower = ci_delta_lower,
     ci_delta_upper = ci_delta_upper,
     ci_check_status = ci_check_status,

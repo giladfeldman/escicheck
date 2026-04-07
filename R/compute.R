@@ -104,8 +104,8 @@ ci_d_ind_noncentral_t <- function(d, n1, n2, level = 0.95) {
           n.1 = n1, n.2 = n2, conf.level = level
         )
         return(c(
-          ci_result$Lower.Conf.Limit.smd,
-          ci_result$Upper.Conf.Limit.smd
+          as.numeric(ci_result$Lower.Conf.Limit.smd),
+          as.numeric(ci_result$Upper.Conf.Limit.smd)
         ))
       },
       error = function(e) {
@@ -1135,7 +1135,7 @@ get_ncp_F <- function(F_val, df1, df2, level = 0.95) {
       },
       error = function(e) NA_real_
     )
-    limits[2] <- ul_try
+    limits[2] <- as.numeric(ul_try)
   } else {
     # Even at lambda=0, probability is too low (unlikely for upper limit)
     limits[2] <- NA_real_
@@ -1154,7 +1154,7 @@ get_ncp_F <- function(F_val, df1, df2, level = 0.95) {
       },
       error = function(e) NA_real_
     )
-    limits[1] <- ll_try
+    limits[1] <- as.numeric(ll_try)
   } else {
     limits[1] <- 0 # If p_null is too small, lower bound is 0
   }
