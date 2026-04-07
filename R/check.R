@@ -2850,6 +2850,25 @@ compute_and_compare_one <- function(row,
   } else {
     "extraction_only"
   }
+
+  # v0.3.0l: r-test upgrade — r IS both the statistic and the effect size.
+  # When r is reported as the test stat (e.g., r(48) = .42), it serves as its own
+  # effect size. If df is available for p-value verification, this is a fully
+  # verified result — not "p_value_only".
+  if (tt == "r" && check_type == "p_value" && !is.na(stat)) {
+    effect_reported <- stat
+    reported_type <- "r"
+    effect_reported_name <- "r"
+    has_effect_reported <- TRUE
+    check_type <- "effect_size"
+    matched_variant <- "r"
+    matched_value <- stat
+    delta_effect_abs <- 0
+    # r matches itself exactly — set PASS now; Phase 9 may downgrade
+    # if a p-value decision error is detected
+    status <- "PASS"
+  }
+
   # v0.3.0c: Correlation guard — r-tests without df or N cannot be verified
   # For r-tests, stat IS the r-value, so computed_variants$r trivially matches
   # the reported effect. Without df (for p-value) or N (for CI), this is a
@@ -3903,11 +3922,12 @@ compute_and_compare_one <- function(row,
     }
 
     # Special case: r-test where the stat IS the effect (r-value)
-    # For r-tests, the stat_value is the r-value itself, so the "effect" is verified
-    if (tt == "r" && !is.na(stat) && !is.na(p_computed) && !is.na(p_reported)) {
+    # v0.3.0l: Primary r-test handling moved to Phase 8 (r-test upgrade block).
+    # This fallback handles edge cases where the upgrade didn't apply (e.g., check_type
+    # was already "effect_size" because an explicit effect size label was parsed).
+    if (tt == "r" && check_type == "p_value" && !is.na(stat) && !is.na(p_computed) && !is.na(p_reported)) {
       p_directions_match <- (p_reported < alpha) == (p_computed < alpha)
       if (p_directions_match || (p_is_inequality && p_reported <= 0.001 && p_computed < 0.001)) {
-        # r-test with consistent p-value: the r IS the effect, this is verified
         if (status != "OK") status <- "OK"
       }
     }

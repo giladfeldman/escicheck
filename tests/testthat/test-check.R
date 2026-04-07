@@ -132,13 +132,15 @@ test_that("OK status for p < .001 inequality when computed p also < .001", {
   }
 })
 
-test_that("r-test with consistent p-value gets OK status", {
-  # r IS the effect size, p should be consistent
+test_that("r-test with consistent p-value gets PASS status", {
+  # v0.3.0l: r IS both the statistic and the effect size — should be PASS
   text <- "r(198) = .34, p < .001"
   result <- check_text(text)
   if (nrow(result) > 0) {
-    # r-test with consistent p should be OK or PASS
-    expect_true(result$status[1] %in% c("OK", "PASS", "NOTE"))
+    expect_equal(result$status[1], "PASS")
+    expect_equal(result$check_type[1], "effect_size")
+    expect_equal(result$effect_reported[1], 0.34)
+    expect_equal(result$matched_variant[1], "r")
   }
 })
 

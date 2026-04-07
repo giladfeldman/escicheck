@@ -124,10 +124,13 @@ test_that("plausibility_filter=FALSE disables plausibility checking", {
 
 test_that("r > 1 is flagged as extraction_suspect", {
   res <- check_text("r(48) = .55, p < .001, r = 1.5")
-  # This may or may not parse correctly; if it does, should be flagged
-  if (nrow(res) > 0 && !is.na(res$effect_reported[1])) {
-    expect_true(res$extraction_suspect[1])
-  }
+  # The explicit "r = 1.5" is not parsed as a separate effect size label;
+
+  # the r(48) = .55 is the primary result. With v0.3.0l, the upgrade sets
+  # effect_reported = stat (0.55), which is within bounds → not extraction_suspect.
+  expect_equal(nrow(res), 1)
+  expect_equal(res$effect_reported[1], 0.55)
+  expect_false(res$extraction_suspect[1])
 })
 
 # ===========================================================================
@@ -520,7 +523,7 @@ test_that("N_candidates_str stores multiple N values from context", {
 test_that("r-test selects best N from candidates via p-value match", {
   res <- check_text("N = 32. N = 959. r = .25, p < .001")
   expect_equal(nrow(res), 1)
-  expect_equal(res$status[1], "OK")
+  expect_equal(res$status[1], "PASS")  # r IS the effect size, self-verified
   # p_computed should be very small (consistent with N=959)
   expect_true(res$p_computed[1] < 0.001)
   # Assumption note should mention multiple sample sizes
