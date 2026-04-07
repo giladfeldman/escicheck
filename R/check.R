@@ -655,6 +655,7 @@ compute_and_compare_one <- function(row,
   # ============================================================================
 
   mixed_model_F_detected <- FALSE  # v0.2.9: initialized for all test types
+  computed_beta_for_output <- NA_real_  # v0.3.0m: for unstandardized-b masquerade
   n_much_larger_than_df <- FALSE   # v0.2.9d: N >> df+1 detection flag
   phi_to_v_reinterpreted <- FALSE  # v0.2.9: initialized for all test types
 
@@ -2114,6 +2115,15 @@ compute_and_compare_one <- function(row,
             value = d_z,
             metadata = VARIANT_METADATA$d_ind_equalN
           )
+          # v0.3.0m: CI for d_ind from z-test
+          if (N > 2) {
+            n_half <- floor(N / 2)
+            d_ci_z <- tryCatch(ci_d_ind(d_z, n_half, N - n_half, ci_level_used),
+                               error = function(e) list(success = FALSE))
+            if (d_ci_z$success) {
+              computed_variants$d_ind_equalN$ci <- d_ci_z$bounds
+            }
+          }
 
           # Paired assumption: dz = z/sqrt(N), treating N as number of pairs
           if (!is.na(dz_z)) {
@@ -2121,6 +2131,14 @@ compute_and_compare_one <- function(row,
               value = dz_z,
               metadata = VARIANT_METADATA$dz
             )
+            # v0.3.0m: CI for dz from z-test
+            if (N > 1) {
+              dz_ci_z <- tryCatch(ci_dz(dz_z, N, ci_level_used),
+                                  error = function(e) list(success = FALSE))
+              if (dz_ci_z$success) {
+                computed_variants$dz$ci <- dz_ci_z$bounds
+              }
+            }
 
             # dav and drm via r-grid (same pattern as t-test block)
             d_av_grid <- sapply(paired_r_grid, function(r) {
@@ -2256,6 +2274,15 @@ compute_and_compare_one <- function(row,
           why_consider = "Correlation equivalent: r = z/sqrt(z^2 + N)"
         )
       }
+      # v0.3.0m: CI for r from z-test
+      if (!is.null(computed_variants$r) && N > 3) {
+        r_ci_z <- tryCatch(ci_r(computed_variants$r$value, N, ci_level_used),
+                            error = function(e) list(success = FALSE))
+        if (r_ci_z$success) {
+          computed_variants$r$ci <- r_ci_z$bounds
+          computed_variants$r$ci_method <- r_ci_z$method
+        }
+      }
     }
 
   } else if (tt == "regression") {
@@ -2280,14 +2307,34 @@ compute_and_compare_one <- function(row,
       }
     }
 
+    # v0.3.0m: Detect unstandardized b masquerading as beta
+    # When effect_reported matches b_coeff, the parser extracted "b = X" but
+    # labelled it "beta" — comparing to standardized_beta is invalid.
+    b_is_unstandardized <- FALSE
+    if (!is.na(canonical_type) && canonical_type == "beta" &&
+        !is.na(b_val) && !is.na(effect_reported) &&
+        abs(abs(b_val) - abs(effect_reported)) < 0.001) {
+      b_is_unstandardized <- TRUE
+      uncertainty <- c(uncertainty,
+        sprintf("Reported value (%.4f) matches unstandardized b coefficient, not standardized beta \u2014 effect size comparison skipped",
+                effect_reported))
+    }
+
     # Compute standardized beta and partial r using t and df
+    computed_beta_for_output <- NA_real_
     if (!is.na(stat) && !is.na(df1) && df1 > 0) {
       beta_val <- tryCatch(standardized_beta_from_t(stat, df1), error = function(e) NA_real_)
       if (!is.na(beta_val)) {
-        computed_variants$standardized_beta <- list(
-          value = beta_val,
-          metadata = VARIANT_METADATA$standardized_beta
-        )
+        computed_beta_for_output <- beta_val
+        if (!b_is_unstandardized) {
+          computed_variants$standardized_beta <- list(
+            value = beta_val,
+            metadata = VARIANT_METADATA$standardized_beta
+          )
+        }
+        # When b_is_unstandardized, value is stored in computed_beta_for_output
+        # for the output column, but NOT in computed_variants or alternatives
+        # — prevents Phase 5 from matching unstandardized b against standardized beta
       }
 
       partial_r_val <- tryCatch(partial_r_from_t(stat, df1), error = function(e) NA_real_)
@@ -2489,8 +2536,10 @@ compute_and_compare_one <- function(row,
       selection_diffs <- sapply(seq_along(same_type_variants), function(i) {
         v <- same_type_variants[[i]]
         vname <- names(same_type_variants)[i]
-        if (is.null(v$value) || is.na(v$value)) return(Inf)
-        dist_to_median <- abs(abs(v$value) - abs_reported)
+        # v0.3.0m: Defensive guard — v$value could be a list from malformed variant
+        val <- tryCatch(as.numeric(v$value[1]), error = function(e) NA_real_)
+        if (is.null(val) || length(val) == 0 || is.na(val)) return(Inf)
+        dist_to_median <- abs(abs(val) - abs_reported)
         if (!is.null(v$range) && length(v$range) == 2 &&
             !any(is.na(v$range))) {
           rng_min <- min(abs(v$range))
@@ -2529,8 +2578,10 @@ compute_and_compare_one <- function(row,
       # nearest grid point and use that distance. This is much more precise
       # than using min/max/median anchors.
       output_diffs <- sapply(same_type_variants, function(v) {
-        if (is.null(v$value) || is.na(v$value)) return(Inf)
-        dist_to_median <- abs(abs(v$value) - abs_reported)
+        # v0.3.0m: Defensive guard — v$value could be a list from malformed variant
+        val <- tryCatch(as.numeric(v$value[1]), error = function(e) NA_real_)
+        if (is.null(val) || length(val) == 0 || is.na(val)) return(Inf)
+        dist_to_median <- abs(abs(val) - abs_reported)
         if (!is.null(v$range) && length(v$range) == 2 &&
             !any(is.na(v$range))) {
           rng_min <- min(abs(v$range))
@@ -2585,10 +2636,12 @@ compute_and_compare_one <- function(row,
 
       if (length(computed_variants) > 0) {
         diffs <- sapply(computed_variants, function(v) {
-          if (is.null(v$value) || is.na(v$value)) {
+          # v0.3.0m: Defensive guard — v$value could be a list from malformed variant
+          val <- tryCatch(as.numeric(v$value[1]), error = function(e) NA_real_)
+          if (is.null(val) || length(val) == 0 || is.na(val)) {
             return(Inf)
           }
-          abs(abs(v$value) - abs(effect_reported))
+          abs(abs(val) - abs(effect_reported))
         })
 
         if (any(is.finite(diffs))) {
@@ -2684,9 +2737,10 @@ compute_and_compare_one <- function(row,
     # Find best match across all CI candidates
     best_delta <- Inf
     for (cname in names(ci_candidates)) {
-      cL <- as.numeric(ci_candidates[[cname]][1])
-      cU <- as.numeric(ci_candidates[[cname]][2])
-      if (is.na(cL) || is.na(cU)) next
+      # v0.3.0m: Defensive guard — ci_candidates may contain lists
+      cL <- tryCatch(as.numeric(ci_candidates[[cname]][1]), error = function(e) NA_real_)
+      cU <- tryCatch(as.numeric(ci_candidates[[cname]][2]), error = function(e) NA_real_)
+      if (is.na(cL) || is.na(cU) || !is.finite(cL) || !is.finite(cU)) next
       dL <- abs(cL - ciL_rep)
       dU <- abs(cU - ciU_rep)
       max_delta <- max(dL, dU)
@@ -2715,7 +2769,8 @@ compute_and_compare_one <- function(row,
 
     # CI diagnostics
     reported_width <- ciU_rep - ciL_rep
-    if (!is.na(computed_ciL) && !is.na(computed_ciU) && reported_width != 0) {
+    if (!is.na(computed_ciL) && !is.na(computed_ciU) &&
+        is.finite(computed_ciL) && is.finite(computed_ciU) && reported_width != 0) {
       computed_width <- computed_ciU - computed_ciL
       ci_width_ratio <- round(computed_width / reported_width, 3)
     }
@@ -2746,7 +2801,7 @@ compute_and_compare_one <- function(row,
     } else if (tt == "chisq") {
       c("phi", "V")
     } else if (tt == "z") {
-      c("d", "r")
+      c("d_ind_equalN", "dz", "r")
     } else {
       c()
     }
@@ -4191,7 +4246,8 @@ compute_and_compare_one <- function(row,
   generalized_eta2 <- if ("generalized_eta2" %in% names(computed_variants)) computed_variants$generalized_eta2$value else NA_real_
   omega2 <- if ("omega2" %in% names(computed_variants)) computed_variants$omega2$value else if ("omega2" %in% names(alternatives)) alternatives$omega2$value else NA_real_
   cohens_f <- if ("cohens_f" %in% names(computed_variants)) computed_variants$cohens_f$value else if ("cohens_f" %in% names(alternatives)) alternatives$cohens_f$value else NA_real_
-  standardized_beta <- if ("standardized_beta" %in% names(computed_variants)) computed_variants$standardized_beta$value else NA_real_
+  # v0.3.0m: Also check computed_beta_for_output (set when b_is_unstandardized skips variant storage)
+  standardized_beta <- if ("standardized_beta" %in% names(computed_variants)) computed_variants$standardized_beta$value else if ("standardized_beta" %in% names(alternatives)) alternatives$standardized_beta$value else if (!is.na(computed_beta_for_output)) computed_beta_for_output else NA_real_
   partial_r <- if ("partial_r" %in% names(alternatives)) alternatives$partial_r$value else NA_real_
 
   tibble::tibble(

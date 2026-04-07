@@ -1,3 +1,25 @@
+# effectcheck 0.3.0m
+
+## Bug fixes (MetaESCI batch validation)
+
+* Fixed 153 false positive ERRORs from unstandardized regression
+  coefficients (`b = 0.29`) being compared to computed standardized beta.
+  Parser's `pat_eta` regex matched "eta" inside "beta", mislabelling
+  effect sizes. Added negative lookbehind and b-masquerade detection.
+* Fixed 27 F-test computation crashes (NaN delta) from list-type values
+  in Phase 5 matching and infinite CI bounds from `ci_cohens_f` when
+  eta-squared is near 1.0. Added defensive guards throughout.
+* Added z-test CI computation for d, dz, and r variants. Previously
+  1,517 z-test results with reported CIs showed UNVERIFIABLE status.
+
+# effectcheck 0.3.0l
+
+## Enhancements
+
+* Recognize r as a self-verifying effect size. When r is reported as the
+  test statistic (e.g., `r(48) = .42`), it now routes through effect-size
+  checking with PASS status, not p_value_only with OK.
+
 # effectcheck 0.3.0k
 
 ## Bug fixes

@@ -1222,5 +1222,9 @@ ci_cohens_f <- function(F_val, df1, df2, level = 0.95) {
   }
 
   bounds <- c(convert(res$bounds[1]), convert(res$bounds[2]))
+  # v0.3.0m: Guard against all-infinite bounds (eta2 near 1)
+  if (all(!is.finite(bounds))) {
+    return(ci_result(reason = "CI bounds infinite (eta2 near 1)"))
+  }
   ci_result(bounds = bounds, method = "from_eta2_ncf", success = TRUE)
 }

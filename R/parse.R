@@ -611,10 +611,12 @@ parse_text <- function(text, context_window_size = 2) {
   pat_drm <- "\\b[Dd]rm\\s*=\\s*([-+]?\\d*\\.?\\d+)"
   pat_phi <- "(?:phi|\u03c6)\\s*=\\s*([-+]?\\d*\\.?\\d+)"
   pat_V <- "(?:Cramer'?s?\\s*V|\\bV\\b)\\s*=\\s*([-+]?\\d*\\.?\\d+)"
-  pat_eta <- "(?:eta|\u03b7)\\s*=\\s*([-+]?\\d*\\.?\\d+)"
+  # v0.3.0m: Added negative lookbehind to prevent matching "eta" inside "beta"
+  pat_eta <- "(?<![a-zA-Z])(?:eta|\u03b7)\\s*=\\s*([-+]?\\d*\\.?\\d+)"
   # v0.3.0a: Added eta[-]?2, omega[-]?2, partial eta[-]?2, eta p^2 forms
   # Handles plain text (eta2=), caret (eta^2=), Unicode (eta-squared=), superscript (after normalize_text)
-  pat_eta2 <- "(?:eta\\s*[-]?squared|eta[-]?2|\u03b7\u00b2|eta\\^2|\u03b7\\^2)\\s*=\\s*([-+]?\\d*\\.?\\d+)"
+  # v0.3.0m: Added negative lookbehind to prevent matching within "beta2", "beta-squared"
+  pat_eta2 <- "(?<![a-zA-Z])(?:eta\\s*[-]?squared|eta[-]?2|\u03b7\u00b2|eta\\^2|\u03b7\\^2)\\s*=\\s*([-+]?\\d*\\.?\\d+)"
   pat_etap2 <- "(?:partial\\s*eta\\s*[-]?squared|partial\\s*eta[-]?2|partial\\s*\u03b7\u00b2|\u03b7p\u00b2|partial\\s*\u03b7\\^2|\u03b7p\\^2)\\s*=\\s*([-+]?\\d*\\.?\\d+)"
   # v0.3.0f: Generalized eta-squared — explicit labels + PDF corruption forms
   # Must be checked BEFORE pat_eta2 since "geta-squared" contains "eta-squared"
