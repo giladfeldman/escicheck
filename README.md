@@ -156,29 +156,15 @@ metadata <- get_variant_metadata("dz")
 print(metadata$when_to_use)
 ```
 
-### Shiny App
-
-```r
-# Run the interactive Shiny app
-shiny::runApp("effectcheck-demo")
-```
-
-The Shiny app provides:
-- **Upload/Input tab**: File upload, text paste, encoding selection
-- **Parsing Diagnostics**: Highlighted statistics, context windows
-- **Results tab**: Interactive table with status summary and export options
-- **Uncertainty Review**: Filtered view of WARN/ERROR cases
-- **Settings tab**: Configurable tolerances, CI levels, r-grid
-- **Documentation tab**: Complete user guide and effect size definitions
-
 ## Understanding Results
 
 ### Status Levels
 
 - **PASS**: Computed effect size matches reported value within tolerance
-- **WARN**: Minor mismatch (rounding, CI method difference, minor assumptions)
+- **WARN**: Minor mismatch (rounding, CI method difference, design ambiguity)
 - **ERROR**: Significant mismatch (incompatible values)
-- **INSUFFICIENT_DATA**: Not enough information to compute effect sizes
+- **SKIP**: Extraction-only result with nothing to check
+- **NOTE**: Cannot fully verify, or decision error suppressed by context
 
 ### Uncertainty Levels
 
@@ -374,7 +360,7 @@ If you use EffectCheck in your research, please cite:
 
 ```
 EffectCheck: Statistical Consistency Checker for Published Research Results
-Version 0.2.0
+Version 0.3.0
 ```
 
 ## License

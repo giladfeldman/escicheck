@@ -1,3 +1,63 @@
+# effectcheck 0.3.0k
+
+## Bug fixes
+
+* Fixed `bind_rows()` crash during batch processing when MBESS noncentral
+  F-inversion returns non-numeric types under extreme noncentrality
+  parameters (>37.62). `ciL_computed` became a list instead of double,
+  crashing `dplyr::bind_rows()`. Now coerced to numeric with `NA` fallback.
+
+# effectcheck 0.3.0j
+
+## Bug fixes
+
+* Fixed decimal CI level parsing: papers reporting "99.9% CI", "99.5% CI"
+  produced ci_level values of 0.09, 0.05 due to `(\d+)%` regex failing
+  on decimal percentages. Changed to `(\d+\.?\d*)%` with plausibility
+  guard (ci_level < 0.50 falls back to 0.95).
+
+# effectcheck 0.3.0i
+
+## Bug fixes and cleanup
+
+* Fixed eta-squared (η²) extraction from PDFs using Unicode mathematical
+  italic characters.
+* Removed WebR/Private mode (archived to `archive/webr/`). Frontend is
+  Cloud-mode only.
+* Optimized pdftotext extraction pipeline.
+
+# effectcheck 0.3.0h
+
+## Bug fixes and cleanup
+
+* Fixed bare Cohen's f not recognized for t-tests. `t(287.58) = -0.21,
+  p = 0.837, f = -0.01` now correctly extracts `f = -0.01` for any test
+  type (was gated to F-tests only).
+* Removed Shiny app (`shiny/` directory, `start_shiny.bat`). Next.js
+  frontend is the sole UI.
+
+# effectcheck 0.3.0g
+
+## Bug fixes and new features
+
+* Fixed F-test df falsely parsed as CI bounds: `F(2, 76) = 3.45` no longer
+  produces `ciL=2, ciU=76`. pat_CI4 now checks if matched values equal
+  df1/df2 and skips them.
+* Multi-method CI verification: Phase 6 now tries all available CI
+  computation methods (noncentral t, normal approximation, Steiger 2004
+  for eta-squared) and picks the best match. New output columns:
+  `ci_delta_upper`, `ci_check_status`, `ci_method_match`, `ci_width_ratio`,
+  `ci_symmetry`.
+* Removed dead CI pattern matching code.
+* 1286 total tests passing.
+
+# effectcheck 0.3.0f-fix
+
+## Bug fixes
+
+* Page number artifact guard: strip standalone digits before line-break
+  joining to prevent page numbers from being concatenated with statistics.
+
 # effectcheck 0.3.0f
 
 ## Parser fixes and artifact detection
