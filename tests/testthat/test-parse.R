@@ -57,6 +57,42 @@ test_that("normalize_text: N thousands and decimal comma coexist", {
   expect_true(grepl("0\\.45", normalized))
 })
 
+test_that("normalize_text strips thousand-sep commas in t-test parens (E8)", {
+  # MetaESCI E8: t(2,758) must become t(2758), not t(2.758)
+  # Without this fix, the decimal-comma converter would treat 2,758 as 2.758
+  # and parse.R would read df=2.758 (Welch) with a garbage N estimate.
+  text <- "beta = -.06, t(2,758) = -2.96, p = .003"
+  normalized <- effectcheck:::normalize_text(text)
+  expect_true(grepl("t\\(2758\\)", normalized))
+  expect_false(grepl("t\\(2\\.758\\)", normalized))
+})
+
+test_that("normalize_text strips thousand-sep commas in F-test parens", {
+  text <- "F(2, 1,234) = 3.45, F[1, 2,500] = 8.12"
+  normalized <- effectcheck:::normalize_text(text)
+  expect_true(grepl("F\\(2, 1234\\)", normalized))
+  expect_true(grepl("F\\[1, 2500\\]", normalized))
+})
+
+test_that("normalize_text strips thousand-sep commas in chi-square N", {
+  text <- "chi-square(3, N = 1,542) = 12.3"
+  normalized <- effectcheck:::normalize_text(text)
+  expect_true(grepl("N = 1542", normalized))
+})
+
+test_that("check_text parses t(2,758) with correct df (E8 end-to-end)", {
+  text <- paste(
+    "beta = -.06, t(2,758) = -2.96, p = .003.",
+    "beta = -.14, t(2,758) = -9.75, p < .001."
+  )
+  r <- check_text(text)
+  expect_gte(nrow(r), 2)
+  # df must be 2758, not 2.758
+  dfs <- unique(r$df1)
+  expect_true(2758 %in% dfs)
+  expect_false(any(dfs < 10, na.rm = TRUE))
+})
+
 test_that("normalize_text harmonizes CI delimiters", {
   text <- "CI (0.12; 0.45)"
   normalized <- effectcheck:::normalize_text(text)

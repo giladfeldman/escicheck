@@ -370,6 +370,28 @@ test_that("ci_dz computes CI for paired dz", {
   expect_true(result$bounds[2] > dz)
 })
 
+test_that("ci_dz uses noncentral-t inversion (MetaESCI E10)", {
+  # Algina & Keselman (2003): CI for standardized mean (paired dz) comes
+  # from inverting the noncentral-t distribution on t = dz * sqrt(n).
+  # Reference fixture: dz = 0.55, n = 9 -> CI ~= [-0.17, 1.24]
+  # (matches MBESS::ci.sm and a hand uniroot inversion; published paper's
+  # reported CI [-0.10, 1.17] is within rounding distance.)
+  result <- ci_dz(0.55, 9, 0.95)
+  expect_true(result$success)
+  expect_equal(result$bounds[1], -0.1694572, tolerance = 1e-3)
+  expect_equal(result$bounds[2],  1.2405829, tolerance = 1e-3)
+
+  # dz = 0.5, n = 100 -> CI should be narrow and bracket 0.5
+  r2 <- ci_dz(0.5, 100, 0.95)
+  expect_true(r2$success)
+  expect_true(r2$bounds[1] < 0.5 && r2$bounds[2] > 0.5)
+  expect_lt(r2$bounds[2] - r2$bounds[1], 0.5)
+
+  # Symmetric around zero when dz = 0
+  r3 <- ci_dz(0, 20, 0.95)
+  expect_equal(r3$bounds[1], -r3$bounds[2], tolerance = 1e-6)
+})
+
 test_that("ci_etap2 computes CI for partial eta-squared", {
   # NCP inversion method
   result <- ci_etap2(5.0, 2, 57, 0.95)

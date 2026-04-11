@@ -199,27 +199,80 @@ ci_dz <- function(dz, n, level = 0.95) {
     return(ci_result(reason = "Missing or invalid parameters for dz CI"))
   }
 
-  # Try noncentral t method first
-  ncp <- dz * sqrt(n)
-  df <- n - 1
-  tryCatch(
-    {
-      alpha <- 1 - level
-      t_lo <- suppressWarnings(stats::qt(1 - alpha / 2, df = df, ncp = ncp))
-      t_hi <- suppressWarnings(stats::qt(alpha / 2, df = df, ncp = ncp))
-      if (!is.na(t_lo) && !is.na(t_hi) && is.finite(t_lo) && is.finite(t_hi)) {
-        bounds <- c(t_hi / sqrt(n), t_lo / sqrt(n))
-        return(ci_result(bounds = bounds, method = "noncentral_t", success = TRUE))
-      }
-    },
-    error = function(e) NULL
-  )
+  # Noncentral-t inversion (Algina & Keselman 2003): find the ncp values
+  # whose alpha/2 and 1 - alpha/2 quantiles equal the observed t = dz*sqrt(n).
+  # dz CI = [ncp_lo, ncp_hi] / sqrt(n).
+  bounds <- ci_dz_noncentral_t(dz, n, level)
+  if (!any(is.na(bounds))) {
+    return(ci_result(bounds = bounds, method = "noncentral_t", success = TRUE))
+  }
 
   # Fallback: large-sample normal approximation
   se_dz <- sqrt(1 / n + dz^2 / (2 * n))
   z <- stats::qnorm(1 - (1 - level) / 2)
   bounds <- c(dz - z * se_dz, dz + z * se_dz)
   ci_result(bounds = bounds, method = "normal_approx", success = TRUE)
+}
+
+# Invert noncentral-t to get a CI for dz (Algina & Keselman 2003).
+# Observed t = dz * sqrt(n), df = n - 1.
+# Prefer MBESS::ci.sm when available (reference implementation); otherwise
+# solve for ncp via uniroot, with a wide but bounded search window.
+ci_dz_noncentral_t <- function(dz, n, level = 0.95) {
+  df <- n - 1
+  t_obs <- dz * sqrt(n)
+  if (!is.finite(t_obs) || df < 1) {
+    return(c(NA_real_, NA_real_))
+  }
+
+  if (requireNamespace("MBESS", quietly = TRUE)) {
+    bounds <- tryCatch(
+      {
+        ci_res <- NULL
+        utils::capture.output(
+          ci_res <- suppressMessages(suppressWarnings(
+            MBESS::ci.sm(sm = dz, N = n, conf.level = level)
+          )),
+          type = "output"
+        )
+        c(
+          as.numeric(ci_res$Lower.Conf.Limit.Standardized.Mean),
+          as.numeric(ci_res$Upper.Conf.Limit.Standardized.Mean)
+        )
+      },
+      error = function(e) c(NA_real_, NA_real_)
+    )
+    if (!any(is.na(bounds))) {
+      return(bounds)
+    }
+  }
+
+  # uniroot fallback: find ncp_lo, ncp_hi such that
+  #   qt(1 - alpha/2, df, ncp_lo) = t_obs  (lower bound)
+  #   qt(    alpha/2, df, ncp_hi) = t_obs  (upper bound)
+  alpha <- 1 - level
+  search_hi <- max(50, abs(t_obs) * 5 + 20)
+  f_lo <- function(nc) {
+    suppressWarnings(stats::qt(1 - alpha / 2, df = df, ncp = nc)) - t_obs
+  }
+  f_hi <- function(nc) {
+    suppressWarnings(stats::qt(alpha / 2, df = df, ncp = nc)) - t_obs
+  }
+  bounds <- tryCatch(
+    {
+      lo <- stats::uniroot(
+        f_lo,
+        interval = c(-search_hi, search_hi), extendInt = "yes"
+      )$root
+      hi <- stats::uniroot(
+        f_hi,
+        interval = c(-search_hi, search_hi), extendInt = "yes"
+      )$root
+      c(lo, hi) / sqrt(n)
+    },
+    error = function(e) c(NA_real_, NA_real_)
+  )
+  bounds
 }
 
 #' Calculate Cohen's dz from t-statistic (Paired)
@@ -517,18 +570,13 @@ ci_d_ind_all <- function(d, n1, n2, level = 0.95) {
 ci_dz_all <- function(dz, n, level = 0.95) {
   if (any(is.na(c(dz, n))) || n <= 1) return(list())
   results <- list()
-  # Method 1: Noncentral t
-  ncp <- dz * sqrt(n)
-  df <- n - 1
-  tryCatch({
-    alpha <- 1 - level
-    t_lo <- suppressWarnings(stats::qt(1 - alpha / 2, df = df, ncp = ncp))
-    t_hi <- suppressWarnings(stats::qt(alpha / 2, df = df, ncp = ncp))
-    if (!is.na(t_lo) && !is.na(t_hi) && is.finite(t_lo) && is.finite(t_hi)) {
-      bounds <- c(t_hi / sqrt(n), t_lo / sqrt(n))
-      results$noncentral_t <- ci_result(bounds = bounds, method = "noncentral_t", success = TRUE)
-    }
-  }, error = function(e) NULL)
+  # Method 1: Noncentral-t inversion (Algina & Keselman 2003)
+  bounds_nc <- ci_dz_noncentral_t(dz, n, level)
+  if (!any(is.na(bounds_nc))) {
+    results$noncentral_t <- ci_result(
+      bounds = bounds_nc, method = "noncentral_t", success = TRUE
+    )
+  }
   # Method 2: Normal approximation (symmetric)
   se_dz <- sqrt(1 / n + dz^2 / (2 * n))
   z <- stats::qnorm(1 - (1 - level) / 2)

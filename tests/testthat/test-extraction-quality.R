@@ -293,3 +293,57 @@ test_that("pipe-delimited table stats are parsed correctly", {
   expect_true(any(res$test_type == "chisq"))
   expect_true(any(res$stat_value == 12.484, na.rm = TRUE))
 })
+
+# =============================================================================
+# SECTION 11: Decimal-comma false positives on author affiliations
+# =============================================================================
+# Regression: 2026-04-11. The decimal-comma normalization was firing on author
+# affiliation footnote markers like "Braunstein1,3" (multi-affiliation), turning
+# them into "Braunstein1.3". That corrupted the author block, which in turn
+# shifted context windows and flipped a t-test status from WARN to OK on a real
+# eLife paper. Fix adds a negative lookbehind so [a-zA-Z] preceding the digit
+# prevents the decimal-comma rule from firing. See docpluck_shootout baseline
+# 2026-04-11 and parse.R:189.
+
+test_that("author affiliation markers survive decimal-comma normalization", {
+  raw <- "Julia Braunstein1,3, Boryana Todorova1, Isabella C Wagner1"
+  out <- effectcheck:::normalize_text(raw)
+  expect_true(grepl("Braunstein1,3", out, fixed = TRUE))
+  expect_false(grepl("Braunstein1.3", out, fixed = TRUE))
+})
+
+test_that("single-affiliation markers also survive", {
+  # Preceding letter should block the decimal-comma rule even with a
+  # following comma delimiter.
+  raw <- "G\u00f6khan Aydogan2, Julia Braunstein1,3"
+  out <- effectcheck:::normalize_text(raw)
+  expect_true(grepl("Aydogan2,", out, fixed = TRUE))
+  expect_true(grepl("Braunstein1,3", out, fixed = TRUE))
+})
+
+test_that("decimal comma in stat expressions STILL converts (must not over-fix)", {
+  # The guard must be conservative: leading space/punctuation followed by a
+  # decimal must still get the dot treatment.
+  raw <- "d = 0,45 and p = 0,032 with CI [0,12, 0,45]"
+  out <- effectcheck:::normalize_text(raw)
+  expect_true(grepl("0.45", out, fixed = TRUE))
+  expect_true(grepl("0.032", out, fixed = TRUE))
+  expect_true(grepl("0.12", out, fixed = TRUE))
+})
+
+test_that("trailing letter guard: 1,3Boryana does NOT become 1.3Boryana", {
+  # Converse case: digit-comma-digit immediately followed by a letter is also
+  # an affiliation pattern.
+  raw <- "multi 1,3Boryana"
+  out <- effectcheck:::normalize_text(raw)
+  expect_true(grepl("1,3Boryana", out, fixed = TRUE))
+  expect_false(grepl("1.3Boryana", out, fixed = TRUE))
+})
+
+test_that("thousands-separator protection still works (N = 1,182)", {
+  # Regression sanity: the new lookbehind must not break existing N-context
+  # thousands separator handling (which runs before decimal comma conversion).
+  raw <- "Participants (N = 1,182) completed the survey"
+  out <- effectcheck:::normalize_text(raw)
+  expect_true(grepl("N = 1182", out) || grepl("N=1182", out))
+})

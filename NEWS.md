@@ -1,3 +1,83 @@
+# effectcheck 0.3.2
+
+Follow-up to 0.3.1 addressing MetaESCI requests E8 and E10.
+
+## Parse: thousand-separator commas in test-statistic parens (E8, HIGH)
+
+* `parse.R` / `normalize_text()` previously let the decimal-comma
+  converter mis-normalize `t(2,758)` as `t(2.758)`, after which `parse.R`
+  silently read it as Welch df=2.758 and back-computed N≈5. In the
+  MetaESCI 339-PDF pre-test, PSPB article `10.1177/0146167220905712`
+  dropped 47 rows due to this, since every subsequent check treated the
+  garbage df as genuine and the results were rejected downstream.
+* Fix: `normalize_text()` now strips thousand-separator commas from
+  inside `t(...)`, `F(...)`, `F[...]`, `H(...)`, `r(...)`, `z(...)` and
+  `chi-square(df, N = ...)` parens *before* the decimal-comma converter
+  runs, the same way `N = 1,234` is already pre-stripped.
+* Handles `t(2,758)`, `F(2, 1,234)`, `F[1, 2,500]`, and
+  `chi-square(3, N = 1,542)` — with an iterative pass so
+  `N = 12,345,678`-style multi-comma numbers survive.
+* New tests: `test-parse.R` now covers the t/F/chi-square cases and an
+  end-to-end `check_text()` assertion that df=2758 round-trips.
+
+## Compute: Cohen's dz CI uses noncentral-t inversion (E10, MEDIUM)
+
+* `ci_dz()` / `ci_dz_all()` previously claimed a "noncentral_t" method
+  but actually computed `qt(alpha/2, df, ncp = dz*sqrt(n)) / sqrt(n)` —
+  i.e., quantiles of a single noncentral-t distribution, *not* the
+  Algina & Keselman (2003) inversion. For small n this returned bounds
+  that could be dramatically wrong: e.g., `dz=0.55, n=9` returned a
+  one-sided-looking `[-1.66, 0.05]`-style interval instead of the
+  correct `[-0.17, 1.24]`.
+* Fix: new internal `ci_dz_noncentral_t()` uses `MBESS::ci.sm()` (the
+  reference implementation of standardized-mean CI inversion) when
+  available, falling back to a `stats::uniroot()`-based inversion that
+  solves for the noncentrality parameters whose α/2 and 1−α/2 quantiles
+  equal the observed t = dz·√n. The normal-approximation fallback is
+  unchanged and still available when inversion fails.
+* MetaESCI reported 20 divergent rows between the legacy
+  `run_escicheck.R` pipeline and 0.3.1. Under 0.3.2 the new
+  implementation agrees with MBESS on the fixture
+  `dz = 0.55, n = 9, 95% CI`, which is what legacy `ci.sm` returned —
+  so the 20 CI-width-ratio discrepancies should resolve.
+* **Downstream impact**: any downstream consumer tracking
+  `ci_match_rate` for Cohen's dz (and `ci_dz_all`) will see bounds
+  shift. This is a correctness fix, not a silent behavior change —
+  flag it in your analysis plan.
+* New tests: `test-golden-exact.R` pins the `dz = 0.55, n = 9` fixture
+  and adds sanity checks for `dz = 0, n = 20` (symmetric) and
+  `dz = 0.5, n = 100` (narrow).
+
+## Parse: decimal-comma no longer corrupts author affiliation markers
+
+* `normalize_text()` previously fired the decimal-comma → decimal-dot
+  conversion on author affiliation footnotes like `Braunstein1,3`
+  (multi-affiliation) and `Wagner1,3,4`, rewriting them to
+  `Braunstein1.3` / `Wagner1,3.4`. The corruption shifted context
+  windows enough to flip at least one eLife t-test result from WARN
+  to OK on a real paper.
+* Fix: add a negative lookbehind `(?<![a-zA-Z,])` on both
+  decimal-comma gsubs so a letter (or a preceding comma, for the
+  middle of a 3-affiliation run) blocks the match. The trailing
+  lookahead was also tightened from `[^0-9]` to `[^0-9a-zA-Z]` to
+  block the `1,3Boryana` converse case. The second rule's leading
+  quantifier was changed from `\d*` to `\d+` so the match is always
+  anchored at a real digit, letting the lookbehind check the
+  character before that digit rather than the character before the
+  comma.
+* 5 new tests in `test-extraction-quality.R` cover Braunstein/Wagner
+  affiliation blocks, the `1,3Boryana` converse, the stat-expression
+  case that must still convert (`d = 0,45`), and the
+  thousands-separator-in-N regression guard.
+
+## E9 — Smaller parse.R gaps (deferred, needs repro bundle)
+
+* The 13-row residual across 5 PSPB/JESP/RSOS/MP sources needs the
+  staged `.txt` files from MetaESCI's
+  `data/results/subset_metaesci_regression_textstaging/` directory,
+  which was not available at the time of triage. Will investigate when
+  repro bundle is attached.
+
 # effectcheck 0.3.1
 
 This is a housekeeping release packaging the v0.3.0f → v0.3.0n bug-fix

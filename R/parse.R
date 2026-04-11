@@ -180,6 +180,30 @@ normalize_text <- function(x) {
   }
 
   # ============================================================================
+  # Pre-strip thousands-separator commas inside test-statistic parentheses
+  # Must run BEFORE decimal comma conversion to prevent t(2,758) -> t(2.758)
+  # which would silently be parsed as Welch df=2.758 with nonsense N estimate.
+  # (MetaESCI E8, 2026-04-11: one article dropped 47 rows to this bug.)
+  # ============================================================================
+  for (.i in 1:3) {
+    # t(d,ddd), H(d,ddd), r(d,ddd), Z(d,ddd): single df with thousand separator
+    x <- gsub(
+      "(\\b[tHrZz]\\s*\\(\\s*\\d{1,3}),(\\d{3})(?=\\s*\\))",
+      "\\1\\2", x, perl = TRUE
+    )
+    # F(df1, d,ddd) / F[df1, d,ddd]: denominator df with thousand separator
+    x <- gsub(
+      "(\\bF\\s*[\\(\\[]\\s*\\d+(?:\\.\\d+)?\\s*,\\s*\\d{1,3}),(\\d{3})(?=\\s*[\\)\\]])",
+      "\\1\\2", x, perl = TRUE
+    )
+    # chi-square(df, N = d,ddd) and variants: N inside chi-square parens
+    x <- gsub(
+      "((?:chi-?square|\u03c7\\s*\\^?2|\u03c7\u00b2|Chi-?square|chi2|X\\s*\\^?2|X\u00b2)\\s*\\(\\s*\\d{1,3}\\s*,\\s*[Nn]\\s*=\\s*\\d{1,3}),(\\d{3})(?=\\s*\\))",
+      "\\1\\2", x, perl = TRUE
+    )
+  }
+
+  # ============================================================================
   # Decimal separator normalization (locale-aware) - uses Perl regex
   # ============================================================================
   # Strategy: Convert comma to dot only when it appears between digits
@@ -187,13 +211,36 @@ normalize_text <- function(x) {
   # This preserves thousands separators in large numbers
 
   # Pattern for decimal comma: digit(s), comma, 1-3 digits, then space/punctuation/end
-  # But exclude if it looks like thousands (4+ digits before comma)
-  x <- gsub("(\\d{1,3}),([0-9]{1,3})(?=\\s|[^0-9]|$)", "\\1.\\2", x, perl = TRUE)
+  # But exclude if it looks like thousands (4+ digits before comma).
+  #
+  # Leading lookbehind guard (?<![a-zA-Z,]) prevents false positives on author
+  # affiliations like:
+  #   "Braunstein1,3"   -> 'n' before '1' is a letter -> blocked
+  #   "Wagner1,3,4"     -> the ',3,4' middle match has ',' before '3' -> blocked
+  # Without the letter exclusion, "Braunstein1,3" became "Braunstein1.3".
+  # Without the comma exclusion, "Wagner1,3,4" became "Wagner1,3.4" (the middle
+  # digit pair was still converted because the preceding char was a comma).
+  #
+  # Trailing lookahead adds a-zA-Z to the exclusion so "1,3Boryana" doesn't fire.
+  x <- gsub("(?<![a-zA-Z,])(\\d{1,3}),([0-9]{1,3})(?=\\s|[^0-9a-zA-Z]|$)",
+            "\\1.\\2", x, perl = TRUE)
 
   # Handle cases where decimal comma might be in effect sizes or CIs
-  # Pattern: [-+]?digit*,digit+digit (with optional leading sign)
+  # Pattern: [-+]?digit+,digit+ (with optional leading sign)
   # This catches "d = 0,45" or "CI [0,12, 0,45]"
-  x <- gsub("([-+]?\\d*),([0-9]+)(?=\\s|,|\\]|\\)|;|$)", "\\1.\\2", x, perl = TRUE)
+  #
+  # IMPORTANT: \\d+ (one or more) NOT \\d* here. With \\d* the engine could
+  # anchor the match at the comma itself (zero leading digits), which meant the
+  # (?<![a-zA-Z]) lookbehind would check the digit BEFORE the comma (not the
+  # letter before the digit) and therefore fire on patterns like
+  # "Braunstein1,3" where 1 is not a letter.
+  #
+  # With \\d+ the match is always anchored at a real digit, so the lookbehind
+  # applies to the character before that digit, and affiliation patterns are
+  # correctly blocked. The comma exclusion also handles "Wagner1,3,4" style
+  # 3-affiliation sequences.
+  x <- gsub("(?<![a-zA-Z,])([-+]?\\d+),([0-9]+)(?=\\s|,|\\]|\\)|;|$)",
+            "\\1.\\2", x, perl = TRUE)
 
   # CI delimiter harmonization
   # Convert semicolons to commas in CI bounds: (0.12; 0.45) -> (0.12, 0.45)
