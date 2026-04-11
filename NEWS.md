@@ -1,3 +1,94 @@
+# effectcheck 0.3.1
+
+This is a housekeeping release packaging the v0.3.0f → v0.3.0n bug-fix
+wave with a stable CRAN-style version number, batch-stdout hygiene, a
+schema stability test, and a new `decision_error_reason` diagnostic
+column. Addresses MetaESCI requests E1–E4 and E7.
+
+## DESCRIPTION version sync (E2)
+
+* `DESCRIPTION Version:` bumped from `0.3.0` (which covered every build
+  v0.3.0 → v0.3.0n) to `0.3.1`. Downstream pipelines can now
+  discriminate the v0.3.0n bug-fix wave from earlier v0.3.0 builds via
+  `packageVersion("effectcheck")` alone instead of requiring a git SHA.
+
+## Batch stdout: noncentral-t overflow spam silenced (E1)
+
+* `MBESS::ci.smd` (via `ci_d_ind_noncentral_t`) printed a multi-line
+  warning to stdout every time the noncentrality parameter exceeded
+  R's ~37.62 accuracy limit. At corpus scale this could print hundreds
+  of lines per batch and drown out per-PDF progress output.
+* Fix: preempt the overflow by routing `|ncp| > 37.62` directly to the
+  large-sample normal approximation (which is no less accurate than
+  MBESS's iterative fallback at that regime). Remaining MBESS calls
+  are additionally wrapped in `utils::capture.output()` as a
+  belt-and-suspenders silencer.
+* Behaviour change: a small number of d-CI computations will now be
+  tagged `method = "normal_approx"` instead of `"noncentral_t"`. The
+  numerical difference is below the effect-size tolerance and does not
+  affect PASS/WARN/ERROR status assignment.
+
+## Schema stability test (E3)
+
+* Added `tests/testthat/test-schema-stability.R`. The test asserts
+  that `check_text()` returns a tibble containing every MetaESCI-
+  critical column (`source`, `check_scope`, `check_type`, `status`,
+  `uncertainty_level`, `uncertainty_reasons`,
+  `unknown_groups_downgraded`, `r2_cross_pairing_detected`,
+  `decision_error_downgraded`, `design_ambiguous`, `ci_match`,
+  `ci_check_status`, `ci_method_match`, `ci_width_ratio`,
+  `ci_symmetry`, `decision_error`, plus new
+  `decision_error_reason`). An optional second check runs against a
+  fixture PDF via the `EFFECTCHECK_TEST_PDF` env var and asserts the
+  column set and element types are identical between `check_text()`
+  and `checkPDF()`. By construction both paths funnel through
+  `process_files_internal()` → `check_text()`, so this is an invariant
+  guard against future regressions.
+
+## New column: `decision_error_reason` (E7)
+
+* Every row now carries a `decision_error_reason` character column.
+  For rows where `decision_error == FALSE` the value is `NA`. For
+  rows where `decision_error == TRUE` the value is one of:
+    * `reported_sig_computed_ns` — reported p < alpha but recomputed
+      p >= alpha (claimed significance does not reproduce).
+    * `reported_ns_computed_sig` — reported p >= alpha but recomputed
+      p < alpha (claimed non-significance does not reproduce).
+    * `ns_label_vs_computed_sig` — paper reports "ns"/"not
+      significant" but recomputed p < alpha.
+    * `other` — catch-all for future decision-error variants.
+* Downstream analysis (e.g. MetaESCI `analysis.Rmd`) can now break
+  decision errors down by mechanism without reparsing `raw_text`.
+
+## Expected row-count delta vs v0.3.0f (E4 — MetaESCI batch guidance)
+
+On the MetaESCI `metaesci_regression` 200-PDF frozen benchmark (seed 42),
+comparing v0.3.0f (last full batch) to v0.3.0n / 0.3.1:
+
+| subset               | v0.3.0f rows | v0.3.0n rows | delta          | v0.3.0f ERRORs | v0.3.0n ERRORs |
+|----------------------|-------------:|-------------:|---------------:|---------------:|---------------:|
+| meta_psychology (139)|          464 |          464 |             0  |              0 |              0 |
+| metaesci_regression  |        2,209 |        3,385 |  +1,176 (+53%) |             13 |              0 |
+
+The +53% row-count delta on `metaesci_regression` is driven by
+**parser gains**, not a config-default change (`plausibility_filter`
+and `try_tables` defaults are unchanged). The new rows come from:
+
+* Phase 7 multi-predictor regression rows that v0.3.0f short-circuited
+  before v0.3.0m's multi-predictor-beta fix landed.
+* F-test rows previously lost to the F ≈ 0 crash (fixed in v0.3.0n).
+* z-test CI checks (1,517 previously UNVERIFIABLE rows now produce
+  ci-check output, fixed in v0.3.0m).
+
+Downstream consumers **must** re-derive all aggregate numbers from a
+fresh v0.3.1 batch — old v0.3.0f aggregates are not directly
+comparable. The 13 → 0 ERROR reduction on `metaesci_regression` is
+real (v0.3.0n's F ≈ 0 crash fix + multi-predictor-beta fix), not
+artefactual.
+
+No columns were added or removed vs v0.3.0n other than the new
+`decision_error_reason` column described above.
+
 # effectcheck 0.3.0n
 
 ## Bug fixes (MetaESCI v0.3.0m batch deep-dive)

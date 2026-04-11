@@ -3720,6 +3720,11 @@ compute_and_compare_one <- function(row,
 
   p_computed <- NA_real_
   decision_error <- FALSE
+  # v0.3.1 (E7): Per-row categorisation of the decision-error mechanism.
+  # NA when decision_error is FALSE; otherwise one of:
+  #   "reported_sig_computed_ns", "reported_ns_computed_sig",
+  #   "ns_label_vs_computed_sig", "other"
+  decision_error_reason <- NA_character_
 
   # Helper: for one-tailed tests, compute both tails and match the reported p.
   # This handles the case where a negative t-statistic has an upper-tail p > 0.5.
@@ -3826,8 +3831,16 @@ compute_and_compare_one <- function(row,
     }
 
     decision_error <- reported_significant != computed_significant
+    if (decision_error) {
+      decision_error_reason <- if (reported_significant && !computed_significant) {
+        "reported_sig_computed_ns"
+      } else {
+        "reported_ns_computed_sig"
+      }
+    }
     if (p_inequality_consistent) {
       decision_error <- FALSE
+      decision_error_reason <- NA_character_
     }
     # Decision error requires a reported p-value (v0.2.6) -- without one,
     # there is no author's significance decision to check. This prevents false
@@ -3835,6 +3848,7 @@ compute_and_compare_one <- function(row,
     # from coefficient tables where z = 9.47** but no p is reported).
     if (is.na(p_reported) && decision_error) {
       decision_error <- FALSE
+      decision_error_reason <- NA_character_
     }
 
     # Universal one-tailed/two-tailed fallback:
@@ -3858,6 +3872,7 @@ compute_and_compare_one <- function(row,
           # Fallback resolves the mismatch
           p_computed <- p_alt
           decision_error <- FALSE
+          decision_error_reason <- NA_character_
           tail_note <- if (alt_one_tailed) "one-tailed" else "two-tailed"
           uncertainty <- c(uncertainty,
             sprintf("P-value is consistent if interpreted as %s test (p_computed=%.4f)",
@@ -3874,6 +3889,7 @@ compute_and_compare_one <- function(row,
       isTRUE(row$method_context_detected[1]) else FALSE
     if (method_context && decision_error) {
       decision_error <- FALSE
+      decision_error_reason <- NA_character_
       uncertainty <- c(uncertainty,
         "Decision error suppressed: statistic appears in methodological context (p-curve, equivalence test, etc.)")
       if (status == "WARN") status <- "NOTE"
@@ -3887,6 +3903,7 @@ compute_and_compare_one <- function(row,
       as.character(row$N_source[1]) else NA_character_
     if (tt == "r" && decision_error && !is.na(n_source) && n_source == "global_text") {
       decision_error <- FALSE
+      decision_error_reason <- NA_character_
       uncertainty <- c(uncertainty,
         "Decision error suppressed: r-test with globally-inferred N (from methods section) \u2014 p-value discrepancy may reflect N applied to different analysis")
       if (status == "WARN") status <- "NOTE"
@@ -3942,6 +3959,7 @@ compute_and_compare_one <- function(row,
         sprintf("Reported as 'not significant'; computed p=%.4f confirms (p > %.2f)", p_computed, alpha))
     } else {
       decision_error <- TRUE
+      decision_error_reason <- "ns_label_vs_computed_sig"
       uncertainty <- c(uncertainty,
         sprintf("Decision error: reported as 'not significant' but computed p=%.4f (p < %.2f)", p_computed, alpha))
       # status stays WARN
@@ -4367,6 +4385,7 @@ compute_and_compare_one <- function(row,
     p_reported = p_reported,
     p_computed = p_computed,
     decision_error = decision_error,
+    decision_error_reason = decision_error_reason,
     ci_match = ci_match,
     ciL_computed = as.numeric(computed_ciL),
     ciU_computed = as.numeric(computed_ciU),
@@ -4702,6 +4721,7 @@ check_text <- function(text,
           r2_cross_pairing_detected = FALSE,
           decision_error_downgraded = FALSE,
           decision_error = FALSE,
+          decision_error_reason = NA_character_,
           p_reported = NA_real_,
           p_computed = NA_real_,
           d_ind = NA_real_, d_ind_equalN = NA_real_, d_ind_min = NA_real_, d_ind_max = NA_real_,

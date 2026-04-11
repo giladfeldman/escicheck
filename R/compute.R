@@ -95,23 +95,42 @@ ci_d_ind_noncentral_t <- function(d, n1, n2, level = 0.95) {
     return(c(NA_real_, NA_real_))
   }
 
+  # v0.3.1 (E1): Preempt MBESS noncentral-t overflow spam.
+  # R's qt() / MBESS::conf.limits.nct iteratively prints a warning when |ncp|
+  # exceeds ~37.62 (R's accuracy limit for the noncentral t-distribution).
+  # At that regime the noncentral-t result is unreliable anyway, so we fall
+  # through to the large-sample approximation rather than calling MBESS.
+  ncp_val <- d * sqrt((n1 * n2) / (n1 + n2))
+  if (!is.finite(ncp_val) || abs(ncp_val) > 37.62) {
+    return(ci_d_ind_approx(d, n1, n2, level))
+  }
+
   # Try MBESS if available
   if (requireNamespace("MBESS", quietly = TRUE)) {
-    tryCatch(
+    # Silence any stray print()/cat()/message()/warning() from MBESS internals
+    # so batch stdout stays readable (MetaESCI E1).
+    bounds <- tryCatch(
       {
-        ci_result <- MBESS::ci.smd(
-          ncp = d * sqrt((n1 * n2) / (n1 + n2)),
-          n.1 = n1, n.2 = n2, conf.level = level
+        ci_res <- NULL
+        utils::capture.output(
+          ci_res <- suppressMessages(suppressWarnings(
+            MBESS::ci.smd(
+              ncp = ncp_val,
+              n.1 = n1, n.2 = n2, conf.level = level
+            )
+          )),
+          type = "output"
         )
-        return(c(
-          as.numeric(ci_result$Lower.Conf.Limit.smd),
-          as.numeric(ci_result$Upper.Conf.Limit.smd)
-        ))
+        c(
+          as.numeric(ci_res$Lower.Conf.Limit.smd),
+          as.numeric(ci_res$Upper.Conf.Limit.smd)
+        )
       },
-      error = function(e) {
-        return(c(NA_real_, NA_real_))
-      }
+      error = function(e) c(NA_real_, NA_real_)
     )
+    if (!any(is.na(bounds))) {
+      return(bounds)
+    }
   }
 
   # Fallback to approximation
