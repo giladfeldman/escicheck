@@ -187,18 +187,19 @@ normalize_text <- function(x) {
   # ============================================================================
   for (.i in 1:3) {
     # t(d,ddd), H(d,ddd), r(d,ddd), Z(d,ddd): single df with thousand separator
+    # \s* after comma handles docpluck A4 spacing: "t(2, 758)" as well as "t(2,758)"
     x <- gsub(
-      "(\\b[tHrZz]\\s*\\(\\s*\\d{1,3}),(\\d{3})(?=\\s*\\))",
+      "(\\b[tHrZz]\\s*\\(\\s*\\d{1,3}),\\s*(\\d{3})(?=\\s*\\))",
       "\\1\\2", x, perl = TRUE
     )
     # F(df1, d,ddd) / F[df1, d,ddd]: denominator df with thousand separator
     x <- gsub(
-      "(\\bF\\s*[\\(\\[]\\s*\\d+(?:\\.\\d+)?\\s*,\\s*\\d{1,3}),(\\d{3})(?=\\s*[\\)\\]])",
+      "(\\bF\\s*[\\(\\[]\\s*\\d+(?:\\.\\d+)?\\s*,\\s*\\d{1,3}),\\s*(\\d{3})(?=\\s*[\\)\\]])",
       "\\1\\2", x, perl = TRUE
     )
     # chi-square(df, N = d,ddd) and variants: N inside chi-square parens
     x <- gsub(
-      "((?:chi-?square|\u03c7\\s*\\^?2|\u03c7\u00b2|Chi-?square|chi2|X\\s*\\^?2|X\u00b2)\\s*\\(\\s*\\d{1,3}\\s*,\\s*[Nn]\\s*=\\s*\\d{1,3}),(\\d{3})(?=\\s*\\))",
+      "((?:chi-?square|\u03c7\\s*\\^?2|\u03c7\u00b2|Chi-?square|chi2|X\\s*\\^?2|X\u00b2)\\s*\\(\\s*\\d{1,3}\\s*,\\s*[Nn]\\s*=\\s*\\d{1,3}),\\s*(\\d{3})(?=\\s*\\))",
       "\\1\\2", x, perl = TRUE
     )
   }

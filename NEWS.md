@@ -1,3 +1,22 @@
+# effectcheck 0.3.3
+
+Follow-up to 0.3.2 addressing MetaESCI v0.3.3 request: the E8 pre-strip
+was a no-op on real docpluck output.
+
+## Parse: thousand-sep comma strip now handles spaces after comma (E8 follow-up)
+
+* The v0.3.2 regexes in `parse.R` required `t(2,758)` with no space —
+  but docpluck v1.4.4's A4 paren-spacing normalizer always emits
+  `t(2, 758)` with a space. The fix matched the pre-A4 raw text we'd
+  been shown in the MetaESCI report, not the actual post-normalizer
+  input. Net effect in v0.3.2: zero rows recovered on the PSPB article
+  `10.1177/0146167220905712`.
+* Fix: add `\s*` after the comma in all three pre-strip regexes
+  (t/H/r/z, F, chi-square-N). Single-character change per regex.
+* New tests: parallel with-space cases for all three statistic types,
+  plus an end-to-end 5-line fixture copied verbatim from docpluck's
+  output on `0146167220905712` (`t(2, 758) = -2.96, ...`).
+
 # effectcheck 0.3.2
 
 Follow-up to 0.3.1 addressing MetaESCI requests E8 and E10.

@@ -93,6 +93,49 @@ test_that("check_text parses t(2,758) with correct df (E8 end-to-end)", {
   expect_false(any(dfs < 10, na.rm = TRUE))
 })
 
+# MetaESCI v0.3.3 follow-up: docpluck v1.4.4 emits "t(2, 758)" with a space
+# after the comma (A4 paren spacing normalizer). The v0.3.2 pre-strip regex
+# did not allow a space, so the fix was a no-op on real PDFs. These tests
+# pin the with-space variants for t/F/chi-square.
+
+test_that("normalize_text strips thousand-sep commas WITH SPACE in t parens (E8 docpluck)", {
+  text <- "beta = -.06, t(2, 758) = -2.96, p = .003"
+  normalized <- effectcheck:::normalize_text(text)
+  expect_true(grepl("t\\(2758\\)", normalized))
+  expect_false(grepl("t\\(2\\.758\\)", normalized))
+})
+
+test_that("normalize_text strips thousand-sep commas WITH SPACE in F parens", {
+  text <- "F(2, 1, 234) = 3.45, F[1, 2, 500] = 8.12"
+  normalized <- effectcheck:::normalize_text(text)
+  expect_true(grepl("F\\(2, 1234\\)", normalized))
+  expect_true(grepl("F\\[1, 2500\\]", normalized))
+})
+
+test_that("normalize_text strips thousand-sep commas WITH SPACE in chi-square N", {
+  text <- "chi-square(3, N = 1, 542) = 12.3"
+  normalized <- effectcheck:::normalize_text(text)
+  expect_true(grepl("N = 1542", normalized))
+})
+
+test_that("check_text parses docpluck A4-normalized t(2, 758) block (E8 docpluck end-to-end)", {
+  # Canonical 5-line slice from docpluck v1.4.4 output for PMID 0146167220905712
+  text <- paste(
+    "FL was a significant predictor of all well-being measures across all the models: autonomy: beta = -.06, t(2, 758) = -2.96, p = .003; environment",
+    "t(2, 758) = -9.75, p < .001; personal growth: beta = -.18,",
+    "t(2, 758) = -7.10, p < .001; positive relations with others: beta = -.12,",
+    "t(2, 758) = -6.14, p < .001; purpose in life: beta = -.16,",
+    "t(2, 757) = -7.63, p < .001; self-acceptance: beta = -.18,",
+    sep = "\n"
+  )
+  r <- check_text(text)
+  expect_gte(nrow(r), 5)
+  dfs <- unique(r$df1)
+  expect_true(2758 %in% dfs)
+  expect_true(2757 %in% dfs)
+  expect_false(any(dfs < 10, na.rm = TRUE))
+})
+
 test_that("normalize_text harmonizes CI delimiters", {
   text <- "CI (0.12; 0.45)"
   normalized <- effectcheck:::normalize_text(text)
