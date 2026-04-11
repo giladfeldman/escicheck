@@ -1,3 +1,20 @@
+# effectcheck 0.3.0n
+
+## Bug fixes (MetaESCI v0.3.0m batch deep-dive)
+
+* Fixed ~100 F-test crashes (`'list' object cannot be coerced to type
+  'double'`) for `F` near zero. The v0.3.0m defensive guard covered Phase 5
+  matching but missed the Phase 6 CI-fallback path at `check.R:2809`, which
+  extracted `computed_variants[[eff]]$ci` without a `tryCatch`. Now mirrors
+  the guarded pattern already in use above.
+* Fixed ~61 false positive ERRORs from multi-predictor regression rows
+  where both unstandardized `b` and standardized `beta` are reported with
+  different values (e.g., `b = 4.12, beta = 0.29`). v0.3.0m only detected
+  the `b == beta` masquerade. effectcheck computes single-predictor
+  `standardized_beta_from_t` which cannot match a multi-predictor reported
+  beta — the comparison is now skipped with a "multi-predictor regression"
+  uncertainty note instead of flagging ERROR.
+
 # effectcheck 0.3.0m
 
 ## Bug fixes (MetaESCI batch validation)

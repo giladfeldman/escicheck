@@ -2809,8 +2809,15 @@ compute_and_compare_one <- function(row,
     for (eff_name in primary_effects) {
       if (eff_name %in% names(computed_variants) &&
         !is.null(computed_variants[[eff_name]]$ci)) {
-        computed_ciL <- as.numeric(computed_variants[[eff_name]]$ci[1])
-        computed_ciU <- as.numeric(computed_variants[[eff_name]]$ci[2])
+        # v0.3.0n: Defensive guard -- $ci may be a list when noncentral-F CI
+        # routines fail for F ~= 0. Mirror the pattern at lines 2740-2743.
+        cL <- tryCatch(as.numeric(computed_variants[[eff_name]]$ci[1]),
+                       error = function(e) NA_real_)
+        cU <- tryCatch(as.numeric(computed_variants[[eff_name]]$ci[2]),
+                       error = function(e) NA_real_)
+        if (is.na(cL) || is.na(cU) || !is.finite(cL) || !is.finite(cU)) next
+        computed_ciL <- cL
+        computed_ciU <- cU
         break
       }
     }
@@ -2886,6 +2893,24 @@ compute_and_compare_one <- function(row,
     } else {
       status <- "WARN"
     }
+  }
+
+  # v0.3.0n: Multi-predictor regression downgrade
+  # When a regression row reports both b and beta with materially different
+  # values AND the status is ERROR, it's almost certainly a multi-predictor
+  # model: effectcheck's single-predictor standardized_beta_from_t cannot
+  # match the reported multi-predictor beta. Downgrade to WARN with note.
+  # (Simple-predictor cases with correct single-predictor beta will still
+  # PASS and bypass this downgrade.)
+  if (status == "ERROR" && !is.na(tt) && tt == "regression" &&
+      !is.na(canonical_type) && canonical_type == "beta" &&
+      exists("b_val", inherits = FALSE) && !is.na(b_val) &&
+      !is.na(effect_reported) &&
+      abs(abs(b_val) - abs(effect_reported)) >= 0.001) {
+    status <- "WARN"
+    uncertainty <- c(uncertainty, sprintf(
+      "Both unstandardized b (%.4f) and standardized beta (%.4f) reported with different values \u2014 likely multi-predictor regression; single-predictor standardized_beta comparison may not apply",
+      b_val, effect_reported))
   }
 
   # CI affects status (controlled by ci_affects_status parameter)
