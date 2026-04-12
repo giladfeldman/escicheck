@@ -225,15 +225,19 @@ test_that("eta2 cross-match with distant F-test", {
 })
 
 test_that("Phase 14 cross-result reports attempts to user", {
-  # Row 2: F(2,74)=6.9 gives eta2=0.157, reported=0.22 (ERROR)
-  # Phase 14 tries F(1,36)=2.02 -> eta2=0.053 (no match)
-  # Should still be ERROR but with "No cross-result match" note
+  # Row 2: F(2,74)=6.9 gives eta2=0.157, reported=0.22
+  # v0.3.4: Phase 8D Signal 11 now catches eta2 cross-pairing (df1>1,
+  # computed eta2=0.157 matches F but not reported 0.22) → WARN.
+  # Previously Phase 14 added a cross-result note, but Signal 11 fires
+  # earlier and is more precise.
   r <- check_text(paste(
     "F(1, 36) = 2.02, p = .164, eta-squared = 0.16.",
     "F(2, 74) = 6.9, p < .001, eta-squared = 0.22."))
-  # Row 2 should have cross-result attempt info
-  if (nrow(r) >= 2 && r$status[2] %in% c("ERROR", "WARN")) {
-    expect_true(grepl("cross-result|Cross-result|attempts",
+  if (nrow(r) >= 2) {
+    # Signal 11 detects cross-pairing: WARN with r2_cross_pairing_detected
+    expect_equal(r$status[2], "WARN")
+    expect_true(r$r2_cross_pairing_detected[2])
+    expect_true(grepl("cross-paired|cross-result|attempts",
       r$uncertainty_reasons[2], ignore.case = TRUE))
   }
 })

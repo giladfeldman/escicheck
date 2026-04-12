@@ -54,3 +54,49 @@ test_that("ANOVA context prevents regression downgrade", {
     }
   }
 })
+
+# Signal 14 (v0.3.4): Eta/f cross-family detection
+# When reported eta2/etap2 is matched to cohens_f/cohens_f2 with delta > 0.05,
+# downgrade ERROR -> WARN with r2_cross_pairing_detected = TRUE.
+
+test_that("etap2 reported matched to cohens_f gets WARN (Signal 14)", {
+  # F(1,100)=2.50: computed etap2=0.024, cohens_f=0.158
+  # Reported etap2=0.50 is closer to cohens_f -> cross-family match, delta ~0.34
+  res <- check_text("F(1, 100) = 2.50, etap2 = 0.50")
+  expect_equal(nrow(res), 1)
+  expect_equal(res$test_type[1], "F")
+  expect_equal(res$matched_variant[1], "cohens_f")
+  expect_equal(res$status[1], "WARN")
+  expect_true(res$r2_cross_pairing_detected[1])
+})
+
+test_that("eta2 reported matched to cohens_f gets WARN (Signal 14)", {
+  # Same as above but with eta2 instead of etap2
+  res <- check_text("F(1, 100) = 2.50, eta2 = 0.50")
+  expect_equal(nrow(res), 1)
+  expect_equal(res$test_type[1], "F")
+  expect_equal(res$matched_variant[1], "cohens_f")
+  expect_equal(res$status[1], "WARN")
+  expect_true(res$r2_cross_pairing_detected[1])
+})
+
+test_that("eta2 correct match stays PASS (no false positive from Signal 14)", {
+  # F(2,100)=35.58: computed eta2=0.416 -> reported matches -> PASS
+  res <- check_text("F(2, 100) = 35.58, eta2 = 0.416")
+  expect_equal(res$status[1], "PASS")
+  expect_false(res$r2_cross_pairing_detected[1])
+})
+
+test_that("partial eta2 correct match stays PASS (no false positive from Signal 14)", {
+  # F(1,98)=478.55: computed partial eta2=0.830 -> reported matches -> PASS
+  res <- check_text("F(1, 98) = 478.55, partial eta2 = 0.83")
+  expect_equal(res$status[1], "PASS")
+  expect_false(res$r2_cross_pairing_detected[1])
+})
+
+test_that("cohens_f correct match stays PASS (no false positive from Signal 14)", {
+  # F(2,100)=35.58: computed cohens_f=0.844 -> reported matches -> PASS
+  res <- check_text("F(2, 100) = 35.58, f = 0.844")
+  expect_equal(res$status[1], "PASS")
+  expect_false(res$r2_cross_pairing_detected[1])
+})

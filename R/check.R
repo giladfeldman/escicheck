@@ -3447,7 +3447,7 @@ compute_and_compare_one <- function(row,
   r2_cross_pairing_detected <- FALSE
 
   if (status == "ERROR" && tt == "F" && check_type == "effect_size" &&
-      !is.na(canonical_type) && canonical_type %in% c("R2", "adjusted_R2", "f2", "cohens_f") &&
+      !is.na(canonical_type) && canonical_type %in% c("R2", "adjusted_R2", "f2", "cohens_f", "eta2", "etap2", "generalized_eta2") &&
       !is.na(delta_effect_abs)) {
 
     raw <- if (!is.null(row$raw_text) && length(row$raw_text) > 0)
@@ -3579,6 +3579,28 @@ compute_and_compare_one <- function(row,
         uncertainty <- c(uncertainty,
           sprintf("Cohen's %s delta=%.3f > 0.10: f/f2 derives deterministically from F -- mismatch indicates cross-pairing",
                   canonical_type, delta_effect_abs))
+      }
+      # Signal 14 (v0.3.4): Eta/f cross-family detection
+      # eta2 = F*df1/(F*df1+df2) is deterministic from F, just like
+      # cohens_f = sqrt(F*df1/df2). If reported eta2/etap2 matched to
+      # cohens_f/f2 with delta > 0.05, they're from different analyses.
+      # No contextual signals needed (same rationale as Signal 13).
+      if (!r2_cross_pairing_detected &&
+          !is.na(canonical_type) && !is.na(matched_variant) &&
+          !is.na(delta_effect_abs) && delta_effect_abs > 0.05) {
+        eta_family <- c("eta2", "etap2", "generalized_eta2")
+        f_family_variants <- c("cohens_f", "cohens_f_omega", "cohens_f2", "f2")
+        eta_f_cross <- (canonical_type %in% eta_family &&
+                        matched_variant %in% f_family_variants) ||
+                       (canonical_type %in% c("cohens_f", "f2") &&
+                        grepl("^(eta2|eta$|partial_eta2|generalized_eta2)", matched_variant))
+        if (eta_f_cross) {
+          status <- "WARN"
+          r2_cross_pairing_detected <- TRUE
+          uncertainty <- c(uncertainty,
+            sprintf("Reported %s matched to %s (delta=%.3f): eta-squared and Cohen's f are different scales (eta2 vs f=sqrt(eta2/(1-eta2))) -- cross-family mismatch",
+                    canonical_type, matched_variant, delta_effect_abs))
+        }
       }
     }
 

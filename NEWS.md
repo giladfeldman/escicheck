@@ -1,3 +1,21 @@
+# effectcheck 0.3.4
+
+Addresses MetaESCI v0.3.4 request: 42 Category A ERROR false positives where
+reported eta2/etap2 was cross-matched to cohens_f/cohens_f2 without detection.
+
+## Check: Phase 8D Signal 14 — eta/f cross-family detection (E11)
+
+* Phase 8D entry condition now includes `eta2`, `etap2`, `generalized_eta2`
+  alongside the existing `R2`, `adjusted_R2`, `f2`, `cohens_f`.
+* New Signal 14: when reported eta2/etap2 is matched to cohens_f/cohens_f2/f2
+  with delta > 0.05, downgrades ERROR -> WARN with `r2_cross_pairing_detected`.
+  Standalone (no contextual signals needed) — same rationale as Signal 13:
+  both eta2 and cohens_f are deterministic from F, so any mismatch means the
+  reported value came from a different analysis.
+* Symmetric: also handles cohens_f reported + eta variant matched.
+* Expected impact: MetaESCI Category A ERRORs 42 -> ~6, raw ERROR rate
+  0.128% -> ~0.06%.
+
 # effectcheck 0.3.3
 
 Follow-up to 0.3.2 addressing MetaESCI v0.3.3 request: the E8 pre-strip
