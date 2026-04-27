@@ -1,0 +1,54 @@
+name: no-app-code
+
+# Guard: this repository must remain R-package-only.
+# Fail the build if any web-app or deployment file appears at the repo root
+# or anywhere else in the tree. This is the long-term defense against the
+# old monorepo state ever returning here.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  check-no-app-code:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Reject non-R-package paths
+        shell: bash
+        run: |
+          set -euo pipefail
+          forbidden=(
+            "frontend"
+            "worker"
+            "Dockerfile"
+            "render.yaml"
+            "start_app.bat"
+            "node_modules"
+            "package.json"
+            "package-lock.json"
+            ".dockerignore"
+            "API.md"
+            "LESSONS.md"
+            "vercel.json"
+          )
+          violations=0
+          for path in "${forbidden[@]}"; do
+            if [ -e "$path" ]; then
+              echo "::error file=$path::Forbidden path '$path' present. This repo must stay R-package-only."
+              violations=$((violations + 1))
+            fi
+          done
+          # Also scan for these directories anywhere in the tree, not just root
+          if find . -type d \( -name frontend -o -name worker -o -name node_modules \) -not -path "./.git/*" | grep -q .; then
+            echo "::error::Found a forbidden directory (frontend/worker/node_modules) somewhere in the tree."
+            violations=$((violations + 1))
+          fi
+          if [ "$violations" -gt 0 ]; then
+            echo "Refusing to allow $violations forbidden path(s) in this R-package repo."
+            exit 1
+          fi
+          echo "OK: no app-code paths present."
