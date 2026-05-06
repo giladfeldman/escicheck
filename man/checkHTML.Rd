@@ -2,30 +2,22 @@
 % Please edit documentation in R/api.R
 \name{checkHTML}
 \alias{checkHTML}
-\title{Check HTML files for statistical consistency}
+\title{Check HTML files for statistical consistency (DEFUNCT)}
 \usage{
 checkHTML(files, messages = TRUE, ...)
 }
 \arguments{
-\item{files}{Character vector of HTML file paths}
+\item{files}{Defunct argument.}
 
-\item{messages}{Logical, show progress messages (default TRUE)}
+\item{messages}{Defunct argument.}
 
-\item{...}{Additional arguments passed to check_text()}
+\item{...}{Defunct argument.}
 }
 \value{
-An effectcheck object with results
+Errors with a migration message.
 }
 \description{
-Checks one or more HTML files for statistical consistency.
-This function is provided for compatibility with statcheck's checkHTML().
+Removed in effectcheck 0.4.0. HTML can be passed directly to \code{\link[=check_text]{check_text()}}
+via \code{check_text(rvest::html_text2(xml2::read_html(path)))}.
 }
-\examples{
-\donttest{
-tmp <- tempfile(fileext = ".html")
-writeLines("<p>t(28) = 2.21, p = .035, d = 0.80</p>", tmp)
-results <- checkHTML(tmp)
-summary(results)
-unlink(tmp)
-}
-}
+\keyword{internal}

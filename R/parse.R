@@ -419,6 +419,28 @@ numify_int <- function(x) {
   suppressWarnings(as.integer(x))
 }
 
+#' Count decimal places in the raw matched string
+#'
+#' Counts trailing digits after the decimal point in a numeric string,
+#' preserving trailing zeros (which numify() loses). Used for APA-precision
+#' tracking — "0.0400" returns 4, "0.04" returns 2, "2" returns 0.
+#'
+#' Must be called on the raw regex match group, before numify().
+#'
+#' @param x Character (single value) — the raw matched string
+#' @return Integer count of decimal places, or NA_integer_ if input is NA/empty
+#' @keywords internal
+count_decimal_places <- function(x) {
+  if (is.null(x) || length(x) == 0L) return(NA_integer_)
+  x <- x[1]
+  if (is.na(x) || !nzchar(x)) return(NA_integer_)
+  s <- as.character(x)
+  s <- sub("^\\s*[+-]?", "", s)
+  m <- regmatches(s, regexpr("\\.([0-9]+)", s))
+  if (!length(m)) return(0L)
+  nchar(m) - 1L
+}
+
 #' Extract context window around a sentence
 #'
 #' Gets n sentences around a given sentence index for design inference.
@@ -480,16 +502,21 @@ parse_text <- function(text, context_window_size = 2) {
       table_c = numeric(0),
       effect_reported_name = character(0),
       effect_reported = numeric(0),
+      effect_reported_decimals = integer(0),
+      stat_value_decimals = integer(0),
       effect_fallback = logical(0),
       eta = numeric(0),
       ci_level = numeric(0),
       ci_level_source = character(0),
       ciL_reported = numeric(0),
       ciU_reported = numeric(0),
+      ciL_reported_decimals = integer(0),
+      ciU_reported_decimals = integer(0),
       z_auxiliary = numeric(0),
       b_coeff = numeric(0),
       SE_coeff = numeric(0),
-      adj_R2 = numeric(0)
+      adj_R2 = numeric(0),
+      df_arity_mismatch = logical(0)
     ))
   }
 
@@ -585,16 +612,21 @@ parse_text <- function(text, context_window_size = 2) {
       table_c = numeric(0),
       effect_reported_name = character(0),
       effect_reported = numeric(0),
+      effect_reported_decimals = integer(0),
+      stat_value_decimals = integer(0),
       effect_fallback = logical(0),
       eta = numeric(0),
       ci_level = numeric(0),
       ci_level_source = character(0),
       ciL_reported = numeric(0),
       ciU_reported = numeric(0),
+      ciL_reported_decimals = integer(0),
+      ciU_reported_decimals = integer(0),
       z_auxiliary = numeric(0),
       b_coeff = numeric(0),
       SE_coeff = numeric(0),
-      adj_R2 = numeric(0)
+      adj_R2 = numeric(0),
+      df_arity_mismatch = logical(0)
     ))
   }
 
@@ -622,6 +654,16 @@ parse_text <- function(text, context_window_size = 2) {
   pat_chi <- "(?:chi-?square|\u03c7\\s*\\^?2|\u03c7\u00b2|Chi-?square|chi2|X\\s*\\^?2|X\u00b2)\\s*\\(\\s*(\\d+(?:\\.\\d+)?)\\s*(?:,\\s*[Nn]\\s*=\\s*([\\d,]+))?\\s*\\)\\s*=\\s*([-+]?\\d*\\.?\\d+)"
   # Chi-square without parenthesized df: chi2 = 27.04, df = 1 (or chi2(N = 100) = 5.03)
   pat_chi_nodf <- "(?:chi-?square|\u03c7\\s*\\^?2|\u03c7\u00b2|Chi-?square|chi2|X\\s*\\^?2|X\u00b2)\\s*=\\s*([-+]?\\d*\\.?\\d+)"
+
+  # v0.3.6: Shadow patterns for df_arity_mismatch detection.
+  # These run only when the strict patterns above fail (see dispatch chain
+  # below). They capture malformed-arity stats so we can emit a row with
+  # df_arity_mismatch = TRUE rather than silently dropping the extraction.
+  # See docs/superpowers/specs/2026-05-03-deception-detection-design.md sec 5.
+  pat_F_one_df <- "F\\s*[\\(\\[]\\s*(\\d+(?:\\.\\d+)?)\\s*[\\)\\]]\\s*=\\s*([-+]?\\d*\\.?\\d+)"
+  pat_t_two_dfs <- "\\bt\\s*\\(\\s*(\\d+(?:\\.\\d+)?)\\s*,\\s*(\\d+(?:\\.\\d+)?)\\s*\\)\\s*=\\s*([-+]?\\d*\\.?\\d+)"
+  pat_chi_two_dfs <- "(?:chi-?square|\u03c7\\s*\\^?2|\u03c7\u00b2|Chi-?square|chi2|X\\s*\\^?2|X\u00b2)\\s*\\(\\s*(\\d+(?:\\.\\d+)?)\\s*,\\s*(?![Nn]\\s*=)(\\d+(?:\\.\\d+)?)\\s*\\)\\s*=\\s*([-+]?\\d*\\.?\\d+)"
+  pat_r_two_dfs <- "(?<![a-zA-Z])r\\s*\\(\\s*(\\d+(?:\\.\\d+)?)\\s*,\\s*(\\d+(?:\\.\\d+)?)\\s*\\)\\s*=\\s*([-+]?\\d*\\.?\\d+)"
 
   # Nonparametric test patterns
   # Mann-Whitney U: require co-occurrence with p or z to avoid bare "U" false positives
@@ -873,6 +915,12 @@ parse_text <- function(text, context_window_size = 2) {
     m_cohens_w <- stringr::str_match(s, pat_cohens_w)
     m_fallback_es <- stringr::str_match(s, pat_fallback_es)
 
+    # v0.3.6: shadow-pattern matches (only consulted if strict patterns fail)
+    m_F_one_df    <- stringr::str_match(s, pat_F_one_df)
+    m_t_two_dfs   <- stringr::str_match(s, pat_t_two_dfs)
+    m_chi_two_dfs <- stringr::str_match(s, pat_chi_two_dfs)
+    m_r_two_dfs   <- stringr::str_match(s, pat_r_two_dfs)
+
     # Match regression coefficients
     m_b_coeff <- stringr::str_match(s, pat_b_coeff)
     m_SE <- stringr::str_match(s, pat_SE)
@@ -883,26 +931,32 @@ parse_text <- function(text, context_window_size = 2) {
     df1 <- NA_real_
     df2 <- NA_real_
     stat_value <- NA_real_
+    stat_value_decimals <- NA_integer_
     chi_inline_N <- NA_real_
+    df_arity_mismatch <- FALSE
 
     if (!all(is.na(m_t))) {
       test_type <- "t"
       df1 <- numify(m_t[2])
       stat_value <- numify(m_t[3])
+      stat_value_decimals <- count_decimal_places(m_t[3])
     } else if (!all(is.na(m_t_nodf))) {
       # t = value, df = value (non-standard format, e.g., "one-sample t-test: t = -1.30, df = 42")
       test_type <- "t"
       stat_value <- numify(m_t_nodf[2])
+      stat_value_decimals <- count_decimal_places(m_t_nodf[2])
       df1 <- numify(m_t_nodf[3])
     } else if (!all(is.na(m_F))) {
       test_type <- "F"
       df1 <- numify(m_F[2])
       df2 <- numify(m_F[3])
       stat_value <- numify(m_F[4])
+      stat_value_decimals <- count_decimal_places(m_F[4])
     } else if (!all(is.na(m_r))) {
       test_type <- "r"
       df1 <- numify(m_r[2])
       stat_value <- numify(m_r[3])
+      stat_value_decimals <- count_decimal_places(m_r[3])
     } else if (!all(is.na(m_r_nodf))) {
       # r = value without df (requires p-value nearby to avoid false positives)
       has_p <- !all(is.na(stringr::str_match(s, pat_p)))
@@ -911,6 +965,7 @@ parse_text <- function(text, context_window_size = 2) {
       if (has_p && !is.na(r_val) && abs(r_val) <= 1) {
         test_type <- "r"
         stat_value <- r_val
+        stat_value_decimals <- count_decimal_places(m_r_nodf[2])
         # df is NA -- will be flagged as "requires verification" in check.R
       }
     } else if (!all(is.na(m_chi))) {
@@ -918,6 +973,7 @@ parse_text <- function(text, context_window_size = 2) {
       df1 <- numify(m_chi[2])
       chi_inline_N <- if (!is.na(m_chi[3])) numify_int(m_chi[3]) else NA_real_
       stat_value <- numify(m_chi[4])
+      stat_value_decimals <- count_decimal_places(m_chi[4])
     } else if (!all(is.na(m_chi_nodf))) {
       # Chi-square without parenthesized df (e.g., "chi2 = 27.04, df = 1")
       # Only match if there's also a p-value or df stated nearby to avoid false positives
@@ -926,6 +982,7 @@ parse_text <- function(text, context_window_size = 2) {
       if (has_p || has_df_nearby) {
         test_type <- "chisq"
         stat_value <- numify(m_chi_nodf[2])
+        stat_value_decimals <- count_decimal_places(m_chi_nodf[2])
         # Try to extract df from nearby "df = N" pattern
         m_df_sep <- stringr::str_match(s, "\\bdf\\s*=\\s*(\\d+)")
         if (all(is.na(m_df_sep))) {
@@ -940,6 +997,7 @@ parse_text <- function(text, context_window_size = 2) {
       test_type <- "H"
       df1 <- numify(m_H[2])
       stat_value <- numify(m_H[3])
+      stat_value_decimals <- count_decimal_places(m_H[3])
     } else if (!all(is.na(m_U))) {
       # Mann-Whitney U - require p or z co-occurrence to avoid false positives
       has_p <- !all(is.na(stringr::str_match(s, pat_p)))
@@ -947,6 +1005,7 @@ parse_text <- function(text, context_window_size = 2) {
       if (has_p || has_z) {
         test_type <- "U"
         stat_value <- numify(m_U[2])
+        stat_value_decimals <- count_decimal_places(m_U[2])
       }
     } else if (!all(is.na(m_W_stat))) {
       # Wilcoxon W - require p or z co-occurrence
@@ -955,6 +1014,7 @@ parse_text <- function(text, context_window_size = 2) {
       if (has_p || has_z) {
         test_type <- "W"
         stat_value <- numify(m_W_stat[2])
+        stat_value_decimals <- count_decimal_places(m_W_stat[2])
       }
     }
     # z-test is checked last - if U or W consumed the sentence, z is auxiliary
@@ -964,7 +1024,41 @@ parse_text <- function(text, context_window_size = 2) {
       if (!is_fmri) {
         test_type <- "z"
         stat_value <- numify(m_z[2])
+        stat_value_decimals <- count_decimal_places(m_z[2])
       }
+    }
+
+    # v0.3.6: shadow patterns - fire only when no strict pattern matched.
+    # Emit a row with df_arity_mismatch = TRUE so downstream check.R can
+    # short-circuit to status=NOTE and the arena adapter can flag suspicion.
+    if (is.na(test_type) && !all(is.na(m_F_one_df))) {
+      test_type <- "F"
+      df1 <- numify(m_F_one_df[2])
+      df2 <- NA_real_
+      stat_value <- numify(m_F_one_df[3])
+      stat_value_decimals <- count_decimal_places(m_F_one_df[3])
+      df_arity_mismatch <- TRUE
+    } else if (is.na(test_type) && !all(is.na(m_t_two_dfs))) {
+      test_type <- "t"
+      df1 <- numify(m_t_two_dfs[2])
+      df2 <- numify(m_t_two_dfs[3])
+      stat_value <- numify(m_t_two_dfs[4])
+      stat_value_decimals <- count_decimal_places(m_t_two_dfs[4])
+      df_arity_mismatch <- TRUE
+    } else if (is.na(test_type) && !all(is.na(m_chi_two_dfs))) {
+      test_type <- "chisq"
+      df1 <- numify(m_chi_two_dfs[2])
+      df2 <- numify(m_chi_two_dfs[3])
+      stat_value <- numify(m_chi_two_dfs[4])
+      stat_value_decimals <- count_decimal_places(m_chi_two_dfs[4])
+      df_arity_mismatch <- TRUE
+    } else if (is.na(test_type) && !all(is.na(m_r_two_dfs))) {
+      test_type <- "r"
+      df1 <- numify(m_r_two_dfs[2])
+      df2 <- numify(m_r_two_dfs[3])
+      stat_value <- numify(m_r_two_dfs[4])
+      stat_value_decimals <- count_decimal_places(m_r_two_dfs[4])
+      df_arity_mismatch <- TRUE
     }
 
     # Extract z_auxiliary for nonparametric tests
@@ -995,6 +1089,7 @@ parse_text <- function(text, context_window_size = 2) {
     # Extract effect size (prioritize by specificity)
     effect_name <- NA_character_
     effect_reported <- NA_real_
+    effect_reported_decimals <- NA_integer_
     effect_fallback <- FALSE # NEW: Initialize fallback flag (Phase 2F)
 
     # Check more specific patterns first (prioritize more specific over more general)
@@ -1002,85 +1097,109 @@ parse_text <- function(text, context_window_size = 2) {
     if (!all(is.na(m_f2))) {
       effect_name <- "f2"
       effect_reported <- numify(m_f2[2])
+      effect_reported_decimals <- count_decimal_places(m_f2[2])
     } else if (!all(is.na(m_etap2))) {
       effect_name <- "etap2"
       effect_reported <- numify(m_etap2[2])
+      effect_reported_decimals <- count_decimal_places(m_etap2[2])
     } else if (!all(is.na(m_eta2_corrupted))) {
       # v0.3.0f: Generalized eta-squared (geta-squared, Geta-squared, 2G, etc.)
       # Must be checked BEFORE pat_eta2 since "geta-squared" contains "eta-squared"
       effect_name <- "generalized_eta2"
       effect_reported <- numify(m_eta2_corrupted[2])
+      effect_reported_decimals <- count_decimal_places(m_eta2_corrupted[2])
       effect_fallback <- TRUE # Flag as uncertain extraction
     } else if (!all(is.na(m_eta2))) {
       effect_name <- "eta2"
       effect_reported <- numify(m_eta2[2])
+      effect_reported_decimals <- count_decimal_places(m_eta2[2])
     } else if (!all(is.na(m_eta))) {
       effect_name <- "eta"
       effect_reported <- numify(m_eta[2])
+      effect_reported_decimals <- count_decimal_places(m_eta[2])
     } else if (!all(is.na(m_partial_omega2))) {
       effect_name <- "partial_omega2"
       effect_reported <- numify(m_partial_omega2[2])
+      effect_reported_decimals <- count_decimal_places(m_partial_omega2[2])
     } else if (!all(is.na(m_omega2))) {
       effect_name <- "omega2"
       effect_reported <- numify(m_omega2[2])
+      effect_reported_decimals <- count_decimal_places(m_omega2[2])
     } else if (!all(is.na(m_epsilon2))) {
       effect_name <- "epsilon_squared"
       effect_reported <- numify(m_epsilon2[2])
+      effect_reported_decimals <- count_decimal_places(m_epsilon2[2])
     } else if (!all(is.na(m_cohens_f))) {
       effect_name <- "f"
       effect_reported <- numify(m_cohens_f[2])
+      effect_reported_decimals <- count_decimal_places(m_cohens_f[2])
     } else if (!all(is.na(m_bare_f))) {
       # Bare "f = value" after comma — Cohen's f (for F-tests or t-tests reporting f)
       effect_name <- "f"
       effect_reported <- numify(m_bare_f[2])
+      effect_reported_decimals <- count_decimal_places(m_bare_f[2])
     } else if (!all(is.na(m_dz))) {
       effect_name <- "dz"
       effect_reported <- numify(m_dz[2])
+      effect_reported_decimals <- count_decimal_places(m_dz[2])
     } else if (!all(is.na(m_dav))) {
       effect_name <- "dav"
       effect_reported <- numify(m_dav[2])
+      effect_reported_decimals <- count_decimal_places(m_dav[2])
     } else if (!all(is.na(m_drm))) {
       effect_name <- "drm"
       effect_reported <- numify(m_drm[2])
+      effect_reported_decimals <- count_decimal_places(m_drm[2])
     } else if (!all(is.na(m_g))) {
       effect_name <- "g"
       effect_reported <- numify(m_g[2])
+      effect_reported_decimals <- count_decimal_places(m_g[2])
     } else if (!all(is.na(m_d))) {
       effect_name <- "d"
       effect_reported <- numify(m_d[2])
+      effect_reported_decimals <- count_decimal_places(m_d[2])
     } else if (!all(is.na(m_phi))) {
       effect_name <- "phi"
       effect_reported <- numify(m_phi[2])
+      effect_reported_decimals <- count_decimal_places(m_phi[2])
     } else if (!all(is.na(m_V))) {
       effect_name <- "V"
       effect_reported <- numify(m_V[2])
+      effect_reported_decimals <- count_decimal_places(m_V[2])
     } else if (!all(is.na(m_beta))) {
       effect_name <- "beta"
       effect_reported <- numify(m_beta[2])
+      effect_reported_decimals <- count_decimal_places(m_beta[2])
     } else if (!all(is.na(m_R2))) {
       effect_name <- "R2"
       effect_reported <- numify(m_R2[2])
+      effect_reported_decimals <- count_decimal_places(m_R2[2])
     } else if (!all(is.na(m_OR))) {
       effect_name <- "OR"
       effect_reported <- numify(m_OR[2])
+      effect_reported_decimals <- count_decimal_places(m_OR[2])
     } else if (!all(is.na(m_RR))) {
       effect_name <- "RR"
       effect_reported <- numify(m_RR[2])
+      effect_reported_decimals <- count_decimal_places(m_RR[2])
     } else if (!all(is.na(m_IRR))) {
       effect_name <- "IRR"
       effect_reported <- numify(m_IRR[2])
+      effect_reported_decimals <- count_decimal_places(m_IRR[2])
     } else if (!all(is.na(m_h))) {
       # Cohen's h - only accept when co-occurring with a chi-square or z-test
       # to avoid false positives from bare "h = X" in other contexts
       if (!is.na(test_type) && test_type %in% c("chisq", "z")) {
         effect_name <- "h"
         effect_reported <- numify(m_h[2])
+        effect_reported_decimals <- count_decimal_places(m_h[2])
       }
     } else if (!all(is.na(m_cohens_w))) {
       # v0.3.0f: Cohen's w - only with chi-square or z context
       if (!is.na(test_type) && test_type %in% c("chisq", "z")) {
         effect_name <- "cohens_w"
         effect_reported <- numify(m_cohens_w[2])
+        effect_reported_decimals <- count_decimal_places(m_cohens_w[2])
       }
     } else if (!all(is.na(m_fallback_es))) {
       # Fallback match - likely PDF corruption or non-standard notation (Phase 2F)
@@ -1104,6 +1223,7 @@ parse_text <- function(text, context_window_size = 2) {
       }
 
       effect_reported <- if (length(m_fallback_es) >= 3) numify(m_fallback_es[3]) else NA_real_
+      effect_reported_decimals <- if (length(m_fallback_es) >= 3) count_decimal_places(m_fallback_es[3]) else NA_integer_
       effect_fallback <- TRUE # NEW: Flag this as fallback match for uncertainty tracking
     }
 
@@ -1120,6 +1240,7 @@ parse_text <- function(text, context_window_size = 2) {
       if (effect_name %in% bounded_at_one && abs(effect_reported) > 1.0) {
         effect_name <- NA_character_
         effect_reported <- NA_real_
+        effect_reported_decimals <- NA_integer_
       }
 
       # v0.3.0f: Extended d-family guard to include dz, dav, drm
@@ -1130,6 +1251,7 @@ parse_text <- function(text, context_window_size = 2) {
           effect_name %in% d_family && abs(effect_reported) > 10) {
         effect_name <- NA_character_
         effect_reported <- NA_real_
+        effect_reported_decimals <- NA_integer_
       }
 
       # Round-integer d/g/dz > 2 without decimal point:
@@ -1143,6 +1265,7 @@ parse_text <- function(text, context_window_size = 2) {
           # d=6, d=8 etc. — virtually never a real effect size
           effect_name <- NA_character_
           effect_reported <- NA_real_
+          effect_reported_decimals <- NA_integer_
         } else {
           # d=3, d=4, d=5 — check context for spurious patterns
           reject <- FALSE
@@ -1173,6 +1296,7 @@ parse_text <- function(text, context_window_size = 2) {
           if (reject) {
             effect_name <- NA_character_
             effect_reported <- NA_real_
+            effect_reported_decimals <- NA_integer_
           }
         }
       }
@@ -1187,6 +1311,8 @@ parse_text <- function(text, context_window_size = 2) {
     ci_level <- NA_real_
     ciL <- NA_real_
     ciU <- NA_real_
+    ciL_reported_decimals <- NA_integer_
+    ciU_reported_decimals <- NA_integer_
     ci_level_source <- NA_character_
 
     # Match all patterns
@@ -1201,17 +1327,23 @@ parse_text <- function(text, context_window_size = 2) {
       ci_level <- numify(m_CI1[2]) / 100
       ciL <- numify(m_CI1[3])
       ciU <- numify(m_CI1[4])
+      ciL_reported_decimals <- count_decimal_places(m_CI1[3])
+      ciU_reported_decimals <- count_decimal_places(m_CI1[4])
       ci_level_source <- "explicit_with_bounds"
     } else if (!all(is.na(m_CI2))) {
       # Pattern 2: Level explicitly with bounds (alternate format)
       ci_level <- numify(m_CI2[2]) / 100
       ciL <- numify(m_CI2[3])
       ciU <- numify(m_CI2[4])
+      ciL_reported_decimals <- count_decimal_places(m_CI2[3])
+      ciU_reported_decimals <- count_decimal_places(m_CI2[4])
       ci_level_source <- "explicit_with_bounds"
     } else if (!all(is.na(m_CI3))) {
       # Pattern 3: Bounds without level in brackets
       ciL <- numify(m_CI3[2])
       ciU <- numify(m_CI3[3])
+      ciL_reported_decimals <- count_decimal_places(m_CI3[2])
+      ciU_reported_decimals <- count_decimal_places(m_CI3[3])
 
       # Look for level stated separately in same sentence
       if (!all(is.na(m_CI_level))) {
@@ -1239,6 +1371,8 @@ parse_text <- function(text, context_window_size = 2) {
         if (!is_f_test_df) {
           ciL <- ci4_val1
           ciU <- ci4_val2
+          ciL_reported_decimals <- count_decimal_places(m_CI4_all[ci4_row_idx, 2])
+          ciU_reported_decimals <- count_decimal_places(m_CI4_all[ci4_row_idx, 3])
           ci4_found <- TRUE
           break
         }
@@ -1314,16 +1448,21 @@ parse_text <- function(text, context_window_size = 2) {
       table_c = if (!all(is.na(m_dim))) numify(m_dim[3]) else NA_real_,
       effect_reported_name = effect_name,
       effect_reported = effect_reported,
+      effect_reported_decimals = effect_reported_decimals, # v0.3.5 (MetaESCI 2A)
+      stat_value_decimals = stat_value_decimals,           # v0.3.5 (MetaESCI 2A)
       effect_fallback = effect_fallback, # NEW: Phase 2F - flag fallback pattern use
       eta = if (length(effect_name) > 0 && !is.na(effect_name) && effect_name == "eta") effect_reported else NA_real_,
       ci_level = ci_level,
       ci_level_source = ci_level_source, # NEW: Phase 2H - Track where CI level came from
       ciL_reported = ciL,
       ciU_reported = ciU,
+      ciL_reported_decimals = ciL_reported_decimals,       # v0.3.5 (MetaESCI 2A)
+      ciU_reported_decimals = ciU_reported_decimals,       # v0.3.5 (MetaESCI 2A)
       z_auxiliary = z_auxiliary,
       b_coeff = b_coeff,
       SE_coeff = SE_coeff,
-      adj_R2 = adj_R2_val
+      adj_R2 = adj_R2_val,
+      df_arity_mismatch = df_arity_mismatch
     )
   })
 
@@ -1356,16 +1495,21 @@ parse_text <- function(text, context_window_size = 2) {
       table_c = numeric(0),
       effect_reported_name = character(0),
       effect_reported = numeric(0),
+      effect_reported_decimals = integer(0),
+      stat_value_decimals = integer(0),
       effect_fallback = logical(0),
       eta = numeric(0),
       ci_level = numeric(0),
       ci_level_source = character(0),
       ciL_reported = numeric(0),
       ciU_reported = numeric(0),
+      ciL_reported_decimals = integer(0),
+      ciU_reported_decimals = integer(0),
       z_auxiliary = numeric(0),
       b_coeff = numeric(0),
       SE_coeff = numeric(0),
-      adj_R2 = numeric(0)
+      adj_R2 = numeric(0),
+      df_arity_mismatch = logical(0)
     ))
   }
 

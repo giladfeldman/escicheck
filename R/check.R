@@ -395,8 +395,23 @@ compute_and_compare_one <- function(row,
   table_c <- if (length(row$table_c) > 0) as.numeric(row$table_c[1]) else NA_real_
   effect_reported <- if (length(row$effect_reported) > 0) as.numeric(row$effect_reported[1]) else NA_real_
   effect_reported_name <- if (length(row$effect_reported_name) > 0) as.character(row$effect_reported_name[1]) else NA_character_
+
+  # v0.3.6: df_arity_mismatch from parser; if TRUE, short-circuit below.
+  df_arity_mismatch <- if ("df_arity_mismatch" %in% names(row) &&
+                           length(row$df_arity_mismatch) > 0) {
+    isTRUE(row$df_arity_mismatch[1])
+  } else {
+    FALSE
+  }
+
   ciL_rep <- if (length(row$ciL_reported) > 0) as.numeric(row$ciL_reported[1]) else NA_real_
   ciU_rep <- if (length(row$ciU_reported) > 0) as.numeric(row$ciU_reported[1]) else NA_real_
+
+  # v0.3.5 (MetaESCI 2A): Decimal-place precision tracking from parse.R raw match strings
+  effect_reported_decimals <- if ("effect_reported_decimals" %in% names(row) && length(row$effect_reported_decimals) > 0) as.integer(row$effect_reported_decimals[1]) else NA_integer_
+  ciL_reported_decimals    <- if ("ciL_reported_decimals" %in% names(row) && length(row$ciL_reported_decimals) > 0) as.integer(row$ciL_reported_decimals[1]) else NA_integer_
+  ciU_reported_decimals    <- if ("ciU_reported_decimals" %in% names(row) && length(row$ciU_reported_decimals) > 0) as.integer(row$ciU_reported_decimals[1]) else NA_integer_
+  stat_value_decimals      <- if ("stat_value_decimals" %in% names(row) && length(row$stat_value_decimals) > 0) as.integer(row$stat_value_decimals[1]) else NA_integer_
 
   # P-value extraction (now numeric from parse.R with validation)
   p_reported <- if ("p_reported" %in% names(row) && length(row$p_reported) > 0) {
@@ -444,6 +459,91 @@ compute_and_compare_one <- function(row,
     !is.na(row$ci_level_source[1]) &&
     row$ci_level_source[1] == "assumed_95") {
     assumptions <- c(assumptions, "Assumed 95% confidence level (not explicitly stated)")
+  }
+
+  # ============================================================================
+  # v0.3.6: df_arity_mismatch short-circuit
+  # Skip all computation when the parser flagged a malformed-arity stat.
+  # Emit a NOTE row so the caller and the arena adapter can flag suspicion.
+  # ============================================================================
+  if (df_arity_mismatch) {
+    tt_safe <- if (!is.na(tt)) tt else ""
+    expected_arity <- switch(tt_safe,
+      "F" = "two", "t" = "one", "chisq" = "one", "r" = "one",
+      "an unknown number of"
+    )
+    actual_arity <- if (!is.na(df2)) "two" else "one"
+    msg <- sprintf(
+      "Declared test '%s' takes %s df argument(s) but %s were supplied; cannot verify (df_arity_mismatch).",
+      if (!is.na(tt)) tt else "(unknown)", expected_arity, actual_arity
+    )
+    return(tibble::tibble(
+      location = if ("location" %in% names(row) && length(row$location) > 0) row$location[1] else NA_integer_,
+      raw_text = if ("raw_text" %in% names(row) && length(row$raw_text) > 0) row$raw_text[1] else "",
+      context_window = if ("context_window" %in% names(row) && length(row$context_window) > 0) row$context_window[1] else "",
+      test_type = tt,
+      df1 = df1,
+      df2 = df2,
+      stat_value = stat,
+      reported_type = NA_character_,
+      effect_reported_name = effect_reported_name,
+      effect_reported = effect_reported,
+      matched_variant = NA_character_,
+      matched_value = NA_real_,
+      delta_effect = NA_real_,
+      ambiguity_level = "clear",
+      ambiguity_reason = "",
+      all_variants = "{}",
+      status = "NOTE",
+      check_type = "extraction_only",
+      check_scope = "extraction_only",
+      extraction_suspect = FALSE,
+      decimal_recovered = FALSE,
+      result_context = "study",
+      confidence = 1L,
+      design_inferred = "unclear",
+      variants_tested = "",
+      uncertainty_level = "high",
+      uncertainty_reasons = msg,
+      assumptions_used = "",
+      insufficient_data = TRUE,
+      software_notes = NA_character_,
+      alternative_formulas = NA_character_,
+      best_practice_notes = NA_character_,
+      unknown_groups_downgraded = FALSE,
+      r2_cross_pairing_detected = FALSE,
+      decision_error_downgraded = FALSE,
+      decision_error = FALSE,
+      decision_error_reason = NA_character_,
+      p_reported = p_reported,
+      p_computed = NA_real_,
+      d_ind = NA_real_, d_ind_equalN = NA_real_, d_ind_min = NA_real_, d_ind_max = NA_real_,
+      g_ind = NA_real_, dz = NA_real_, d_av_median = NA_real_, d_av_min = NA_real_,
+      d_av_max = NA_real_, drm = NA_real_, r_from_t_or_reported = NA_real_,
+      r_ciL = NA_real_, r_ciU = NA_real_, phi = NA_real_, phi_ciL = NA_real_,
+      phi_ciU = NA_real_, V = NA_real_, eta2 = NA_real_, partial_eta2 = NA_real_,
+      generalized_eta2 = NA_real_, omega2 = NA_real_, cohens_f = NA_real_,
+      standardized_beta = NA_real_, partial_r = NA_real_, semi_partial_r = NA_real_,
+      cohens_f2 = NA_real_, R2 = NA_real_,
+      rank_biserial_r = NA_real_, cliffs_delta = NA_real_,
+      epsilon_squared = NA_real_, kendalls_W = NA_real_, z_auxiliary = NA_real_,
+      b_coeff = NA_real_, SE_coeff = NA_real_, adj_R2 = NA_real_,
+      closest_method = NA_character_,
+      delta_effect_abs = NA_real_, ci_match = as.logical(NA),
+      ci_delta_lower = NA_real_, ci_delta_upper = NA_real_,
+      ci_check_status = NA_character_, ci_method_match = NA_character_,
+      ci_width_ratio = NA_real_, ci_symmetry = NA_character_,
+      ci_level_mismatch   = NA_character_,
+      ci_clipped_to_bound = NA_character_,
+      ci_symmetry_class   = NA_character_,
+      effect_reported_decimals = NA_integer_,
+      ciL_reported_decimals    = NA_integer_,
+      ciU_reported_decimals    = NA_integer_,
+      stat_value_decimals      = NA_integer_,
+      ci_expected              = FALSE,
+      ci_reported              = FALSE,
+      df_arity_mismatch        = TRUE
+    ))
   }
 
   # ============================================================================
@@ -1182,8 +1282,19 @@ compute_and_compare_one <- function(row,
       }
 
       if (!is.na(canonical_type) && canonical_type == "R2") {
+        # v0.3.5: route R^2 CI through partial-eta^2 NCP F-inversion
+        R2_ci_all <- ci_R2_all(
+          R2 = eta2_from_t,
+          df1 = 1,
+          df2 = df1,
+          F_val = stat^2,
+          level = ci_level_used
+        )
+        R2_primary_ci <- if (length(R2_ci_all) > 0L) R2_ci_all[[1]]$bounds else NULL
         computed_variants$R2 <- list(
           value = eta2_from_t,
+          ci = R2_primary_ci,
+          ci_all = R2_ci_all,
           metadata = list(
             name = "R-squared (from t-test)",
             description = "R2 = t2/(t2+df), single-predictor model"
@@ -1408,8 +1519,19 @@ compute_and_compare_one <- function(row,
 
       # R2 as computed variant when reported type is R2 (R2 = eta2 for single-factor)
       if (!is.na(canonical_type) && canonical_type == "R2" && !is.na(anova_effects$eta2)) {
+        # v0.3.5: route R^2 CI through partial-eta^2 NCP F-inversion
+        R2_ci_all_F <- ci_R2_all(
+          R2 = anova_effects$eta2,
+          df1 = df1,
+          df2 = df2,
+          F_val = stat,
+          level = ci_level_used
+        )
+        R2_primary_ci_F <- if (length(R2_ci_all_F) > 0L) R2_ci_all_F[[1]]$bounds else NULL
         computed_variants$R2 <- list(
           value = anova_effects$eta2,
+          ci = R2_primary_ci_F,
+          ci_all = R2_ci_all_F,
           metadata = list(
             name = "R-squared (from F)",
             assumptions = "R\u00b2 = SS_effect / SS_total = eta\u00b2 for single-factor designs",
@@ -2073,16 +2195,29 @@ compute_and_compare_one <- function(row,
     if (!is.na(df1)) {
       beta_val <- tryCatch(standardized_beta_from_t(stat, df1), error = function(e) NA_real_)
       if (!is.na(beta_val)) {
+        # v0.3.5: attach normal-approx CI for standardized beta
+        beta_ci_all <- ci_standardized_beta_all(
+          beta = beta_val, SE_beta = NULL,
+          t_stat = stat, df = df1, level = ci_level_used
+        )
+        beta_primary_ci <- if (length(beta_ci_all) > 0L) beta_ci_all[[1]]$bounds else NULL
         computed_variants$standardized_beta <- list(
           value = beta_val,
+          ci = beta_primary_ci,
+          ci_all = beta_ci_all,
           metadata = VARIANT_METADATA$standardized_beta
         )
       }
 
       partial_r_val <- tryCatch(partial_r_from_t(stat, df1), error = function(e) NA_real_)
       if (!is.na(partial_r_val)) {
+        # v0.3.5: attach Fisher-z CI for partial r
+        pr_ci_all <- ci_partial_r_all(partial_r_val, df1, level = ci_level_used)
+        pr_primary_ci <- if (length(pr_ci_all) > 0L) pr_ci_all[[1]]$bounds else NULL
         alternatives$partial_r <- list(
           value = partial_r_val,
+          ci = pr_primary_ci,
+          ci_all = pr_ci_all,
           metadata = VARIANT_METADATA$partial_r,
           why_consider = "Correlation-based interpretation"
         )
@@ -2327,8 +2462,18 @@ compute_and_compare_one <- function(row,
       if (!is.na(beta_val)) {
         computed_beta_for_output <- beta_val
         if (!b_is_unstandardized) {
+          # v0.3.5: SE_beta when both b and SE were parsed (regression rows usually
+          # publish SE for the unstandardized b; for standardized beta we fall back
+          # to the t-based approximation).
+          beta_ci_all <- ci_standardized_beta_all(
+            beta = beta_val, SE_beta = NULL,
+            t_stat = stat, df = df1, level = ci_level_used
+          )
+          beta_primary_ci <- if (length(beta_ci_all) > 0L) beta_ci_all[[1]]$bounds else NULL
           computed_variants$standardized_beta <- list(
             value = beta_val,
+            ci = beta_primary_ci,
+            ci_all = beta_ci_all,
             metadata = VARIANT_METADATA$standardized_beta
           )
         }
@@ -2339,8 +2484,13 @@ compute_and_compare_one <- function(row,
 
       partial_r_val <- tryCatch(partial_r_from_t(stat, df1), error = function(e) NA_real_)
       if (!is.na(partial_r_val)) {
+        # v0.3.5: Fisher-z CI for partial r
+        pr_ci_all <- ci_partial_r_all(partial_r_val, df1, level = ci_level_used)
+        pr_primary_ci <- if (length(pr_ci_all) > 0L) pr_ci_all[[1]]$bounds else NULL
         alternatives$partial_r <- list(
           value = partial_r_val,
+          ci = pr_primary_ci,
+          ci_all = pr_ci_all,
           metadata = VARIANT_METADATA$partial_r,
           why_consider = "Partial correlation from regression t-value"
         )
@@ -2459,6 +2609,38 @@ compute_and_compare_one <- function(row,
       }
     } else {
       uncertainty <- c(uncertainty, "Kruskal-Wallis H requires df and N for effect size computation")
+    }
+  }
+
+  # ============================================================================
+  # PHASE 4Z (v0.3.5): OR CI computation
+  # ----------------------------------------------------------------------------
+  # OR is reported as an effect size, not derived from a test statistic. Feed
+  # ci_OR_all() into the variant pool so Phase 6 picks up the reported-vs-
+  # computed CI delta. Inputs: SE_logOR (rare), p-value (back-derived SE), or
+  # 2x2 cells (rare in psychology corpora).
+  # ============================================================================
+  if (!is.na(canonical_type) && canonical_type == "OR" &&
+      !is.na(effect_reported) && effect_reported > 0) {
+    OR_ci_all <- ci_OR_all(
+      OR = effect_reported,
+      SE_logOR = NULL,
+      level = ci_level_used,
+      cells = NULL,
+      p_value = if (!is.na(p_reported) && p_reported > 0 && p_reported < 1) p_reported else NULL
+    )
+    if (length(OR_ci_all) > 0L) {
+      primary <- OR_ci_all[[1]]
+      # value = NA_real_ keeps Phase 5 type-match from making this a
+      # tautological self-match (effect_reported vs itself). Phase 6 still
+      # pulls ci_all into the CI candidate pool.
+      computed_variants$OR <- list(
+        value = NA_real_,
+        ci = primary$bounds,
+        ci_all = OR_ci_all,
+        metadata = if (!is.null(VARIANT_METADATA$OR)) VARIANT_METADATA$OR else list(),
+        why_consider = "Odds ratio CI from reported point estimate (v0.3.5)"
+      )
     }
   }
 
@@ -2690,6 +2872,10 @@ compute_and_compare_one <- function(row,
   ci_method_match <- NA_character_
   ci_width_ratio <- NA_real_
   ci_symmetry <- NA_character_
+  # v0.3.5 (MetaESCI 2C/2D/2E): CI metadata
+  ci_level_mismatch <- NA_character_
+  ci_clipped_to_bound <- NA_character_
+  ci_symmetry_class <- NA_character_
 
   # Helper: collect all CI candidates from a variant
   collect_ci_candidates <- function(variant, name_prefix) {
@@ -2782,6 +2968,94 @@ compute_and_compare_one <- function(row,
       if (lower_arm > 0 && upper_arm > 0) {
         ratio <- min(lower_arm, upper_arm) / max(lower_arm, upper_arm)
         ci_symmetry <- if (ratio > 0.95) "symmetric" else "asymmetric"
+      }
+    }
+
+    # ------------------------------------------------------------------
+    # v0.3.5 (MetaESCI 2C): ci_level_mismatch
+    # ------------------------------------------------------------------
+    # Source for "reported" level: parse-time ci_level_source ("explicit_with_bounds",
+    # "inferred_from_context", "assumed_95", "implausible_level"). Numeric reported
+    # level is the parsed `ci_level` (already converted to [0,1]).
+    {
+      ci_level_reported_pct <- if ("ci_level" %in% names(row) &&
+                                   length(row$ci_level) > 0 &&
+                                   !is.na(row$ci_level[1])) {
+        as.numeric(row$ci_level[1]) * 100
+      } else NA_real_
+      ci_level_used_pct <- ci_level_used * 100
+      ci_level_src <- if ("ci_level_source" %in% names(row) &&
+                          length(row$ci_level_source) > 0) {
+        as.character(row$ci_level_source[1])
+      } else NA_character_
+
+      anova_family <- !is.na(canonical_type) &&
+        canonical_type %in% c("eta2", "etap2", "R2", "omega2", "partial_omega2",
+                              "epsilon_squared", "generalized_eta2")
+
+      # Compare against the APA-95% default rather than ci_level_used,
+      # which may have been adopted from the parsed level. The point of this
+      # field is to flag non-standard reporting practice (e.g. 90% CI on eta^2),
+      # not whether the package's internal computation used the same level.
+      ci_level_mismatch <- if (isTRUE(ci_level_src == "implausible_level")) {
+        "implausible"
+      } else if (isTRUE(ci_level_src == "assumed_95")) {
+        "unstated_assumed_95"
+      } else if (!is.na(ci_level_reported_pct) && anova_family &&
+                 abs(ci_level_reported_pct - 90) < 1) {
+        "90_vs_95_anova"
+      } else if (!is.na(ci_level_reported_pct) &&
+                 abs(ci_level_reported_pct - 95) < 0.5) {
+        "match"
+      } else {
+        NA_character_
+      }
+    }
+
+    # ------------------------------------------------------------------
+    # v0.3.5 (MetaESCI 2D): ci_clipped_to_bound for bounded ES families
+    # ------------------------------------------------------------------
+    {
+      bounded_family <- !is.na(canonical_type) &&
+        canonical_type %in% c("eta2", "etap2", "R2", "omega2", "partial_omega2",
+                              "epsilon_squared", "generalized_eta2",
+                              "cramers_v", "V", "phi")
+      ci_clipped_to_bound <- if (!bounded_family) {
+        NA_character_
+      } else if (isTRUE(ciL_rep == 0) && isTRUE(ciU_rep == 1)) {
+        "both"
+      } else if (isTRUE(ciL_rep == 0)) {
+        "lower_0"
+      } else if (isTRUE(ciU_rep == 1)) {
+        "upper_1"
+      } else {
+        "none"
+      }
+    }
+
+    # ------------------------------------------------------------------
+    # v0.3.5 (MetaESCI 2E): ci_symmetry_class — categorical refinement
+    # ------------------------------------------------------------------
+    {
+      expects_asym <- (!is.na(canonical_type) &&
+                         canonical_type %in% c("d", "g") &&
+                         !is.na(effect_reported) &&
+                         abs(effect_reported) > 0.5) ||
+                      (!is.na(canonical_type) && canonical_type == "r" &&
+                         !is.na(effect_reported) &&
+                         abs(effect_reported) > 0.5) ||
+                      isTRUE(bounded_family) ||
+                      (!is.na(canonical_type) && canonical_type == "OR")
+      ci_symmetry_class <- if (is.na(ci_symmetry)) {
+        NA_character_
+      } else if (ci_symmetry == "symmetric"  &&  expects_asym) {
+        "symmetric_unexpected"
+      } else if (ci_symmetry == "asymmetric" && !expects_asym) {
+        "asymmetric_unexpected"
+      } else if (ci_symmetry == "asymmetric" &&  expects_asym) {
+        "asymmetric_expected"
+      } else {
+        "symmetric_expected"
       }
     }
   } else if (!is.na(ciL_rep) || !is.na(ciU_rep)) {
@@ -4315,6 +4589,18 @@ compute_and_compare_one <- function(row,
   standardized_beta <- if ("standardized_beta" %in% names(computed_variants)) computed_variants$standardized_beta$value else if ("standardized_beta" %in% names(alternatives)) alternatives$standardized_beta$value else if (!is.na(computed_beta_for_output)) computed_beta_for_output else NA_real_
   partial_r <- if ("partial_r" %in% names(alternatives)) alternatives$partial_r$value else NA_real_
 
+  # v0.3.5 (MetaESCI 2B): CI expectation flags
+  # ci_expected: TRUE when this row carries an effect size from a family for
+  #   which CIs are normative reporting (d/g/r/eta2/etap2/R2/OR/cramers_v).
+  #   Pipeline check_type can be "effect_size" or "ci" (the latter is a
+  #   downgrade applied when an ES row has a CI mismatch); both should count.
+  # ci_reported: TRUE when both bounds parsed (parse-time F-df artifact already excluded).
+  ci_expected <- isTRUE(check_type %in% c("effect_size", "ci")) &&
+    !is.na(canonical_type) &&
+    canonical_type %in% c("d", "g", "r", "eta2", "etap2", "R2",
+                          "OR", "cramers_v", "V", "phi")
+  ci_reported <- !is.na(ciL_rep) && !is.na(ciU_rep)
+
   tibble::tibble(
     location = row$location,
     raw_text = row$raw_text,
@@ -4332,6 +4618,16 @@ compute_and_compare_one <- function(row,
     ci_level = ci_level_used,
     ciL_reported = ciL_rep,
     ciU_reported = ciU_rep,
+
+    # v0.3.5 (MetaESCI 2A): Reported-value precision tracking
+    effect_reported_decimals = effect_reported_decimals,
+    ciL_reported_decimals    = ciL_reported_decimals,
+    ciU_reported_decimals    = ciU_reported_decimals,
+    stat_value_decimals      = stat_value_decimals,
+
+    # v0.3.5 (MetaESCI 2B): CI expectation flags
+    ci_expected = ci_expected,
+    ci_reported = ci_reported,
 
     # Phase 2 new columns (from parse.R)
     p_symbol = if ("p_symbol" %in% names(row)) row$p_symbol else NA_character_,
@@ -4417,6 +4713,10 @@ compute_and_compare_one <- function(row,
     ci_method_match = ci_method_match,
     ci_width_ratio = ci_width_ratio,
     ci_symmetry = ci_symmetry,
+    # v0.3.5 (MetaESCI 2C/2D/2E)
+    ci_level_mismatch   = ci_level_mismatch,
+    ci_clipped_to_bound = ci_clipped_to_bound,
+    ci_symmetry_class   = ci_symmetry_class,
     # Status and metadata
 
     # REPRO code generation
@@ -4549,7 +4849,9 @@ compute_and_compare_one <- function(row,
     # v0.3.0: User feedback fields
     software_notes = software_notes,
     alternative_formulas = alternative_formulas,
-    best_practice_notes = best_practice_notes
+    best_practice_notes = best_practice_notes,
+    # v0.3.6: df_arity_mismatch flag (FALSE for normal computation path)
+    df_arity_mismatch = FALSE
   )
 }
 
@@ -4761,7 +5063,21 @@ check_text <- function(text,
           delta_effect_abs = NA_real_, ci_match = as.logical(NA),
           ci_delta_lower = NA_real_, ci_delta_upper = NA_real_,
           ci_check_status = NA_character_, ci_method_match = NA_character_,
-          ci_width_ratio = NA_real_, ci_symmetry = NA_character_
+          ci_width_ratio = NA_real_, ci_symmetry = NA_character_,
+          # v0.3.5 (MetaESCI 2C/2D/2E)
+          ci_level_mismatch   = NA_character_,
+          ci_clipped_to_bound = NA_character_,
+          ci_symmetry_class   = NA_character_,
+          # v0.3.5 (MetaESCI 2A): decimal precision tracking
+          effect_reported_decimals = NA_integer_,
+          ciL_reported_decimals    = NA_integer_,
+          ciU_reported_decimals    = NA_integer_,
+          stat_value_decimals      = NA_integer_,
+          # v0.3.5 (MetaESCI 2B): CI expectation flags
+          ci_expected              = FALSE,
+          ci_reported              = FALSE,
+          # v0.3.6: df_arity_mismatch flag (FALSE on error path)
+          df_arity_mismatch        = FALSE
         )
       }
     )
@@ -5099,65 +5415,21 @@ check_text <- function(text,
   new_effectcheck(res, call = match.call(), settings = settings)
 }
 
-#' Check files for statistical consistency
+#' Check files for statistical consistency (DEFUNCT in v0.4.0)
 #'
-#' Reads one or more files and checks all detected statistics for consistency.
+#' Removed in effectcheck 0.4.0. ESCImate delegates extraction to docpluck;
+#' pass already-extracted text to [check_text()].
 #'
-#' @param paths Character vector of file paths (.pdf, .html, .docx, or .txt)
-#' @param try_tables Logical, attempt table extraction from PDFs (default TRUE)
-#' @param try_ocr Logical, attempt OCR for scanned PDFs (default FALSE)
-#' @param messages Logical, show progress messages (default TRUE)
-#' @param ... Additional arguments passed to check_text()
-#' @return An effectcheck S3 object with consistency check results
+#' @param paths Defunct argument.
+#' @param try_tables Defunct argument.
+#' @param try_ocr Defunct argument.
+#' @param messages Defunct argument.
+#' @param ... Defunct argument.
+#' @return Errors with a migration message.
 #' @export
-#' @examples
-#' \donttest{
-#' tmp <- tempfile(fileext = ".txt")
-#' writeLines("t(28) = 2.21, p = .035, d = 0.80", tmp)
-#' results <- check_files(tmp)
-#' print(results)
-#' unlink(tmp)
-#' }
-check_files <- function(paths, try_tables = TRUE, try_ocr = FALSE, messages = TRUE, ...) {
-  if (length(paths) == 0) {
-    return(new_effectcheck(tibble::tibble(), call = match.call()))
-  }
-
-  if (messages) {
-    message(sprintf("Processing %d file(s)...", length(paths)))
-  }
-
-  all_results <- purrr::map(seq_along(paths), function(i) {
-    p <- paths[i]
-
-    if (messages) {
-      message(sprintf("[%d/%d] %s", i, length(paths), basename(p)))
-    }
-
-    tryCatch(
-      {
-        txt <- read_any_text(p, try_tables = try_tables, try_ocr = try_ocr)
-        out <- check_text(txt, messages = FALSE, ...)
-        if (nrow(out) > 0) {
-          out$source <- basename(p)
-          out$source_path <- p
-        }
-        out
-      },
-      error = function(e) {
-        if (messages) {
-          message(sprintf("  Error: %s", e$message))
-        }
-        tibble::tibble()
-      }
-    )
-  })
-
-  combined <- dplyr::bind_rows(all_results)
-
-  if (messages) {
-    message(sprintf("\nFound %d statistics in %d file(s)", nrow(combined), length(paths)))
-  }
-
-  new_effectcheck(combined, call = match.call(), settings = list(...))
+#' @keywords internal
+check_files <- function(paths, try_tables = TRUE, try_ocr = FALSE,
+                        messages = TRUE, ...) {
+  .Defunct(new = "check_text", package = "effectcheck",
+           msg = .extraction_defunct_msg())
 }

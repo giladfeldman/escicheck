@@ -2,26 +2,21 @@
 % Please edit documentation in R/compare.R
 \name{compare_file_with_statcheck}
 \alias{compare_file_with_statcheck}
-\title{Compare effectcheck and statcheck results on a file}
+\title{Compare effectcheck and statcheck on a file (DEFUNCT in v0.4.0)}
 \usage{
 compare_file_with_statcheck(path, ...)
 }
 \arguments{
-\item{path}{Path to a file (PDF, HTML, DOCX, or text)}
+\item{path}{Defunct argument.}
 
-\item{...}{Additional arguments passed to check_file()}
+\item{...}{Defunct argument.}
 }
 \value{
-A tibble with source column
+Errors with a migration message.
 }
 \description{
-Compare effectcheck and statcheck results on a file
+Removed in effectcheck 0.4.0. The text-input variant
+\code{\link[=compare_with_statcheck]{compare_with_statcheck()}} is the supported entry point — extract via
+docpluck and pass the result.
 }
-\examples{
-\donttest{
-tmp <- tempfile(fileext = ".txt")
-writeLines("t(28) = 2.21, p = .035, d = 0.80", tmp)
-comp <- compare_file_with_statcheck(tmp)
-unlink(tmp)
-}
-}
+\keyword{internal}

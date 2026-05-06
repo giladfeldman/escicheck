@@ -49,23 +49,24 @@ test_that("Uncertainty tracking works end-to-end", {
   }
 })
 
-test_that("File reading and checking pipeline", {
-  # Create temporary file
-  test_file <- tempfile(fileext = ".txt")
-  writeLines("t(28) = 2.21, d = 0.80, 95% CI [0.12, 1.48]", test_file)
-  
-  # Read and check
-  text <- read_any_text(test_file)
+test_that("Defunct file-input API errors with migration message (v0.4.0)", {
+  # The v0.3.x pipeline:
+  #   text <- read_any_text(path); check_text(text)
+  #   check_files(path)
+  # is replaced in v0.4.0 by extracting via docpluck and calling check_text()
+  # on the resulting string. Both functions now hard-error.
+  expect_error(read_any_text("dummy.txt"),
+               regexp = "(Defunct|docpluck|effectcheck v0\\.4)")
+  expect_error(check_files("dummy.txt"),
+               regexp = "(Defunct|docpluck|effectcheck v0\\.4)")
+})
+
+test_that("Text-only checking pipeline still works end-to-end", {
+  # Equivalent to the old read_any_text + check_text combo, with text
+  # provided directly (as docpluck would supply it).
+  text <- "t(28) = 2.21, d = 0.80, 95% CI [0.12, 1.48]"
   result <- check_text(text)
-  
   expect_true(nrow(result) > 0)
-  
-  # Or use check_files directly
-  result2 <- check_files(test_file)
-  expect_true(nrow(result2) > 0)
-  expect_true("source" %in% names(result2))
-  
-  unlink(test_file)
 })
 
 test_that("Export pipeline works", {

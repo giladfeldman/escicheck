@@ -2,7 +2,7 @@
 % Please edit documentation in R/api.R
 \name{check_dir}
 \alias{check_dir}
-\title{Check a directory for statistical consistency}
+\title{Check a directory for statistical consistency (DEFUNCT)}
 \usage{
 check_dir(
   dir,
@@ -16,35 +16,27 @@ check_dir(
 )
 }
 \arguments{
-\item{dir}{Directory path to scan}
+\item{dir}{Defunct argument.}
 
-\item{subdir}{Logical, recurse into subdirectories (default TRUE)}
+\item{subdir}{Defunct argument.}
 
-\item{pattern}{File pattern regex (default matches .pdf, .html, .htm, .docx, .txt)}
+\item{pattern}{Defunct argument.}
 
-\item{try_tables}{Logical, attempt table extraction from PDFs (default TRUE)}
+\item{try_tables}{Defunct argument.}
 
-\item{try_ocr}{Logical, attempt OCR for scanned PDFs (default FALSE)}
+\item{try_ocr}{Defunct argument.}
 
-\item{messages}{Logical, show progress messages (default TRUE)}
+\item{messages}{Defunct argument.}
 
-\item{allowed_base_dirs}{Optional character vector of allowed base directories for security}
+\item{allowed_base_dirs}{Defunct argument.}
 
-\item{...}{Additional arguments passed to check_text()}
+\item{...}{Defunct argument.}
 }
 \value{
-An effectcheck object with results from all files
+Errors with a migration message.
 }
 \description{
-Recursively scans a directory for supported files and checks all
-detected statistics for consistency.
+Removed in effectcheck 0.4.0. Extract via docpluck and call \code{\link[=check_text]{check_text()}}
+per file.
 }
-\examples{
-\donttest{
-d <- tempdir()
-writeLines("t(28) = 2.21, p = .035, d = 0.80", file.path(d, "test.txt"))
-results <- check_dir(d, pattern = "\\\\.txt$")
-summary(results)
-unlink(file.path(d, "test.txt"))
-}
-}
+\keyword{internal}

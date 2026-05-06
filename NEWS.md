@@ -1,3 +1,116 @@
+# effectcheck 0.4.0
+
+## Breaking changes — extraction layer removed
+
+All file-input functions are now `.Defunct()` and emit an error directing
+callers to extract via [docpluck](https://docpluck.vercel.app) and pass the
+resulting text to `check_text()`:
+
+* `read_any_text()`
+* `check_file()`, `check_dir()`, `check_files()`
+* `checkPDF()`, `checkPDFdir()`
+* `checkHTML()`, `checkHTMLdir()`, `checkDOCXdir()`
+* `extract_text_pdf()`, `extract_text_pdf_with_ocr()`,
+  `extract_text_docx()`, `extract_text_html()`
+* `compare_file_with_statcheck()` — replaced by `compare_with_statcheck()`
+  (text input)
+
+The pure-text-analysis API (`check_text()`, `compute_and_compare_one()`,
+the parsing layer, all effect-size and CI computations, and every output
+column) is unchanged.
+
+The package no longer requires `poppler-utils`, `tesseract`, `magick`, or
+`qpdf` system dependencies. `SystemRequirements` field removed from
+DESCRIPTION; corresponding entries removed from `Suggests`.
+
+Migration: see <https://docpluck.vercel.app/api-docs> for the API contract.
+Working R reference implementation in the ESCImate web-app repo at
+`tests/scripts/docpluck_shootout.R`.
+
+## New features (carried over from 0.3.6 deception-detection work)
+
+* New per-row column `df_arity_mismatch` (logical, default FALSE) flags structurally
+  malformed test statistics where the declared test label disagrees with the
+  number of df arguments supplied — `F(48)` (F always takes two df), `t(36, 10)`
+  (t always takes one df), `chi2(48, 14)` (chi-square takes one df), `r(50, 30)`
+  (r takes one df). Such rows previously were silently dropped because the strict
+  regex patterns rejected them; v0.3.6 emits the row with `df_arity_mismatch = TRUE`,
+  `status = "NOTE"`, and an explanatory uncertainty message, while skipping all
+  recomputation paths (`p_computed`, effect sizes, `decision_error` are all NA).
+
+* New tier-5 verification fixture (`tests/testthat/test-deception-arena.R`)
+  documents the ScienceArena `stats-extraction-v1` adapter contract: every row
+  corresponding to a deceptive stat is flagged by at least one of
+  `decision_error`, `extraction_suspect`, `insufficient_data`, `df_arity_mismatch`,
+  `ambiguity_level == "highly_ambiguous"`, or `status %in% c("WARN", "ERROR")`.
+
+## API documentation
+
+* `API.md` documents `df_arity_mismatch` and adds a "Suspicion signals for
+  downstream consumers" section listing the six row-level fields a benchmark
+  adapter should OR together to derive `flagged_suspicious`.
+
+# effectcheck 0.3.5
+
+Addresses MetaESCI v0.3.5 request: CI-audit feature pack. Adds CI computation
+coverage for previously-uncomputable effect-size families (OR, R², standardized
+β, partial r, semi-partial r) and new per-row metadata for characterizing CI
+reporting quality at scale (precision tracking, completeness flags, level
+mismatch, bounded-parameter clipping, symmetry classification).
+
+Purely additive — no v0.3.4 behavior changes.
+
+## Compute: CI computation coverage gaps closed
+
+* `ci_OR_all()` — odds-ratio CI via Wald-on-log(OR). Three sources for SE:
+  (1) supplied `SE_logOR`, (2) Fisher exact CI from a 2×2 cell vector,
+  (3) Wald inversion back-derived from a reported p-value when neither is
+  available. Resolves MetaESCI 1A.
+* `ci_R2_all()` — R² CI routed through `ci_etap2_all()` (R² ≡ partial η² in
+  one-predictor / single-omnibus regression). Methods retagged with
+  `_via_etap2` suffix so the matcher distinguishes R²-routed from native
+  η²-routed CIs. Resolves MetaESCI 1B.
+* `ci_standardized_beta_all()` — normal-approximation CI on standardized β.
+  Uses supplied `SE_beta` when available, else back-derives from t-stat.
+* `ci_partial_r_all()` and `ci_semi_partial_r_all()` — Fisher-z transform
+  CIs for partial and semi-partial correlations. Resolves MetaESCI 1C.
+
+## Parse: decimal-place precision tracking
+
+* New helper `count_decimal_places()` extracts trailing-digit count from
+  raw regex match strings *before* `numify()` (which loses trailing zeros).
+* Four new output columns capture APA-7 precision: `effect_reported_decimals`,
+  `ciL_reported_decimals`, `ciU_reported_decimals`, `stat_value_decimals`.
+  Resolves MetaESCI 2A.
+
+## Check: CI audit metadata (Phase 6)
+
+* `ci_expected` (logical) — TRUE when row carries an effect size from a
+  family for which CIs are normative reporting (d/g/r/η²/η_p²/R²/OR/V/φ).
+* `ci_reported` (logical) — TRUE when both bounds parsed (F-test df
+  artifact already excluded at parse time). Resolves MetaESCI 2B.
+* `ci_level_mismatch` (character) — categorical `{match, 90_vs_95_anova,
+  implausible, unstated_assumed_95, NA}`. Compares parsed level against
+  the APA-95% canonical default. Resolves MetaESCI 2C.
+* `ci_clipped_to_bound` (character) — `{none, lower_0, upper_1, both, NA}`
+  for bounded ES families (η², η_p², R², ω², ε², generalized η², V, φ).
+  Resolves MetaESCI 2D.
+* `ci_symmetry_class` (character) — categorical refinement of the existing
+  `ci_symmetry` ratio: `{symmetric_expected, asymmetric_expected,
+  symmetric_unexpected, asymmetric_unexpected, NA}`. Resolves MetaESCI 2E.
+
+## Frontend (escimate.app)
+
+* CI block now renders `ci_width_ratio`, `ci_level_source`, the new
+  `ci_level_mismatch` / `ci_clipped_to_bound` / `ci_symmetry_class` chips,
+  a "CI expected, missing" badge, and an APA-7 precision row with
+  precision-mismatch warning. Decision-error reason now appears as a
+  tooltip on the badge. Downgrade-reason chips (`decision_error_downgraded`,
+  `unknown_groups_downgraded`, `r2_cross_pairing_detected`) surfaced as
+  inline status indicators instead of being hidden in raw metadata.
+* Notes block surfaces `software_notes`, `best_practice_notes`, and
+  `alternative_formulas` (previously visible only in the metadata panel).
+
 # effectcheck 0.3.4
 
 Addresses MetaESCI v0.3.4 request: 42 Category A ERROR false positives where

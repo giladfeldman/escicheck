@@ -30,13 +30,14 @@ test_that("compare_with_statcheck finds at least one result", {
   expect_equal(res$test_type[1], "t")
 })
 
-test_that("compare_file_with_statcheck works on text file", {
-  tmp <- tempfile(fileext = ".txt")
-  writeLines("t(28) = 2.21, p = .035, d = 0.80", tmp)
-  res <- compare_file_with_statcheck(tmp)
-  expect_true("effectcheck_comparison" %in% class(res))
-  expect_true("source" %in% names(res))
-  unlink(tmp)
+test_that("compare_file_with_statcheck() is defunct in v0.4.0", {
+  # File-input variant removed in v0.4.0. Use compare_with_statcheck(text)
+  # after extracting via docpluck.
+  expect_error(
+    compare_file_with_statcheck("any_path.txt"),
+    regexp = "(Defunct|docpluck|effectcheck v0\\.4)",
+    info = "compare_file_with_statcheck() should error with the v0.4.0 migration message"
+  )
 })
 
 test_that("print method works for comparison", {

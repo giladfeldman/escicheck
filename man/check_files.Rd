@@ -2,33 +2,26 @@
 % Please edit documentation in R/check.R
 \name{check_files}
 \alias{check_files}
-\title{Check files for statistical consistency}
+\title{Check files for statistical consistency (DEFUNCT in v0.4.0)}
 \usage{
 check_files(paths, try_tables = TRUE, try_ocr = FALSE, messages = TRUE, ...)
 }
 \arguments{
-\item{paths}{Character vector of file paths (.pdf, .html, .docx, or .txt)}
+\item{paths}{Defunct argument.}
 
-\item{try_tables}{Logical, attempt table extraction from PDFs (default TRUE)}
+\item{try_tables}{Defunct argument.}
 
-\item{try_ocr}{Logical, attempt OCR for scanned PDFs (default FALSE)}
+\item{try_ocr}{Defunct argument.}
 
-\item{messages}{Logical, show progress messages (default TRUE)}
+\item{messages}{Defunct argument.}
 
-\item{...}{Additional arguments passed to check_text()}
+\item{...}{Defunct argument.}
 }
 \value{
-An effectcheck S3 object with consistency check results
+Errors with a migration message.
 }
 \description{
-Reads one or more files and checks all detected statistics for consistency.
+Removed in effectcheck 0.4.0. ESCImate delegates extraction to docpluck;
+pass already-extracted text to \code{\link[=check_text]{check_text()}}.
 }
-\examples{
-\donttest{
-tmp <- tempfile(fileext = ".txt")
-writeLines("t(28) = 2.21, p = .035, d = 0.80", tmp)
-results <- check_files(tmp)
-print(results)
-unlink(tmp)
-}
-}
+\keyword{internal}

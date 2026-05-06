@@ -1,8 +1,9 @@
 ## Schema stability test (MetaESCI request E3)
 ## -----------------------------------------------
-## check_text(), checkPDF(), and checkPDFdir() must return tibbles with
-## identical column sets so MetaESCI and other downstream pipelines can
-## transparently swap between the text-path and PDF-path entry points.
+## check_text() must return a tibble with the columns MetaESCI and other
+## downstream pipelines depend on. (In v0.3.x this test also covered
+## checkPDF()/checkPDFdir() schema equivalence; v0.4.0 removed those entry
+## points — extraction now happens via docpluck before check_text() is called.)
 ##
 ## The set of "critical columns" below is the MetaESCI contract (aggregate.R,
 ## validate_esci.py, analysis.Rmd) -- removing or renaming any of them is a
@@ -15,7 +16,15 @@ critical_columns <- c(
   "decision_error_downgraded", "design_ambiguous",
   "ci_match", "ci_check_status", "ci_method_match",
   "ci_width_ratio", "ci_symmetry",
-  "decision_error", "decision_error_reason"
+  "decision_error", "decision_error_reason",
+  ## v0.3.5 additions (MetaESCI CI-audit pack)
+  "effect_reported_decimals", "ciL_reported_decimals",
+  "ciU_reported_decimals", "stat_value_decimals",
+  "ci_expected", "ci_reported",
+  "ci_level_mismatch", "ci_clipped_to_bound",
+  "ci_symmetry_class",
+  ## v0.3.6 addition (ScienceArena tier-5 deception detection)
+  "df_arity_mismatch"
 )
 
 sample_text <- paste(
@@ -47,40 +56,13 @@ test_that("check_text() column set is deterministic across inputs", {
   expect_setequal(names(r1), names(r2))
 })
 
-test_that("checkPDF() and check_text() share the same schema (when fixture available)", {
-  # checkPDF() funnels through process_files_internal() -> check_text(), so the
-  # schemas should be equal by construction. This test guards the invariant in
-  # case someone adds a PDF-only post-process step in the future.
-  fixture <- Sys.getenv("EFFECTCHECK_TEST_PDF", unset = NA)
-  if (is.na(fixture) || !nzchar(fixture) || !file.exists(fixture)) {
-    skip("No PDF fixture configured via EFFECTCHECK_TEST_PDF env var")
-  }
-
-  text_result <- check_text(sample_text)
-  pdf_result <- tryCatch(
-    checkPDF(fixture, messages = FALSE),
-    error = function(e) NULL
+test_that("checkPDF() is defunct in v0.4.0", {
+  # The v0.3.x test here verified schema equivalence between check_text()
+  # and checkPDF() outputs against an EFFECTCHECK_TEST_PDF fixture. v0.4.0
+  # removed checkPDF(); the docpluck-extracted-text -> check_text() path is
+  # the only entry point now, so schema equivalence is true by construction.
+  expect_error(
+    checkPDF("dummy.pdf", messages = FALSE),
+    regexp = "(Defunct|docpluck|effectcheck v0\\.4)"
   )
-  if (is.null(pdf_result) || nrow(pdf_result) == 0) {
-    skip("PDF fixture produced no rows; cannot compare schemas")
-  }
-
-  text_cols <- names(text_result)
-  pdf_cols <- names(pdf_result)
-  missing_in_pdf <- setdiff(text_cols, pdf_cols)
-  missing_in_text <- setdiff(pdf_cols, text_cols)
-
-  expect_equal(missing_in_pdf, character(0),
-               info = paste("PDF path dropped columns:", paste(missing_in_pdf, collapse = ", ")))
-  expect_equal(missing_in_text, character(0),
-               info = paste("Text path dropped columns:", paste(missing_in_text, collapse = ", ")))
-
-  # Compatible types on the critical column set
-  for (col in intersect(critical_columns, intersect(text_cols, pdf_cols))) {
-    expect_identical(
-      class(text_result[[col]])[1],
-      class(pdf_result[[col]])[1],
-      info = paste("type mismatch on column", col)
-    )
-  }
 })

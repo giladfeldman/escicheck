@@ -561,6 +561,99 @@ ci_d_ind_all <- function(d, n1, n2, level = 0.95) {
   results
 }
 
+#' Compute CIs for R-squared via partial-eta-squared NCP F-inversion (v0.3.5)
+#'
+#' R^2 in a single-omnibus regression (or a one-predictor model) is
+#' mathematically identical to partial eta-squared. We route through
+#' ci_etap2_all() and tag the method names so the matcher distinguishes
+#' R^2-routed CIs from native eta_p^2 CIs. Caller supplies the F statistic
+#' (when available) or back-computes from R^2 + df1 + df2.
+#'
+#' @param R2 R-squared (point estimate, in [0, 1))
+#' @param df1 Numerator df (number of predictors)
+#' @param df2 Denominator df (residual df, N - df1 - 1)
+#' @param F_val Optional F statistic; computed from R2/df1/df2 if NA
+#' @param level Confidence level
+#' @return Named list of ci_result objects with R2-tagged methods
+#' @keywords internal
+ci_R2_all <- function(R2, df1, df2, F_val = NA_real_, level = 0.95) {
+  if (is.na(R2) || is.na(df1) || is.na(df2)) return(list())
+  if (R2 < 0 || R2 >= 1 || df1 <= 0 || df2 <= 0) return(list())
+  if (is.na(F_val)) {
+    F_val <- (R2 / df1) / ((1 - R2) / df2)
+  }
+  res <- ci_etap2_all(F_val, df1, df2, level)
+  if (length(res) == 0L) return(list())
+  for (m in names(res)) {
+    res[[m]]$method <- paste0(res[[m]]$method, "_via_etap2")
+  }
+  names(res) <- paste0(names(res), "_via_etap2")
+  res
+}
+
+#' Compute CIs for odds ratio via all available methods (v0.3.5)
+#'
+#' Implements Wald CI on log(OR) (the standard psychology-paper method) and
+#' optionally an exact Fisher CI when 2x2 cell counts are supplied.
+#'
+#' Wald-on-log uses SE_logOR if supplied, otherwise back-derives it from the
+#' reported CI bounds when both are available, otherwise estimates it from
+#' the reported p-value (when p > 0). If none of those are available it
+#' returns an empty list — there is no information to construct a CI from
+#' the point estimate alone.
+#'
+#' @param OR Odds ratio (point estimate)
+#' @param SE_logOR Standard error of log(OR), if known
+#' @param level Confidence level (default 0.95)
+#' @param cells Numeric length-4 vector c(a, b, c, d) for 2x2 table (optional)
+#' @param p_value Reported p-value (optional, used to back-derive SE)
+#' @return Named list of ci_result objects
+#' @keywords internal
+ci_OR_all <- function(OR, SE_logOR = NULL, level = 0.95,
+                      cells = NULL, p_value = NULL) {
+  if (is.na(OR) || OR <= 0 || !is.finite(OR)) return(list())
+  results <- list()
+  z <- stats::qnorm(1 - (1 - level) / 2)
+  log_or <- log(OR)
+
+  # Method 1: Wald CI on log(OR) using supplied SE
+  if (!is.null(SE_logOR) && length(SE_logOR) == 1L &&
+      !is.na(SE_logOR) && is.finite(SE_logOR) && SE_logOR > 0) {
+    bounds <- c(exp(log_or - z * SE_logOR), exp(log_or + z * SE_logOR))
+    results$wald_log <- ci_result(bounds = bounds, method = "wald_log", success = TRUE)
+  }
+
+  # Method 2: Fisher exact CI from 2x2 cells (when supplied)
+  if (!is.null(cells) && length(cells) == 4L &&
+      all(is.finite(cells)) && all(cells >= 0)) {
+    ft <- tryCatch(
+      stats::fisher.test(matrix(cells, nrow = 2L), conf.level = level),
+      error = function(e) NULL
+    )
+    if (!is.null(ft) && !is.null(ft$conf.int)) {
+      bounds <- c(ft$conf.int[1], ft$conf.int[2])
+      results$fisher_exact <- ci_result(bounds = bounds, method = "fisher_exact", success = TRUE)
+    }
+  }
+
+  # Method 3: Back-derive SE from p-value (Wald inversion).
+  # If p comes from a two-sided test of H0: log(OR) = 0, then z* = log(OR)/SE
+  # and SE = |log(OR)| / qnorm(1 - p/2). Only valid for nonzero log(OR) and p in (0,1).
+  if (length(results) == 0L && !is.null(p_value) && length(p_value) == 1L &&
+      !is.na(p_value) && p_value > 0 && p_value < 1 && abs(log_or) > 1e-9) {
+    z_obs <- stats::qnorm(1 - p_value / 2)
+    if (is.finite(z_obs) && z_obs > 0) {
+      se_est <- abs(log_or) / z_obs
+      bounds <- c(exp(log_or - z * se_est), exp(log_or + z * se_est))
+      results$wald_log_from_p <- ci_result(
+        bounds = bounds, method = "wald_log_from_p", success = TRUE
+      )
+    }
+  }
+
+  results
+}
+
 #' Compute CIs for paired dz via all available methods
 #' @param dz Cohen's dz
 #' @param n Sample size (number of pairs)
@@ -850,6 +943,83 @@ partial_r_from_t <- function(t, df) {
     return(NA_real_)
   }
   t / sqrt(t^2 + df)
+}
+
+#' Wald-on-beta CI for standardized beta (v0.3.5)
+#'
+#' Normal approximation: beta +/- z * SE_beta. SE is supplied directly when
+#' the paper reports SE alongside b/beta; otherwise back-derive from t and df
+#' via SE_beta_approx = beta / t (valid when t = beta / SE_beta).
+#'
+#' @param beta Standardized regression coefficient
+#' @param SE_beta Standard error of standardized beta (optional)
+#' @param t_stat Test statistic (optional, used to back-derive SE)
+#' @param df Residual df (optional, used to bound back-derived SE)
+#' @param level Confidence level
+#' @return Named list of ci_result objects
+#' @keywords internal
+ci_standardized_beta_all <- function(beta, SE_beta = NULL,
+                                     t_stat = NULL, df = NULL,
+                                     level = 0.95) {
+  if (is.na(beta) || !is.finite(beta)) return(list())
+  results <- list()
+  z <- stats::qnorm(1 - (1 - level) / 2)
+  if (!is.null(SE_beta) && length(SE_beta) == 1L &&
+      !is.na(SE_beta) && is.finite(SE_beta) && SE_beta > 0) {
+    bounds <- c(beta - z * SE_beta, beta + z * SE_beta)
+    results$normal_approx <- ci_result(bounds = bounds, method = "normal_approx", success = TRUE)
+  } else if (!is.null(t_stat) && length(t_stat) == 1L &&
+             !is.na(t_stat) && abs(t_stat) > 1e-9) {
+    se_est <- abs(beta) / abs(t_stat)
+    bounds <- c(beta - z * se_est, beta + z * se_est)
+    results$normal_approx_from_t <- ci_result(bounds = bounds, method = "normal_approx_from_t", success = TRUE)
+  }
+  results
+}
+
+#' Fisher-z CI for partial correlation (v0.3.5)
+#'
+#' Same Fisher-z transform used in ci_phi(); df gives N - k - 1.
+#' Treats the partial r as a correlation with effective N = df + 2 (i.e. as
+#' if there were no covariates), which is the standard simplification used
+#' in psychology software when the full residual df is supplied.
+#'
+#' @param r Partial r
+#' @param df Residual df
+#' @param level Confidence level
+#' @return Named list of ci_result objects
+#' @keywords internal
+ci_partial_r_all <- function(r, df, level = 0.95) {
+  if (is.na(r) || is.na(df) || !is.finite(r) || df <= 1) return(list())
+  if (abs(r) >= 1) return(list())
+  N_eff <- df + 2L
+  z_r <- atanh(r)
+  se_z <- 1 / sqrt(N_eff - 3)
+  z <- stats::qnorm(1 - (1 - level) / 2)
+  bounds <- c(tanh(z_r - z * se_z), tanh(z_r + z * se_z))
+  list(fisher_z = ci_result(bounds = bounds, method = "fisher_z", success = TRUE))
+}
+
+#' Fisher-z CI for semi-partial correlation (v0.3.5)
+#'
+#' Same Fisher-z transform applied to the semi-partial r value (an
+#' approximation; the exact distribution of semi-partial r depends on the
+#' full covariance structure). Documented as an approximation.
+#'
+#' @param r Semi-partial r
+#' @param df Residual df
+#' @param level Confidence level
+#' @return Named list of ci_result objects
+#' @keywords internal
+ci_semi_partial_r_all <- function(r, df, level = 0.95) {
+  if (is.na(r) || is.na(df) || !is.finite(r) || df <= 1) return(list())
+  if (abs(r) >= 1) return(list())
+  N_eff <- df + 2L
+  z_r <- atanh(r)
+  se_z <- 1 / sqrt(N_eff - 3)
+  z <- stats::qnorm(1 - (1 - level) / 2)
+  bounds <- c(tanh(z_r - z * se_z), tanh(z_r + z * se_z))
+  list(fisher_z_approx = ci_result(bounds = bounds, method = "fisher_z_approx", success = TRUE))
 }
 
 # Semi-partial correlation (r_semi) from t-statistic and R^2

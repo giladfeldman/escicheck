@@ -38,50 +38,20 @@ compare_with_statcheck <- function(text, ...) {
   result
 }
 
-#' Compare effectcheck and statcheck results on a file
+#' Compare effectcheck and statcheck on a file (DEFUNCT in v0.4.0)
 #'
-#' @param path Path to a file (PDF, HTML, DOCX, or text)
-#' @param ... Additional arguments passed to check_file()
-#' @return A tibble with source column
+#' Removed in effectcheck 0.4.0. The text-input variant
+#' [compare_with_statcheck()] is the supported entry point — extract via
+#' docpluck and pass the result.
+#'
+#' @param path Defunct argument.
+#' @param ... Defunct argument.
+#' @return Errors with a migration message.
 #' @export
-#' @examples
-#' \donttest{
-#' tmp <- tempfile(fileext = ".txt")
-#' writeLines("t(28) = 2.21, p = .035, d = 0.80", tmp)
-#' comp <- compare_file_with_statcheck(tmp)
-#' unlink(tmp)
-#' }
+#' @keywords internal
 compare_file_with_statcheck <- function(path, ...) {
-  if (!requireNamespace("statcheck", quietly = TRUE)) {
-    warning("statcheck package not installed. Install with: install.packages('statcheck')")
-    ec <- check_file(path, ...)
-    ec$source <- "effectcheck_only"
-    ec$statcheck_error <- NA_character_
-    result <- ec
-    class(result) <- c("effectcheck_comparison", class(result))
-    return(result)
-  }
-
-  ec <- check_file(path, ...)
-
-  ext <- tolower(tools::file_ext(path))
-  sc <- tryCatch({
-    if (ext == "pdf") {
-      statcheck::checkPDF(path)
-    } else if (ext %in% c("html", "htm")) {
-      statcheck::checkHTML(path)
-    } else {
-      txt <- paste(readLines(path, warn = FALSE), collapse = "\n")
-      statcheck::statcheck(txt)
-    }
-  }, error = function(e) {
-    warning("statcheck failed: ", conditionMessage(e))
-    NULL
-  })
-
-  result <- match_results(ec, sc)
-  class(result) <- c("effectcheck_comparison", class(result))
-  result
+  .Defunct(new = "compare_with_statcheck", package = "effectcheck",
+           msg = .extraction_defunct_msg())
 }
 
 #' Match effectcheck and statcheck results
