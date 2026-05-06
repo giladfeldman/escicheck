@@ -2,32 +2,25 @@
 % Please edit documentation in R/api.R
 \name{checkPDF}
 \alias{checkPDF}
-\title{Check PDF files for statistical consistency}
+\title{Check PDF files for statistical consistency (DEFUNCT)}
 \usage{
 checkPDF(files, try_tables = TRUE, try_ocr = FALSE, messages = TRUE, ...)
 }
 \arguments{
-\item{files}{Character vector of PDF file paths}
+\item{files}{Defunct argument.}
 
-\item{try_tables}{Logical, attempt table extraction (default TRUE)}
+\item{try_tables}{Defunct argument.}
 
-\item{try_ocr}{Logical, attempt OCR for scanned PDFs (default FALSE)}
+\item{try_ocr}{Defunct argument.}
 
-\item{messages}{Logical, show progress messages (default TRUE)}
+\item{messages}{Defunct argument.}
 
-\item{...}{Additional arguments passed to check_text()}
+\item{...}{Defunct argument.}
 }
 \value{
-An effectcheck object with results
+Errors with a migration message.
 }
 \description{
-Checks one or more PDF files for statistical consistency.
-This function is provided for compatibility with statcheck's checkPDF().
+Removed in effectcheck 0.4.0. Extract PDFs via docpluck.
 }
-\examples{
-\dontrun{
-# Requires PDF files
-results <- checkPDF(c("paper1.pdf", "paper2.pdf"))
-summary(results)
-}
-}
+\keyword{internal}

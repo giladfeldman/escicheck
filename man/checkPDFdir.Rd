@@ -2,7 +2,7 @@
 % Please edit documentation in R/api.R
 \name{checkPDFdir}
 \alias{checkPDFdir}
-\title{Check a directory of PDF files}
+\title{Check a directory of PDF files (DEFUNCT)}
 \usage{
 checkPDFdir(
   dir,
@@ -14,29 +14,22 @@ checkPDFdir(
 )
 }
 \arguments{
-\item{dir}{Directory path to scan}
+\item{dir}{Defunct argument.}
 
-\item{subdir}{Logical, recurse into subdirectories (default TRUE)}
+\item{subdir}{Defunct argument.}
 
-\item{try_tables}{Logical, attempt table extraction (default TRUE)}
+\item{try_tables}{Defunct argument.}
 
-\item{try_ocr}{Logical, attempt OCR for scanned PDFs (default FALSE)}
+\item{try_ocr}{Defunct argument.}
 
-\item{messages}{Logical, show progress messages (default TRUE)}
+\item{messages}{Defunct argument.}
 
-\item{...}{Additional arguments passed to check_text()}
+\item{...}{Defunct argument.}
 }
 \value{
-An effectcheck object with results
+Errors with a migration message.
 }
 \description{
-Scans a directory for PDF files and checks all detected statistics.
-This function is provided for compatibility with statcheck's checkPDFdir().
+Removed in effectcheck 0.4.0.
 }
-\examples{
-\dontrun{
-# Requires a directory with PDF files
-results <- checkPDFdir("manuscripts/")
-summary(results)
-}
-}
+\keyword{internal}

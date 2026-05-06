@@ -2,30 +2,23 @@
 % Please edit documentation in R/api.R
 \name{checkHTMLdir}
 \alias{checkHTMLdir}
-\title{Check a directory of HTML files}
+\title{Check a directory of HTML files (DEFUNCT)}
 \usage{
 checkHTMLdir(dir, subdir = TRUE, messages = TRUE, ...)
 }
 \arguments{
-\item{dir}{Directory path to scan}
+\item{dir}{Defunct argument.}
 
-\item{subdir}{Logical, recurse into subdirectories (default TRUE)}
+\item{subdir}{Defunct argument.}
 
-\item{messages}{Logical, show progress messages (default TRUE)}
+\item{messages}{Defunct argument.}
 
-\item{...}{Additional arguments passed to check_text()}
+\item{...}{Defunct argument.}
 }
 \value{
-An effectcheck object with results
+Errors with a migration message.
 }
 \description{
-Scans a directory for HTML files and checks all detected statistics.
-This function is provided for compatibility with statcheck's checkHTMLdir().
+Removed in effectcheck 0.4.0.
 }
-\examples{
-\dontrun{
-# Requires a directory with HTML files
-results <- checkHTMLdir("manuscripts/")
-summary(results)
-}
-}
+\keyword{internal}
