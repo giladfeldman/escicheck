@@ -656,3 +656,70 @@ test_that("multiple z-tests in one sentence are all detected", {
   z_rows <- results[results$test_type == "z", ]
   expect_equal(nrow(z_rows), 4)
 })
+
+# ============================================================================
+# v0.3.6: df_arity_mismatch shadow patterns
+# Permissive patterns that catch malformed-arity stats the strict patterns
+# reject. See docs/superpowers/specs/2026-05-03-deception-detection-design.md.
+# ============================================================================
+
+test_that("F with one df fires df_arity_mismatch", {
+  res <- parse_text("F(48) = 2.31, p = .04.")
+  expect_equal(nrow(res), 1)
+  expect_equal(res$test_type[1], "F")
+  expect_equal(res$df1[1], 48)
+  expect_true(is.na(res$df2[1]))
+  expect_equal(res$stat_value[1], 2.31)
+  expect_true(res$df_arity_mismatch[1])
+})
+
+test_that("t with two dfs fires df_arity_mismatch", {
+  res <- parse_text("t(36, 10) = 5.34, p = .003.")
+  expect_equal(nrow(res), 1)
+  expect_equal(res$test_type[1], "t")
+  expect_equal(res$df1[1], 36)
+  expect_equal(res$df2[1], 10)
+  expect_equal(res$stat_value[1], 5.34)
+  expect_true(res$df_arity_mismatch[1])
+})
+
+test_that("chi-square with two non-N dfs fires df_arity_mismatch", {
+  res <- parse_text("chi2(48, 14) = 12.4, p = .002.")
+  expect_equal(nrow(res), 1)
+  expect_equal(res$test_type[1], "chisq")
+  expect_equal(res$df1[1], 48)
+  expect_equal(res$df2[1], 14)
+  expect_equal(res$stat_value[1], 12.4)
+  expect_true(res$df_arity_mismatch[1])
+})
+
+test_that("chi-square with (df, N=...) is unchanged (strict pattern still wins)", {
+  # Regression guard: chi2(3, N=120) = 12.4 must NOT trigger df_arity_mismatch
+  res <- parse_text("chi2(3, N = 120) = 12.4, p = .006.")
+  expect_equal(nrow(res), 1)
+  expect_equal(res$test_type[1], "chisq")
+  expect_equal(res$df1[1], 3)
+  expect_false(res$df_arity_mismatch[1])
+})
+
+test_that("r with two dfs fires df_arity_mismatch", {
+  res <- parse_text("r(50, 30) = 0.31, p = .03.")
+  expect_equal(nrow(res), 1)
+  expect_equal(res$test_type[1], "r")
+  expect_equal(res$df1[1], 50)
+  expect_equal(res$df2[1], 30)
+  expect_equal(res$stat_value[1], 0.31)
+  expect_true(res$df_arity_mismatch[1])
+})
+
+test_that("strict patterns still set df_arity_mismatch = FALSE", {
+  # Regression guard: ordinary stats must NOT trigger the new flag
+  res_t  <- parse_text("t(99) = 2.50, p = .014.")
+  res_F  <- parse_text("F(2, 87) = 4.12, p = .020.")
+  res_r  <- parse_text("r(48) = 0.42, p = .003.")
+  res_c  <- parse_text("chi2(3) = 7.81, p = .050.")
+  expect_false(res_t$df_arity_mismatch[1])
+  expect_false(res_F$df_arity_mismatch[1])
+  expect_false(res_r$df_arity_mismatch[1])
+  expect_false(res_c$df_arity_mismatch[1])
+})

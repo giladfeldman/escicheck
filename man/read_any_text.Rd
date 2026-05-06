@@ -2,28 +2,23 @@
 % Please edit documentation in R/utils-io.R
 \name{read_any_text}
 \alias{read_any_text}
-\title{Read text from .docx, .html, .txt, or .pdf}
+\title{Read text from .docx, .html, .txt, or .pdf (DEFUNCT in v0.4.0)}
 \usage{
 read_any_text(path, try_tables = TRUE, try_ocr = FALSE)
 }
 \arguments{
 \item{path}{File path}
 
-\item{try_tables}{Logical, attempt table extraction from PDFs (default TRUE)}
+\item{try_tables}{(defunct argument)}
 
-\item{try_ocr}{Logical, attempt OCR for scanned PDFs (default FALSE)}
+\item{try_ocr}{(defunct argument)}
 }
 \value{
-character vector of full text
+Errors with a migration message.
 }
 \description{
-Read text from .docx, .html, .txt, or .pdf
+This function was removed in effectcheck 0.4.0. ESCImate now delegates
+file extraction to \href{https://docpluck.vercel.app}{docpluck}. Extract text
+externally and pass the result to \code{\link[=check_text]{check_text()}}.
 }
-\examples{
-\donttest{
-tmp <- tempfile(fileext = ".txt")
-writeLines("t(28) = 2.21, p = .035, d = 0.80", tmp)
-text <- read_any_text(tmp)
-unlink(tmp)
-}
-}
+\keyword{internal}

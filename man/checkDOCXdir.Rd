@@ -2,29 +2,23 @@
 % Please edit documentation in R/api.R
 \name{checkDOCXdir}
 \alias{checkDOCXdir}
-\title{Check Word documents in a directory}
+\title{Check Word documents in a directory (DEFUNCT)}
 \usage{
 checkDOCXdir(dir, subdir = TRUE, messages = TRUE, ...)
 }
 \arguments{
-\item{dir}{Directory path to scan}
+\item{dir}{Defunct argument.}
 
-\item{subdir}{Logical, recurse into subdirectories (default TRUE)}
+\item{subdir}{Defunct argument.}
 
-\item{messages}{Logical, show progress messages (default TRUE)}
+\item{messages}{Defunct argument.}
 
-\item{...}{Additional arguments passed to check_text()}
+\item{...}{Defunct argument.}
 }
 \value{
-An effectcheck object with results
+Errors with a migration message.
 }
 \description{
-Scans a directory for .docx files and checks all detected statistics.
+Removed in effectcheck 0.4.0.
 }
-\examples{
-\dontrun{
-# Requires a directory with DOCX files
-results <- checkDOCXdir("manuscripts/")
-summary(results)
-}
-}
+\keyword{internal}

@@ -94,19 +94,29 @@ test_that("check_text includes variants_tested", {
   }
 })
 
-test_that("check_files handles multiple files", {
-  # Create temporary test files
-  file1 <- tempfile(fileext = ".txt")
-  file2 <- tempfile(fileext = ".txt")
-  writeLines("t(28) = 2.21, d = 0.80", file1)
-  writeLines("r(50) = 0.34, p < .05", file2)
-  
-  result <- check_files(c(file1, file2))
+test_that("check_files() is defunct in v0.4.0", {
+  # File extraction was moved to docpluck in v0.4.0. The replacement is to
+  # extract via docpluck (or any other extractor) and pass the resulting
+  # text directly to check_text(). check_files() now errors on call.
+  expect_error(
+    check_files("any_path.txt"),
+    regexp = "(Defunct|docpluck|effectcheck v0\\.4)",
+    info = "check_files() should error with the v0.4.0 migration message"
+  )
+})
+
+test_that("check_text() handles equivalent multi-input via concatenation", {
+  # The functional replacement for check_files(c(f1, f2)) is to concatenate
+  # the texts and call check_text() once, or call check_text() per file in
+  # the caller and dplyr::bind_rows() the results.
+  text <- paste(
+    "t(28) = 2.21, d = 0.80",
+    "r(50) = 0.34, p < .05",
+    sep = "\n"
+  )
+  result <- check_text(text)
   expect_true(tibble::is_tibble(result))
-  expect_true("source" %in% names(result))
-  
-  # Cleanup
-  unlink(c(file1, file2))
+  expect_gte(nrow(result), 2L)
 })
 
 # ===========================================================================
@@ -235,4 +245,36 @@ test_that("dz_from_t returns NA for n < 2", {
   expect_true(is.na(effectcheck:::dz_from_t(2.5, -1)))
   # n=2 should still work
   expect_equal(effectcheck:::dz_from_t(2.0, 2), 2.0 / sqrt(2), tolerance = 1e-7)
+})
+
+# ============================================================================
+# v0.3.6: df_arity_mismatch short-circuit in check.R
+# When the parser flags a row as df-arity-mismatched, check.R must skip all
+# computation paths and emit status=NOTE with an explanatory message.
+# ============================================================================
+
+test_that("F(48) check: df_arity_mismatch propagates to status NOTE", {
+  res <- check_text("F(48) = 2.31, p = .04.")
+  expect_equal(nrow(res), 1)
+  expect_true(res$df_arity_mismatch[1])
+  expect_equal(res$status[1], "NOTE")
+  expect_true(is.na(res$p_computed[1]))
+  expect_false(res$decision_error[1])
+  expect_true(grepl("df argument", res$uncertainty_reasons[1], fixed = TRUE))
+})
+
+test_that("t(36, 10) check: df_arity_mismatch propagates to status NOTE", {
+  res <- check_text("t(36, 10) = 5.34, p = .003.")
+  expect_equal(nrow(res), 1)
+  expect_true(res$df_arity_mismatch[1])
+  expect_equal(res$status[1], "NOTE")
+  expect_true(is.na(res$p_computed[1]))
+  expect_false(res$decision_error[1])
+})
+
+test_that("normal F(2, 87) check: df_arity_mismatch FALSE and computation runs", {
+  res <- check_text("F(2, 87) = 4.12, p = .020.")
+  expect_equal(nrow(res), 1)
+  expect_false(res$df_arity_mismatch[1])
+  expect_false(is.na(res$p_computed[1]))
 })

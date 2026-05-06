@@ -2,36 +2,23 @@
 % Please edit documentation in R/api.R
 \name{check_file}
 \alias{check_file}
-\title{EffectCheck API Functions}
+\title{Check a single file for statistical consistency (DEFUNCT)}
 \usage{
 check_file(path, try_tables = TRUE, try_ocr = FALSE, ...)
 }
 \arguments{
-\item{path}{Path to the file (.pdf, .html, .docx, or .txt)}
+\item{path}{Defunct argument.}
 
-\item{try_tables}{Logical, attempt table extraction from PDFs (default TRUE)}
+\item{try_tables}{Defunct argument.}
 
-\item{try_ocr}{Logical, attempt OCR for scanned PDFs (default FALSE)}
+\item{try_ocr}{Defunct argument.}
 
-\item{...}{Additional arguments passed to check_text()}
+\item{...}{Defunct argument.}
 }
 \value{
-An effectcheck object with results
+Errors with a migration message.
 }
 \description{
-This file provides statcheck-compatible API functions for checking
-statistical consistency in APA-style results.
-Check a single file for statistical consistency
+Removed in effectcheck 0.4.0. Use \code{\link[=check_text]{check_text()}} on docpluck-extracted text.
 }
-\details{
-Reads a file and checks all detected statistics for consistency.
-}
-\examples{
-\donttest{
-tmp <- tempfile(fileext = ".txt")
-writeLines("t(28) = 2.21, p = .035, d = 0.80", tmp)
-result <- check_file(tmp)
-print(result)
-unlink(tmp)
-}
-}
+\keyword{internal}
