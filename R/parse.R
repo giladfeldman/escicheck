@@ -1092,6 +1092,20 @@ parse_text <- function(text, context_window_size = 2) {
     effect_reported_decimals <- NA_integer_
     effect_fallback <- FALSE # NEW: Initialize fallback flag (Phase 2F)
 
+    # v0.4.2 (T3): a Cohen's-d-family token counts as an r-test's reported
+    # effect only when it is reported AFTER the r statistic (APA order:
+    # statistic, then effect size). A d-family token positioned BEFORE the r
+    # belongs to a preceding clause -- e.g. a two-analysis abstract sentence
+    # "...(d=0.39[...]) ... (r=-.34[...])" that the test-stat-only sub-chunk
+    # splitter cannot separate. A d co-reported after the r (e.g.
+    # "r(50)=.40, p=.003, d=0.87") is legitimate and still adopted.
+    is_correlation_test <- !is.na(test_type) && test_type == "r"
+    r_stat_pos <- if (is_correlation_test) {
+      regexpr(if (!all(is.na(m_r))) pat_r else pat_r_nodf, s, perl = TRUE)[1]
+    } else {
+      0L
+    }
+
     # Check more specific patterns first (prioritize more specific over more general)
     # f^2 must come BEFORE plain f
     if (!all(is.na(m_f2))) {
@@ -1138,23 +1152,28 @@ parse_text <- function(text, context_window_size = 2) {
       effect_name <- "f"
       effect_reported <- numify(m_bare_f[2])
       effect_reported_decimals <- count_decimal_places(m_bare_f[2])
-    } else if (!all(is.na(m_dz))) {
+    } else if (!all(is.na(m_dz)) &&
+               (!is_correlation_test || regexpr(pat_dz, s, perl = TRUE)[1] > r_stat_pos)) {
       effect_name <- "dz"
       effect_reported <- numify(m_dz[2])
       effect_reported_decimals <- count_decimal_places(m_dz[2])
-    } else if (!all(is.na(m_dav))) {
+    } else if (!all(is.na(m_dav)) &&
+               (!is_correlation_test || regexpr(pat_dav, s, perl = TRUE)[1] > r_stat_pos)) {
       effect_name <- "dav"
       effect_reported <- numify(m_dav[2])
       effect_reported_decimals <- count_decimal_places(m_dav[2])
-    } else if (!all(is.na(m_drm))) {
+    } else if (!all(is.na(m_drm)) &&
+               (!is_correlation_test || regexpr(pat_drm, s, perl = TRUE)[1] > r_stat_pos)) {
       effect_name <- "drm"
       effect_reported <- numify(m_drm[2])
       effect_reported_decimals <- count_decimal_places(m_drm[2])
-    } else if (!all(is.na(m_g))) {
+    } else if (!all(is.na(m_g)) &&
+               (!is_correlation_test || regexpr(pat_g, s, perl = TRUE)[1] > r_stat_pos)) {
       effect_name <- "g"
       effect_reported <- numify(m_g[2])
       effect_reported_decimals <- count_decimal_places(m_g[2])
-    } else if (!all(is.na(m_d))) {
+    } else if (!all(is.na(m_d)) &&
+               (!is_correlation_test || regexpr(pat_d, s, perl = TRUE)[1] > r_stat_pos)) {
       effect_name <- "d"
       effect_reported <- numify(m_d[2])
       effect_reported_decimals <- count_decimal_places(m_d[2])

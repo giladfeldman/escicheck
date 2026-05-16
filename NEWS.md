@@ -1,3 +1,31 @@
+# effectcheck 0.4.2
+
+## Bug fixes
+
+* Correlation (`r`) parsing: a Cohen's-d-family token (`d`/`g`/`dz`/`dav`/`drm`)
+  is now adopted as an `r`-test's reported effect size only when it appears
+  *after* the `r` statistic (APA order: statistic, then effect size). A
+  d-family token positioned *before* the `r` belongs to a preceding clause and
+  is no longer conflated into the `r` result. Previously a two-analysis
+  sentence such as an abstract's "...(d=0.39[0.25, 0.54]) ... (r=-.34[-.43,
+  -.24])" produced a single row pairing the second clause's `r` with the first
+  clause's `d`. A `d` co-reported with the `r` (`r(50)=.40, p=.003, d=0.87`) is
+  still matched. Found by the escicheck-iterate corpus loop on Chen et al.
+  (2023, Collabra).
+
+# effectcheck 0.4.1
+
+## Bug fixes
+
+* t-test sample-size inference: a document-wide ("global text") N that is
+  structurally incompatible with a t-test's degrees of freedom -- e.g. N = 608
+  applied to a t-test with df = 364, where the design requires N = df + 2 -- is
+  now overridden with the df-based N (df + 1 paired / df + 2 otherwise).
+  Previously such a t-test kept the wrong N, producing a wrong recomputed d and
+  a spurious WARN even when the reported effect size was consistent. The Welch
+  branch already did this; the non-Welch branch only flagged it. Found by the
+  escicheck-iterate corpus loop on Chen et al. (2021, JESP) Study 3 t-tests.
+
 # effectcheck 0.4.0
 
 ## Breaking changes — extraction layer removed

@@ -851,16 +851,48 @@ compute_and_compare_one <- function(row,
             )
           )
         } else if (N > max_expected_N + 10) {
-          # N is much larger than expected - flag it but don't override
-          # v0.2.9d: Set flag for Phase 8F downgrade
-          n_much_larger_than_df <- TRUE
-          uncertainty <- c(
-            uncertainty,
-            sprintf(
-              "Reported N (%d) is larger than expected (%.0f-%.0f) for df=%.0f",
-              as.integer(N), min_expected_N, max_expected_N, df1
+          # N is much larger than expected for this df.
+          n_source_val <- if ("N_source" %in% names(row) && !is.na(row$N_source[1])) {
+            row$N_source[1]
+          } else {
+            NA_character_
+          }
+          if (!is.na(n_source_val) && n_source_val == "global_text") {
+            # A global-text N this far above df+2 cannot be the N for this t-test:
+            # the df is structurally authoritative (independent N = df+2, paired
+            # N = df+1). Override with the df-based N, mirroring the Welch-branch
+            # override above. Without this, the recomputed d uses a wrong N and the
+            # result is flagged WARN even though the reported effect is consistent.
+            N_original <- N
+            N <- if (!is.na(canonical_type) && canonical_type %in% c("dz", "dav", "drm")) {
+              df1 + 1
+            } else {
+              df1 + 2
+            }
+            assumptions <- c(
+              assumptions,
+              sprintf(
+                "Global-text N=%d is incompatible with df=%.0f; replaced with N=%.0f inferred from df",
+                as.integer(N_original), df1, N
+              )
             )
-          )
+            uncertainty <- c(
+              uncertainty,
+              "Global-text sample size overridden by df-based N (incompatible with the t-test df)"
+            )
+          } else {
+            # N is much larger than expected but came from a trusted (inline /
+            # adjacent) source - flag it but don't override.
+            # v0.2.9d: Set flag for Phase 8F downgrade
+            n_much_larger_than_df <- TRUE
+            uncertainty <- c(
+              uncertainty,
+              sprintf(
+                "Reported N (%d) is larger than expected (%.0f-%.0f) for df=%.0f",
+                as.integer(N), min_expected_N, max_expected_N, df1
+              )
+            )
+          }
         }
       }
     }
