@@ -113,9 +113,7 @@ test_that("Design inference from context", {
   result <- check_text(text)
   if (nrow(result) > 0) {
     expect_true("design_inferred" %in% names(result))
-    # Should infer "paired" from context
-    if (!is.na(result$design_inferred[1])) {
-      expect_true(result$design_inferred[1] %in% c("paired", "independent", "unclear"))
-    }
+    # "A paired-samples t-test" is a determinate design -- strict assertion.
+    expect_equal(result$design_inferred[1], "paired")
   }
 })

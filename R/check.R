@@ -166,7 +166,7 @@ EFFECT_SIZE_FAMILIES <- list(
   # Cohen's h (proportion-based effect size)
   h = list(
     family = "h",
-    variants = character(0),
+    variants = c("h"),
     alternatives = c("phi"),
     description = "Cohen's h - effect size for comparing proportions"
   ),
@@ -231,6 +231,12 @@ VARIANT_METADATA <- list(
     assumptions = "Repeated measures design",
     when_to_use = "Repeated measures ANOVA contexts",
     formula = "drm \u2248 dz (often used interchangeably)"
+  ),
+  d_onesample = list(
+    name = "Cohen's d (one-sample)",
+    assumptions = "One-sample design: a single mean vs. a fixed reference value",
+    when_to_use = "Test of one mean against a constant (scale midpoint, chance, zero)",
+    formula = "d = t / sqrt(N), with N = df + 1"
   ),
   r = list(
     name = "Pearson r",
@@ -385,6 +391,31 @@ compute_and_compare_one <- function(row,
 
   # Extract as single values to avoid "length = 2 in coercion to logical(1)" errors
   tt <- if (length(row$test_type) > 0) as.character(row$test_type[1]) else NA_character_
+  # Stage 1 / P2: rank correlations (Spearman/Kendall) reuse the entire Pearson
+  # r routing pipeline; only the p-value and CI computations branch on
+  # corr_method. tt_original preserves the label for the output row.
+  tt_original <- tt
+  corr_method <- if (!is.na(tt) && tt %in% c("spearman", "kendall")) tt else "pearson"
+  if (!is.na(tt) && tt %in% c("spearman", "kendall")) tt <- "r"
+
+  # Stage 1 / P3: classify the chi-square sub-type from context so McNemar /
+  # Friedman / goodness-of-fit are not silently routed to the phi/V path.
+  chisq_subtype <- NA_character_
+  if (!is.na(tt) && tt == "chisq") {
+    cs_ctx <- tolower(paste(
+      c(if ("context_window" %in% names(row)) as.character(row$context_window[1]) else "",
+        if ("raw_text" %in% names(row)) as.character(row$raw_text[1]) else ""),
+      collapse = " "))
+    chisq_subtype <- if (isTRUE(grepl("mcnemar", cs_ctx, fixed = TRUE))) {
+      "mcnemar"
+    } else if (isTRUE(grepl("friedman", cs_ctx, fixed = TRUE))) {
+      "friedman"
+    } else if (isTRUE(grepl("goodness", cs_ctx, fixed = TRUE))) {
+      "gof"
+    } else {
+      "contingency"
+    }
+  }
   df1 <- if (length(row$df1) > 0) as.numeric(row$df1[1]) else NA_real_
   df2 <- if ("df2" %in% names(row) && length(row$df2) > 0) as.numeric(row$df2[1]) else NA_real_
   stat <- if (length(row$stat_value) > 0) as.numeric(row$stat_value[1]) else NA_real_
@@ -481,7 +512,7 @@ compute_and_compare_one <- function(row,
       location = if ("location" %in% names(row) && length(row$location) > 0) row$location[1] else NA_integer_,
       raw_text = if ("raw_text" %in% names(row) && length(row$raw_text) > 0) row$raw_text[1] else "",
       context_window = if ("context_window" %in% names(row) && length(row$context_window) > 0) row$context_window[1] else "",
-      test_type = tt,
+      test_type = tt_original,
       df1 = df1,
       df2 = df2,
       stat_value = stat,
@@ -712,8 +743,8 @@ compute_and_compare_one <- function(row,
     t = c("d", "g", "dz", "dav", "drm", "r"), # t-tests: d family, g family, r
     F = c("eta2", "etap2", "omega2", "cohens_f", "R2", "f2"), # F-tests: ANOVA effects
     r = c("r", "R2"), # Correlation tests
-    chisq = c("phi", "V"), # Chi-square tests
-    z = c("r", "d", "g", "beta"), # z-tests: various
+    chisq = c("phi", "V", "h"), # Chi-square tests (h: one-proportion / GOF chi-square)
+    z = c("r", "d", "g", "beta", "h"), # z-tests: various, incl. two-proportion h
     regression = c("beta", "partial_r", "R2", "f2", "d", "r"), # Regression coefficients
     U = c("rank_biserial_r", "cliffs_delta"), # Mann-Whitney U
     W = c("rank_biserial_r"), # Wilcoxon W
@@ -851,16 +882,48 @@ compute_and_compare_one <- function(row,
             )
           )
         } else if (N > max_expected_N + 10) {
-          # N is much larger than expected - flag it but don't override
-          # v0.2.9d: Set flag for Phase 8F downgrade
-          n_much_larger_than_df <- TRUE
-          uncertainty <- c(
-            uncertainty,
-            sprintf(
-              "Reported N (%d) is larger than expected (%.0f-%.0f) for df=%.0f",
-              as.integer(N), min_expected_N, max_expected_N, df1
+          # N is much larger than expected for this df.
+          n_source_val <- if ("N_source" %in% names(row) && !is.na(row$N_source[1])) {
+            row$N_source[1]
+          } else {
+            NA_character_
+          }
+          if (!is.na(n_source_val) && n_source_val == "global_text") {
+            # A global-text N this far above df+2 cannot be the N for this t-test:
+            # the df is structurally authoritative (independent N = df+2, paired
+            # N = df+1). Override with the df-based N, mirroring the Welch-branch
+            # override above. Without this, the recomputed d uses a wrong N and the
+            # result is flagged WARN even though the reported effect is consistent.
+            N_original <- N
+            N <- if (!is.na(canonical_type) && canonical_type %in% c("dz", "dav", "drm")) {
+              df1 + 1
+            } else {
+              df1 + 2
+            }
+            assumptions <- c(
+              assumptions,
+              sprintf(
+                "Global-text N=%d is incompatible with df=%.0f; replaced with N=%.0f inferred from df",
+                as.integer(N_original), df1, N
+              )
             )
-          )
+            uncertainty <- c(
+              uncertainty,
+              "Global-text sample size overridden by df-based N (incompatible with the t-test df)"
+            )
+          } else {
+            # N is much larger than expected but came from a trusted (inline /
+            # adjacent) source - flag it but don't override.
+            # v0.2.9d: Set flag for Phase 8F downgrade
+            n_much_larger_than_df <- TRUE
+            uncertainty <- c(
+              uncertainty,
+              sprintf(
+                "Reported N (%d) is larger than expected (%.0f-%.0f) for df=%.0f",
+                as.integer(N), min_expected_N, max_expected_N, df1
+              )
+            )
+          }
         }
       }
     }
@@ -1371,13 +1434,44 @@ compute_and_compare_one <- function(row,
         metadata = VARIANT_METADATA$r
       )
 
-      # Compute CI
+      # Compute CI -- rank correlations use a rank-appropriate interval
+      # (Stage 1 / P2), not the plain Pearson Fisher-z interval.
       n_r <- if (!is.na(df1)) df1 + 2 else N
       if (!is.na(n_r)) {
-        r_ci_result <- ci_r(r_value, n_r, ci_level_used)
-        if (r_ci_result$success) {
-          computed_variants$r$ci <- r_ci_result$bounds
-          computed_variants$r$ci_method <- r_ci_result$method
+        if (corr_method == "spearman") {
+          sc <- ci_spearman(r_value, n_r, ci_level_used)
+          if (!is.na(sc$ci_low)) {
+            computed_variants$r$ci <- c(sc$ci_low, sc$ci_high)
+            computed_variants$r$ci_method <- "spearman_bonett_wright"
+          }
+        } else if (corr_method == "kendall") {
+          kc <- ci_kendall(r_value, n_r, ci_level_used)
+          if (!is.na(kc$ci_low)) {
+            computed_variants$r$ci <- c(kc$ci_low, kc$ci_high)
+            computed_variants$r$ci_method <- "kendall_fisher_z"
+          }
+        } else {
+          r_ci_result <- ci_r(r_value, n_r, ci_level_used)
+          if (r_ci_result$success) {
+            computed_variants$r$ci <- r_ci_result$bounds
+            computed_variants$r$ci_method <- r_ci_result$method
+            # Stage 1 Gap 4: a bare r(df) defaults to Pearson, but the paper
+            # may have used Spearman's rho declared only in a distant Methods
+            # section (out of this chunk's context). rho shares Pearson r's
+            # [-1, 1] scale, so offer the Spearman interval as an alternative
+            # method in the CI candidate pool. Phase 6 multi-method matching
+            # then accepts a reported Spearman CI without a false-positive-
+            # prone document-level reclassification; the row stays labelled
+            # Pearson r and ci_method_match records which method matched.
+            ci_all_r <- list(pearson_fisher_z = list(bounds = r_ci_result$bounds))
+            sc_alt <- tryCatch(ci_spearman(r_value, n_r, ci_level_used),
+                               error = function(e) NULL)
+            if (!is.null(sc_alt) && !is.na(sc_alt$ci_low) && !is.na(sc_alt$ci_high)) {
+              ci_all_r$spearman_bonett_wright <- list(
+                bounds = c(sc_alt$ci_low, sc_alt$ci_high))
+            }
+            computed_variants$r$ci_all <- ci_all_r
+          }
         }
       }
 
@@ -1900,6 +1994,48 @@ compute_and_compare_one <- function(row,
         uncertainty <- c(uncertainty, "ANOVA design unclear (between/within/mixed) \u2014 computed all variants")
       }
     }
+  } else if (tt == "chisq" && !is.na(chisq_subtype) &&
+             chisq_subtype %in% c("friedman", "gof", "mcnemar")) {
+    # ------ CHI-SQUARE SUB-TYPE ROUTING (Stage 1 / P3) ------
+    # McNemar / Friedman / goodness-of-fit chi-squares were silently routed to
+    # the contingency phi/V path, producing a meaningless association effect.
+    # Route each to its correct effect size, or to an honest "cannot verify".
+    if (chisq_subtype == "friedman") {
+      if (!is.na(N) && !is.na(df1) && N > 0 && df1 > 0) {
+        W_val <- kendalls_W_from_chisq(stat, N, df1 + 1)
+        if (!is.na(W_val)) {
+          computed_variants$kendalls_W <- list(
+            value = W_val,
+            metadata = list(
+              name = "Kendall's W",
+              assumptions = "Friedman test: k repeated rankings of N subjects",
+              when_to_use = "Effect size for the Friedman repeated-measures test"
+            ))
+        }
+      } else {
+        uncertainty <- c(uncertainty,
+          "Friedman effect size (Kendall's W) needs N and df - cannot verify")
+      }
+    } else if (chisq_subtype == "gof") {
+      if (!is.na(N) && N > 0 && !is.na(stat) && stat >= 0) {
+        computed_variants$cohens_w <- list(
+          value = sqrt(stat / N),
+          metadata = list(
+            name = "Cohen's w",
+            assumptions = "Goodness-of-fit chi-square against expected frequencies",
+            when_to_use = "Effect size for a one-variable goodness-of-fit test"
+          ))
+      } else {
+        uncertainty <- c(uncertainty,
+          "Goodness-of-fit effect size (Cohen's w) needs N - cannot verify")
+      }
+    } else {
+      # McNemar: the effect size needs the discordant cell counts (b, c) and is
+      # not recoverable from the chi-square alone. Do NOT compute phi/V.
+      uncertainty <- c(uncertainty,
+        "McNemar effect size not recoverable from chi-square alone (needs discordant cell counts)")
+    }
+
   } else if (tt == "chisq") {
     # ------ CHI-SQUARE COMPUTATIONS ------
 
@@ -2192,6 +2328,33 @@ compute_and_compare_one <- function(row,
     }
   } else if (tt == "z") {
     # ------ Z-TEST COMPUTATIONS ------
+
+    # Stage 1 / P6: Cohen's h from a two-proportion z-test. When the chunk
+    # reports two proportions p1 and p2, h is the appropriate effect size.
+    h_src_text <- paste(c(
+      if ("raw_text" %in% names(row)) as.character(row$raw_text[1]) else "",
+      if ("context_window" %in% names(row)) as.character(row$context_window[1]) else ""
+    ), collapse = " ")
+    m_p1 <- regmatches(h_src_text, regexpr("p1\\s*=\\s*[01]?\\.\\d+", h_src_text, perl = TRUE))
+    m_p2 <- regmatches(h_src_text, regexpr("p2\\s*=\\s*[01]?\\.\\d+", h_src_text, perl = TRUE))
+    if (length(m_p1) == 1L && length(m_p2) == 1L) {
+      p1_prop <- suppressWarnings(as.numeric(sub(".*=\\s*", "", m_p1)))
+      p2_prop <- suppressWarnings(as.numeric(sub(".*=\\s*", "", m_p2)))
+      h_val <- h_from_proportions(p1_prop, p2_prop)
+      if (!is.na(h_val)) {
+        h_entry <- list(value = h_val, metadata = list(
+          name = "Cohen's h",
+          assumptions = "Two independent proportions",
+          when_to_use = "Effect size for a difference between two proportions"
+        ))
+        if (!is.na(n1) && !is.na(n2)) {
+          h_ci <- ci_h(p1_prop, p2_prop, n1, n2, ci_level_used)
+          if (!is.na(h_ci$ci_low)) h_entry$ci <- c(h_ci$ci_low, h_ci$ci_high)
+        }
+        computed_variants$h <- h_entry
+      }
+    }
+
     if (!is.na(df1)) {
       beta_val <- tryCatch(standardized_beta_from_t(stat, df1), error = function(e) NA_real_)
       if (!is.na(beta_val)) {
@@ -2610,6 +2773,16 @@ compute_and_compare_one <- function(row,
     } else {
       uncertainty <- c(uncertainty, "Kruskal-Wallis H requires df and N for effect size computation")
     }
+  } else if (tt == "kendall_w") {
+    # ------ KENDALL'S W (coefficient of concordance) ------
+    # A bare Kendall's W is the reported effect size itself. Without the
+    # Friedman chi-square or the rater/item counts there is no independent
+    # quantity to recompute it from, so this is an honest "cannot verify"
+    # rather than the Wilcoxon W mis-route it used to fall into.
+    uncertainty <- c(uncertainty,
+      paste("Kendall's W reported as a standalone coefficient of concordance -",
+            "cannot independently verify without the Friedman chi-square or the",
+            "rater/item counts"))
   }
 
   # ============================================================================
@@ -2644,6 +2817,34 @@ compute_and_compare_one <- function(row,
     }
   }
 
+  # Stage 1 / P7: attach confidence intervals to effect-size variants that had
+  # a point estimate but no CI, so the v0.3.5 CI-audit columns populate.
+  attach_stage1_ci <- function(cv, nm, ci_obj) {
+    if (nm %in% names(cv) && is.null(cv[[nm]]$ci) && isTRUE(ci_obj$success)) {
+      cv[[nm]]$ci <- ci_obj$bounds
+    }
+    cv
+  }
+  if (!is.na(tt) && tt == "F" && !is.na(stat) && !is.na(df1) && !is.na(df2)) {
+    computed_variants <- attach_stage1_ci(computed_variants, "omega2",
+      ci_omega2(stat, df1, df2, ci_level_used))
+    computed_variants <- attach_stage1_ci(computed_variants, "partial_omega2",
+      ci_partial_omega2(stat, df1, df2, ci_level_used))
+    computed_variants <- attach_stage1_ci(computed_variants, "epsilon2_anova",
+      ci_epsilon2(stat, df1, df2, ci_level_used))
+    computed_variants <- attach_stage1_ci(computed_variants, "cohens_f2",
+      ci_f2(stat, df1, df2, ci_level_used))
+    if ("adjusted_R2" %in% names(computed_variants)) {
+      R2_eq <- (stat * df1) / (stat * df1 + df2)
+      computed_variants <- attach_stage1_ci(computed_variants, "adjusted_R2",
+        ci_adjusted_R2(R2_eq, df1 + df2 + 1, df1, df1, df2, ci_level_used))
+    }
+  }
+  if (!is.na(tt) && tt == "chisq" && !is.na(stat) && !is.na(df1) && !is.na(N)) {
+    computed_variants <- attach_stage1_ci(computed_variants, "cohens_w",
+      ci_cohens_w(stat, df1, N, ci_level_used))
+  }
+
   # ============================================================================
   # PHASE 5: Type-matched comparison - find closest SAME-TYPE variant
   # ============================================================================
@@ -2653,6 +2854,10 @@ compute_and_compare_one <- function(row,
   delta_effect_abs <- NA_real_
   ambiguity_level <- "clear"
   ambiguity_reason <- NA_character_
+  # Stage 1 Gap 3: set when Cohen's h is reported on a chi-square row, where h
+  # cannot be recomputed from the chi-square statistic. Suppresses both the
+  # cross-family variant match and the (equally meaningless) CI comparison.
+  h_chisq_unverifiable <- FALSE
 
   # Build list of same-type variants for comparison
   same_type_variants <- list()
@@ -2811,6 +3016,21 @@ compute_and_compare_one <- function(row,
           ambiguity_reason <- paste0("Multiple variants match similarly: ", paste(close_variants, collapse = ", "))
         }
       }
+    } else if (canonical_type == "h" && tt == "chisq") {
+      # Stage 1 Gap 3: Cohen's h was reported as the effect size of a
+      # one-proportion / goodness-of-fit chi-square. h is a function of two
+      # specific proportions and is NOT recoverable from the chi-square
+      # statistic (which aggregates all categories against expected
+      # frequencies). Matching the reported h against the contingency
+      # phi/V/w would be a meaningless cross-family comparison, so leave it
+      # unmatched and report an honest "cannot verify" instead.
+      ambiguity_level <- "clear"
+      h_chisq_unverifiable <- TRUE
+      uncertainty <- c(uncertainty,
+        paste("Cohen's h reported as the effect size of a one-proportion /",
+              "goodness-of-fit chi-square - h is not recoverable from the",
+              "chi-square statistic alone (it requires the two underlying",
+              "proportions), so it cannot be independently verified"))
     } else {
       # No same-type variants computed - fall back to all variants
       ambiguity_level <- "highly_ambiguous"
@@ -2892,8 +3112,11 @@ compute_and_compare_one <- function(row,
     candidates
   }
 
-  if (!is.na(ciL_rep) && !is.na(ciU_rep)) {
+  if (!is.na(ciL_rep) && !is.na(ciU_rep) && !h_chisq_unverifiable) {
     # Gather all CI candidates from matched variant and all same-type variants
+    # (skipped for Stage 1 Gap 3: a reported Cohen's h CI on a chi-square row
+    # has no h CI to compare against - only contingency phi/V/w CIs, which
+    # would produce a spurious mismatch).
     ci_candidates <- list()
 
     # From matched variant (highest priority source)
@@ -3493,6 +3716,26 @@ compute_and_compare_one <- function(row,
 
     if (nchar(context_text) > 0) {
       context_lower <- tolower(context_text)
+      # One-sample patterns checked first: an explicit one-sample t-test must
+      # not be reclassified as paired/independent by a later pattern.
+      one_sample_patterns <- c(
+        "one-sample t", "one sample t",
+        "against the scale midpoint", "against the scale mid-point",
+        "against the midpoint", "against the mid-point",
+        "against chance", "against the chance level",
+        # Stage 1 Gap 1: a mean compared to a constant (a chance baseline or
+        # the scale midpoint) phrased with "than/from/compared to" rather
+        # than "against". None of these substrings match a between-groups
+        # phrase like "higher than the control group" (no constant), so the
+        # one-sample relabel is not over-triggered.
+        "than chance", "from chance", "compared to chance",
+        "relative to chance", "above chance", "below chance",
+        "than the chance level", "from the chance level",
+        "than the midpoint", "than the mid-point",
+        "than the scale midpoint", "than the scale mid-point",
+        "from the midpoint", "from the mid-point",
+        "from the scale midpoint", "from the scale mid-point"
+      )
       paired_patterns <- c(
         "paired", "repeated measures", "within-subjects", "within subjects",
         "same participants", "dependent samples", "pre-post", "before-after"
@@ -3502,7 +3745,9 @@ compute_and_compare_one <- function(row,
         "between-groups", "different groups", "two-sample"
       )
 
-      if (any(sapply(paired_patterns, function(p) grepl(p, context_lower)))) {
+      if (any(sapply(one_sample_patterns, function(p) grepl(p, context_lower)))) {
+        design_inferred <- "one-sample"
+      } else if (any(sapply(paired_patterns, function(p) grepl(p, context_lower)))) {
         design_inferred <- "paired"
       } else if (any(sapply(independent_patterns, function(p) grepl(p, context_lower)))) {
         design_inferred <- "independent"
@@ -3516,6 +3761,14 @@ compute_and_compare_one <- function(row,
       } else if (canonical_type %in% c("d", "g")) {
         design_inferred <- "independent"
       }
+    }
+
+    # One-sample relabel: one-sample d = t / sqrt(N) is numerically the dz
+    # variant, so the variant matcher correctly lands on a paired-family
+    # variant. Relabel it to d_onesample without changing the (correct) value.
+    if (design_inferred == "one-sample" && !is.na(matched_variant) &&
+        matched_variant %in% c("dz", "dav", "drm")) {
+      matched_variant <- "d_onesample"
     }
   } else if (tt == "F") {
     context_text <- ""
@@ -4064,9 +4317,14 @@ compute_and_compare_one <- function(row,
         } else if (tt == "chisq" && !is.na(df1)) {
           stats::pchisq(stat, df = df1, lower.tail = FALSE)
         } else if (tt == "r" && !is.na(df1)) {
-          if (abs(stat) >= 1) {
+          if (corr_method == "kendall") {
+            # Kendall's tau: normal approximation, not the t-from-r formula.
+            p_two <- kendall_pvalue(stat, df1 + 2)
+            if (use_ot) match_one_tailed_p(p_two / 2, p_reported) else p_two
+          } else if (abs(stat) >= 1) {
             if (abs(stat) > 1) NA_real_ else 0
           } else {
+            # Pearson r and Spearman rho share the t-from-r large-sample p.
             t_from_r <- stat * sqrt(df1 / (1 - stat^2))
             if (use_ot) {
               p_upper <- stats::pt(abs(t_from_r), df = df1, lower.tail = FALSE)
@@ -4325,6 +4583,14 @@ compute_and_compare_one <- function(row,
         if (status != "OK") status <- "OK"
       }
     }
+  }
+
+  # Stage 1 Gap 3: Cohen's h reported on a chi-square row is recognised but
+  # cannot be recomputed from the chi-square statistic (it requires the two
+  # underlying proportions). It is neither a verified PASS nor a genuine
+  # discrepancy, so the default WARN is misleading - report it as NOTE.
+  if (h_chisq_unverifiable && status != "NOTE") {
+    status <- "NOTE"
   }
 
   # Extraction-only results: nothing was checked -> SKIP (not analyzed)
@@ -4601,11 +4867,19 @@ compute_and_compare_one <- function(row,
                           "OR", "cramers_v", "V", "phi")
   ci_reported <- !is.na(ciL_rep) && !is.na(ciU_rep)
 
+  # Stage 1 / P2: relabel the matched variant of a rank correlation so the
+  # output names the rank method rather than generic Pearson "r".
+  if (corr_method %in% c("spearman", "kendall") && !is.na(matched_variant) &&
+      matched_variant == "r") {
+    matched_variant <- corr_method
+  }
+
   tibble::tibble(
     location = row$location,
     raw_text = row$raw_text,
     context_window = if ("context_window" %in% names(row)) row$context_window else NA_character_,
-    test_type = tt,
+    test_type = tt_original,
+    chisq_subtype = chisq_subtype,
     df1 = df1,
     df2 = df2,
     stat_value = stat,
@@ -4891,7 +5165,8 @@ compute_and_compare_one <- function(row,
 #' print(result)
 #' summary(result)
 check_text <- function(text,
-                       stats = c("t", "F", "r", "chisq", "z", "U", "W", "H", "regression"),
+                       stats = c("t", "F", "r", "chisq", "z", "U", "W", "H",
+                                 "regression", "spearman", "kendall", "kendall_w"),
                        ci_level = 0.95,
                        alpha = 0.05,
                        one_tailed = FALSE,

@@ -665,6 +665,12 @@ parse_text <- function(text, context_window_size = 2) {
   pat_chi_two_dfs <- "(?:chi-?square|\u03c7\\s*\\^?2|\u03c7\u00b2|Chi-?square|chi2|X\\s*\\^?2|X\u00b2)\\s*\\(\\s*(\\d+(?:\\.\\d+)?)\\s*,\\s*(?![Nn]\\s*=)(\\d+(?:\\.\\d+)?)\\s*\\)\\s*=\\s*([-+]?\\d*\\.?\\d+)"
   pat_r_two_dfs <- "(?<![a-zA-Z])r\\s*\\(\\s*(\\d+(?:\\.\\d+)?)\\s*,\\s*(\\d+(?:\\.\\d+)?)\\s*\\)\\s*=\\s*([-+]?\\d*\\.?\\d+)"
 
+  # Rank-correlation patterns (Stage 1 / P2): Spearman's rho and Kendall's tau
+  # in the symbol-with-df form. A plain r(df) in a Spearman/Kendall context is
+  # reclassified separately in the test-type block below.
+  pat_rho <- "(?:\\brho|\u03c1|\\br_?s\\b)\\s*\\(\\s*(\\d+(?:\\.\\d+)?)\\s*\\)\\s*=\\s*([-+]?\\d*\\.?\\d+)"
+  pat_tau <- "(?:\\btau|\u03c4)\\s*\\(\\s*(\\d+(?:\\.\\d+)?)\\s*\\)\\s*=\\s*([-+]?\\d*\\.?\\d+)"
+
   # Nonparametric test patterns
   # Mann-Whitney U: require co-occurrence with p or z to avoid bare "U" false positives
   pat_U <- "U\\s*=\\s*(\\d+(?:\\.\\d+)?)"
@@ -802,6 +808,8 @@ parse_text <- function(text, context_window_size = 2) {
     m_z <- stringr::str_match(s, pat_z)
     m_r <- stringr::str_match(s, pat_r)
     m_r_nodf <- stringr::str_match(s, pat_r_nodf)
+    m_rho <- stringr::str_match(s, pat_rho)
+    m_tau <- stringr::str_match(s, pat_tau)
     m_chi <- stringr::str_match(s, pat_chi)
     m_chi_nodf <- stringr::str_match(s, pat_chi_nodf)
     m_U <- stringr::str_match(s, pat_U)
@@ -935,6 +943,14 @@ parse_text <- function(text, context_window_size = 2) {
     chi_inline_N <- NA_real_
     df_arity_mismatch <- FALSE
 
+    # Rank-correlation context (Stage 1 / P2): an r(df) reported in a Spearman
+    # or Kendall context must be routed to the rank path, not the Pearson path.
+    rank_ctx <- tolower(paste(c(s, if (exists("context")) context else ""),
+                              collapse = " "))
+    is_kendall_ctx <- isTRUE(grepl("kendall", rank_ctx, fixed = TRUE))
+    is_spearman_ctx <- isTRUE(grepl("spearman", rank_ctx, fixed = TRUE)) ||
+      isTRUE(grepl("rank[ -]order correlation|rank correlation", rank_ctx))
+
     if (!all(is.na(m_t))) {
       test_type <- "t"
       df1 <- numify(m_t[2])
@@ -952,6 +968,23 @@ parse_text <- function(text, context_window_size = 2) {
       df2 <- numify(m_F[3])
       stat_value <- numify(m_F[4])
       stat_value_decimals <- count_decimal_places(m_F[4])
+    } else if (!all(is.na(m_rho)) ||
+               (!all(is.na(m_r)) && is_spearman_ctx && !is_kendall_ctx)) {
+      # Spearman's rho (Stage 1 / P2): symbol form, or an r(df) in a Spearman
+      # context. Group 2 = df, group 3 = coefficient (same arity as pat_r).
+      test_type <- "spearman"
+      m_rank <- if (!all(is.na(m_rho))) m_rho else m_r
+      df1 <- numify(m_rank[2])
+      stat_value <- numify(m_rank[3])
+      stat_value_decimals <- count_decimal_places(m_rank[3])
+    } else if (!all(is.na(m_tau)) ||
+               (!all(is.na(m_r)) && is_kendall_ctx)) {
+      # Kendall's tau (Stage 1 / P2): symbol form, or an r(df) in a Kendall context.
+      test_type <- "kendall"
+      m_rank <- if (!all(is.na(m_tau))) m_tau else m_r
+      df1 <- numify(m_rank[2])
+      stat_value <- numify(m_rank[3])
+      stat_value_decimals <- count_decimal_places(m_rank[3])
     } else if (!all(is.na(m_r))) {
       test_type <- "r"
       df1 <- numify(m_r[2])
@@ -1008,13 +1041,27 @@ parse_text <- function(text, context_window_size = 2) {
         stat_value_decimals <- count_decimal_places(m_U[2])
       }
     } else if (!all(is.na(m_W_stat))) {
-      # Wilcoxon W - require p or z co-occurrence
-      has_p <- !all(is.na(stringr::str_match(s, pat_p)))
-      has_z <- !all(is.na(stringr::str_match(s, pat_z_aux)))
-      if (has_p || has_z) {
-        test_type <- "W"
-        stat_value <- numify(m_W_stat[2])
+      # The bare "W =" token is shared by Wilcoxon's W (a large rank-sum) and
+      # Kendall's W (the coefficient of concordance, mathematically bounded
+      # 0-1). Disambiguate before classifying: a W in [0, 1] reported in a
+      # "Kendall" / "concordance" context is Kendall's W, not Wilcoxon's.
+      w_val <- numify(m_W_stat[2])
+      w_ctx <- tolower(paste(s, context))
+      is_kendall_W <- !is.na(w_val) && w_val >= 0 && w_val <= 1 &&
+        grepl("kendall|concordance", w_ctx) && !grepl("wilcoxon", w_ctx)
+      if (is_kendall_W) {
+        test_type <- "kendall_w"
+        stat_value <- w_val
         stat_value_decimals <- count_decimal_places(m_W_stat[2])
+      } else {
+        # Wilcoxon W - require p or z co-occurrence
+        has_p <- !all(is.na(stringr::str_match(s, pat_p)))
+        has_z <- !all(is.na(stringr::str_match(s, pat_z_aux)))
+        if (has_p || has_z) {
+          test_type <- "W"
+          stat_value <- w_val
+          stat_value_decimals <- count_decimal_places(m_W_stat[2])
+        }
       }
     }
     # z-test is checked last - if U or W consumed the sentence, z is auxiliary
@@ -1092,6 +1139,20 @@ parse_text <- function(text, context_window_size = 2) {
     effect_reported_decimals <- NA_integer_
     effect_fallback <- FALSE # NEW: Initialize fallback flag (Phase 2F)
 
+    # v0.4.2 (T3): a Cohen's-d-family token counts as an r-test's reported
+    # effect only when it is reported AFTER the r statistic (APA order:
+    # statistic, then effect size). A d-family token positioned BEFORE the r
+    # belongs to a preceding clause -- e.g. a two-analysis abstract sentence
+    # "...(d=0.39[...]) ... (r=-.34[...])" that the test-stat-only sub-chunk
+    # splitter cannot separate. A d co-reported after the r (e.g.
+    # "r(50)=.40, p=.003, d=0.87") is legitimate and still adopted.
+    is_correlation_test <- !is.na(test_type) && test_type == "r"
+    r_stat_pos <- if (is_correlation_test) {
+      regexpr(if (!all(is.na(m_r))) pat_r else pat_r_nodf, s, perl = TRUE)[1]
+    } else {
+      0L
+    }
+
     # Check more specific patterns first (prioritize more specific over more general)
     # f^2 must come BEFORE plain f
     if (!all(is.na(m_f2))) {
@@ -1138,23 +1199,28 @@ parse_text <- function(text, context_window_size = 2) {
       effect_name <- "f"
       effect_reported <- numify(m_bare_f[2])
       effect_reported_decimals <- count_decimal_places(m_bare_f[2])
-    } else if (!all(is.na(m_dz))) {
+    } else if (!all(is.na(m_dz)) &&
+               (!is_correlation_test || regexpr(pat_dz, s, perl = TRUE)[1] > r_stat_pos)) {
       effect_name <- "dz"
       effect_reported <- numify(m_dz[2])
       effect_reported_decimals <- count_decimal_places(m_dz[2])
-    } else if (!all(is.na(m_dav))) {
+    } else if (!all(is.na(m_dav)) &&
+               (!is_correlation_test || regexpr(pat_dav, s, perl = TRUE)[1] > r_stat_pos)) {
       effect_name <- "dav"
       effect_reported <- numify(m_dav[2])
       effect_reported_decimals <- count_decimal_places(m_dav[2])
-    } else if (!all(is.na(m_drm))) {
+    } else if (!all(is.na(m_drm)) &&
+               (!is_correlation_test || regexpr(pat_drm, s, perl = TRUE)[1] > r_stat_pos)) {
       effect_name <- "drm"
       effect_reported <- numify(m_drm[2])
       effect_reported_decimals <- count_decimal_places(m_drm[2])
-    } else if (!all(is.na(m_g))) {
+    } else if (!all(is.na(m_g)) &&
+               (!is_correlation_test || regexpr(pat_g, s, perl = TRUE)[1] > r_stat_pos)) {
       effect_name <- "g"
       effect_reported <- numify(m_g[2])
       effect_reported_decimals <- count_decimal_places(m_g[2])
-    } else if (!all(is.na(m_d))) {
+    } else if (!all(is.na(m_d)) &&
+               (!is_correlation_test || regexpr(pat_d, s, perl = TRUE)[1] > r_stat_pos)) {
       effect_name <- "d"
       effect_reported <- numify(m_d[2])
       effect_reported_decimals <- count_decimal_places(m_d[2])
@@ -1300,6 +1366,15 @@ parse_text <- function(text, context_window_size = 2) {
           }
         }
       }
+    }
+
+    # Stage 1 Gap 2: a bare Kendall's W IS its own reported effect size (the
+    # coefficient of concordance), so when no other effect was extracted, the
+    # W value carries through as a kendalls_W effect for check.R to recognise.
+    if (!is.na(test_type) && test_type == "kendall_w" &&
+        is.na(effect_name) && !is.na(stat_value)) {
+      effect_name <- "kendalls_W"
+      effect_reported <- stat_value
     }
 
     # Validate effect size is appropriate for test type (DEPRECATED: let check.R handle it)

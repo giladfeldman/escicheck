@@ -1,3 +1,95 @@
+# effectcheck 0.5.1
+
+Stage 1 validation fixes — four gaps found by validating the v0.5.0 Stage 1
+coverage against six real articles (AI gold generated via the article-finder
+skill).
+
+## Bug fixes
+
+* **One-sample t-test detection** (Gap 1) now covers the "mean vs a constant"
+  family phrased with *than / from / compared to* — e.g. "higher than chance",
+  "differed from the scale midpoint" — not only the "against chance / against
+  the midpoint" forms. A one-sample t-test phrased "...were higher than chance"
+  was still mislabelled `design_inferred = "independent"`, `matched_variant =
+  "dz"`.
+* **Kendall's W** (Gap 2) is no longer misparsed as Wilcoxon's W. The bare
+  `W =` token is shared by Wilcoxon's W (a large rank-sum) and Kendall's W (the
+  coefficient of concordance, bounded 0-1); a `W` in [0, 1] reported in a
+  "Kendall" / "concordance" context is now classified as the new `kendall_w`
+  test type and recognised as a `kendalls_W` effect size.
+* **Cohen's h on a chi-square** (Gap 3) is no longer mis-matched to the
+  contingency phi/V. A one-proportion / goodness-of-fit chi-square that reports
+  Cohen's h as its effect size now yields an honest "cannot verify" NOTE — h is
+  a function of two specific proportions and is not recoverable from the
+  chi-square statistic alone.
+* **Spearman confidence intervals** (Gap 4): a bare `r(df)` correlation now
+  carries the Spearman (Bonett & Wright 2000) interval as an alternative method
+  in the CI candidate pool alongside the Pearson Fisher-z interval. A Spearman
+  correlation whose method was declared only in a distant Methods section no
+  longer draws a spurious CI mismatch. No reclassification occurs, so papers
+  mixing Pearson and Spearman are unaffected; the row stays labelled Pearson r
+  and `ci_method_match` records which method matched.
+
+# effectcheck 0.5.0
+
+Coverage Stage 1 — closes effect-size / test-type gaps from the 2026-05-16
+coverage roadmap (P1, P2, P3, P6, P7).
+
+## New features
+
+* **One-sample t-tests** are now labelled `design_inferred = "one-sample"` with
+  a `d_onesample` matched variant. Previously a one-sample t-test was
+  mislabelled `independent`/`dz` (the recomputed value was correct, since the
+  one-sample d formula `t/sqrt(N)` coincides with `dz`, so only the labels were
+  wrong).
+* **Spearman's rho** and **Kendall's tau** are first-class test types. They are
+  parsed from their symbol forms (`rho(df)=`, `tau(df)=`, Greek symbols) and an
+  `r(df)=` reported in a Spearman/Kendall context is reclassified. Each gets a
+  rank-appropriate p-value (Spearman: t-approximation; Kendall: normal
+  approximation) and confidence interval (Spearman: Bonett & Wright 2000;
+  Kendall: Fisher-z, Fieller et al. 1957) — never the Pearson path.
+* **Chi-square sub-types** are detected (`chisq_subtype` column) and routed
+  correctly: Friedman to Kendall's W, goodness-of-fit to Cohen's w, McNemar to
+  an honest "cannot verify". None are silently given a contingency-table phi/V.
+* **Cohen's h** is computed and verifiable from a two-proportion z-test.
+* **Confidence intervals** now populate for omega-squared, partial
+  omega-squared, epsilon-squared, Cohen's f-squared, adjusted R-squared, and
+  Cohen's w.
+
+## Internal
+
+* New `chisq_subtype` output column.
+* Strict `design_inferred` test assertions: a categorization regression to
+  `"unclear"` now fails the test suite.
+
+# effectcheck 0.4.2
+
+## Bug fixes
+
+* Correlation (`r`) parsing: a Cohen's-d-family token (`d`/`g`/`dz`/`dav`/`drm`)
+  is now adopted as an `r`-test's reported effect size only when it appears
+  *after* the `r` statistic (APA order: statistic, then effect size). A
+  d-family token positioned *before* the `r` belongs to a preceding clause and
+  is no longer conflated into the `r` result. Previously a two-analysis
+  sentence such as an abstract's "...(d=0.39[0.25, 0.54]) ... (r=-.34[-.43,
+  -.24])" produced a single row pairing the second clause's `r` with the first
+  clause's `d`. A `d` co-reported with the `r` (`r(50)=.40, p=.003, d=0.87`) is
+  still matched. Found by the escicheck-iterate corpus loop on Chen et al.
+  (2023, Collabra).
+
+# effectcheck 0.4.1
+
+## Bug fixes
+
+* t-test sample-size inference: a document-wide ("global text") N that is
+  structurally incompatible with a t-test's degrees of freedom -- e.g. N = 608
+  applied to a t-test with df = 364, where the design requires N = df + 2 -- is
+  now overridden with the df-based N (df + 1 paired / df + 2 otherwise).
+  Previously such a t-test kept the wrong N, producing a wrong recomputed d and
+  a spurious WARN even when the reported effect size was consistent. The Welch
+  branch already did this; the non-Welch branch only flagged it. Found by the
+  escicheck-iterate corpus loop on Chen et al. (2021, JESP) Study 3 t-tests.
+
 # effectcheck 0.4.0
 
 ## Breaking changes — extraction layer removed

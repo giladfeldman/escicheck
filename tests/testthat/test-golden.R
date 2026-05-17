@@ -38,10 +38,8 @@ test_that("Golden example 5: Paired t-test", {
   result <- check_text(text)
   expect_true(nrow(result) > 0)
   expect_equal(result$test_type[1], "t")
-  # Should infer paired design
-  if (!is.na(result$design_inferred[1])) {
-    expect_true(result$design_inferred[1] %in% c("paired", "unclear"))
-  }
+  # "paired-samples" is a determinate design -- strict assertion, no "unclear".
+  expect_equal(result$design_inferred[1], "paired")
 })
 
 test_that("Golden example 6: Mixed decimal styles", {
