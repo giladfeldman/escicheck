@@ -26,6 +26,7 @@
     t = "t-test", F = "F-test (ANOVA)", r = "Correlation",
     chisq = "Chi-square", chi2 = "Chi-square", z = "z-test",
     U = "Mann-Whitney U", W = "Wilcoxon W", H = "Kruskal-Wallis H",
+    kendall_w = "Kendall's W (concordance)",
     regression = "Regression"
   )
   if (type %in% names(lookup)) return(lookup[type])

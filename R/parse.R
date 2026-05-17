@@ -529,6 +529,12 @@ parse_text <- function(text, context_window_size = 2) {
   chunks <- unlist(strsplit(text_normalized, "(?<=[\\.!?])\\s+(?=[A-Z]|$)", perl = TRUE))
   chunks <- chunks[nchar(trimws(chunks)) > 0]
 
+  # v0.5.2: an optional subscript label (gof / Pearson / Yates / LR / MH / Wald)
+  # glued or underscore-joined to the chi token -- JASP-style "chi2gof(2)" /
+  # "chi2_Pearson(1)". Shared by the sub-chunk splitter below and by pat_chi /
+  # pat_chi_nodf / pat_chi_two_dfs so every chi path recognises the subscript.
+  chi_sub <- "(?:[\\s_]*(?:[Gg][Oo][Ff]|[Pp]earson|[Yy]ates|[Ll][Rr]|[Mm][Hh]|[Ww]ald))?"
+
   # Sub-chunk splitting: when a sentence contains multiple test statistics,
   # split it so each sub-chunk has exactly one test statistic.
   # This prevents str_match() from silently dropping 2nd/3rd/4th matches.
@@ -539,7 +545,7 @@ parse_text <- function(text, context_window_size = 2) {
     "|(?:^|(?<=\\s|,|;|\\(|\\{))t\\s*=\\s*[-+]?\\.?\\d",  # t = value (bare, for t_nodf; .5 ok)
     "|(?:^|(?<=\\s|,|;|\\(|\\{))r\\s*\\(\\s*\\d",  # r(df)
     "|(?:^|(?<=\\s|,|;|\\(|\\{))(?<![a-zA-Z])r\\s*=\\s*[-+]?\\.?\\d",  # r = value (bare, for r_nodf; .45 ok)
-    "|(?:chi-?square|\u03c7\\s*\\^?2|Chi-?square|chi2|X\\s*\\^?2)\\s*[\\(\\[]\\s*\\d",
+    "|(?:chi-?square|\u03c7\\s*\\^?2|Chi-?square|chi2|X\\s*\\^?2)", chi_sub, "\\s*[\\(\\[]\\s*\\d",
     "|(?:^|(?<=\\s|,|;|\\(|\\{))H\\s*\\(\\s*\\d",  # H(df)
     "|(?:^|(?<=\\s|,|;|\\(|\\{))(?:Sobel\\s+)?[Zz]\\s*=\\s*[-+]?\\.?\\d",  # z = value, Sobel Z = value; .5 ok
     "|(?:^|(?<=\\s|,|;|\\(|\\{))U\\s*=\\s*\\d",    # U = value
@@ -651,9 +657,11 @@ parse_text <- function(text, context_window_size = 2) {
   # Chi-square: chi-square(df) = value, \u03c7\u00b2(df) = value, Chi-square(df)=value
   # Also match: \u03c72, chi2, X2, X\u00b2
   # APA format includes optional N inside parens: \u03c7\u00b2(2, N = 150) = 8.73
-  pat_chi <- "(?:chi-?square|\u03c7\\s*\\^?2|\u03c7\u00b2|Chi-?square|chi2|X\\s*\\^?2|X\u00b2)\\s*\\(\\s*(\\d+(?:\\.\\d+)?)\\s*(?:,\\s*[Nn]\\s*=\\s*([\\d,]+))?\\s*\\)\\s*=\\s*([-+]?\\d*\\.?\\d+)"
+  # chi_sub (defined above, shared with the sub-chunk splitter) allows a
+  # JASP-style subscript label glued to the chi token.
+  pat_chi <- paste0("(?:chi-?square|\u03c7\\s*\\^?2|\u03c7\u00b2|Chi-?square|chi2|X\\s*\\^?2|X\u00b2)", chi_sub, "\\s*\\(\\s*(\\d+(?:\\.\\d+)?)\\s*(?:,\\s*[Nn]\\s*=\\s*([\\d,]+))?\\s*\\)\\s*=\\s*([-+]?\\d*\\.?\\d+)")
   # Chi-square without parenthesized df: chi2 = 27.04, df = 1 (or chi2(N = 100) = 5.03)
-  pat_chi_nodf <- "(?:chi-?square|\u03c7\\s*\\^?2|\u03c7\u00b2|Chi-?square|chi2|X\\s*\\^?2|X\u00b2)\\s*=\\s*([-+]?\\d*\\.?\\d+)"
+  pat_chi_nodf <- paste0("(?:chi-?square|\u03c7\\s*\\^?2|\u03c7\u00b2|Chi-?square|chi2|X\\s*\\^?2|X\u00b2)", chi_sub, "\\s*=\\s*([-+]?\\d*\\.?\\d+)")
 
   # v0.3.6: Shadow patterns for df_arity_mismatch detection.
   # These run only when the strict patterns above fail (see dispatch chain
@@ -662,8 +670,14 @@ parse_text <- function(text, context_window_size = 2) {
   # See docs/superpowers/specs/2026-05-03-deception-detection-design.md sec 5.
   pat_F_one_df <- "F\\s*[\\(\\[]\\s*(\\d+(?:\\.\\d+)?)\\s*[\\)\\]]\\s*=\\s*([-+]?\\d*\\.?\\d+)"
   pat_t_two_dfs <- "\\bt\\s*\\(\\s*(\\d+(?:\\.\\d+)?)\\s*,\\s*(\\d+(?:\\.\\d+)?)\\s*\\)\\s*=\\s*([-+]?\\d*\\.?\\d+)"
-  pat_chi_two_dfs <- "(?:chi-?square|\u03c7\\s*\\^?2|\u03c7\u00b2|Chi-?square|chi2|X\\s*\\^?2|X\u00b2)\\s*\\(\\s*(\\d+(?:\\.\\d+)?)\\s*,\\s*(?![Nn]\\s*=)(\\d+(?:\\.\\d+)?)\\s*\\)\\s*=\\s*([-+]?\\d*\\.?\\d+)"
+  pat_chi_two_dfs <- paste0("(?:chi-?square|\u03c7\\s*\\^?2|\u03c7\u00b2|Chi-?square|chi2|X\\s*\\^?2|X\u00b2)", chi_sub, "\\s*\\(\\s*(\\d+(?:\\.\\d+)?)\\s*,\\s*(?![Nn]\\s*=)(\\d+(?:\\.\\d+)?)\\s*\\)\\s*=\\s*([-+]?\\d*\\.?\\d+)")
   pat_r_two_dfs <- "(?<![a-zA-Z])r\\s*\\(\\s*(\\d+(?:\\.\\d+)?)\\s*,\\s*(\\d+(?:\\.\\d+)?)\\s*\\)\\s*=\\s*([-+]?\\d*\\.?\\d+)"
+
+  # Rank-correlation patterns (Stage 1 / P2): Spearman's rho and Kendall's tau
+  # in the symbol-with-df form. A plain r(df) in a Spearman/Kendall context is
+  # reclassified separately in the test-type block below.
+  pat_rho <- "(?:\\brho|\u03c1|\\br_?s\\b)\\s*\\(\\s*(\\d+(?:\\.\\d+)?)\\s*\\)\\s*=\\s*([-+]?\\d*\\.?\\d+)"
+  pat_tau <- "(?:\\btau|\u03c4)\\s*\\(\\s*(\\d+(?:\\.\\d+)?)\\s*\\)\\s*=\\s*([-+]?\\d*\\.?\\d+)"
 
   # Nonparametric test patterns
   # Mann-Whitney U: require co-occurrence with p or z to avoid bare "U" false positives
@@ -683,11 +697,21 @@ parse_text <- function(text, context_window_size = 2) {
   pat_p <- "\\b[pP]\\s*([<=>]{1,2})\\s*(0?\\.[0-9]+|[01]\\.[0-9]+|[01])"
   # Scientific notation p-values: p < 10^-15, p < 10-12 (PDF strips ^ in exponent)
   pat_p_sci <- "\\b[pP]\\s*([<=>]{1,2})\\s*10\\s*\\^?\\s*[-\u2212](\\d+)"
+  # v0.5.3: scientific E-notation p-values -- p = 2.572e-08, p = 1.2e-3 (the
+  # form R / JASP / Python emit). pat_p rejects these (the mantissa is not a
+  # [01].x number) and pat_p_sci only handles the "10^-N" form. The whole
+  # mantissa+exponent number is captured, then converted to a decimal string.
+  # (normalize_text has already folded Unicode minus U+2212 to ASCII '-', so an
+  # ASCII hyphen in the exponent suffices -- same assumption pat_p relies on.)
+  pat_p_enote <- "\\b[pP]\\s*([<=>]{1,2})\\s*(\\d+(?:\\.\\d+)?[eE]\\s*-\\s*\\d+)"
   # "Not significant" notation: "ns", "n.s.", "NS" (only after comma/semicolon)
   pat_p_ns <- "[,;]\\s*(?:ns\\.?|n\\.s\\.?|NS|N\\.S\\.?)(?=[\\s.,;)]|$)"
   # N regex: restrict to word boundary and look for nearby equals
   # Belt-and-suspenders: also capture comma-thousands in case any slip through normalization
-  pat_N  <- "\\bN\\s*=\\s*(\\d[\\d,]*\\d|\\d+)"
+  # v0.5.5: also accept "nobs" (the JASP "number of observations" token = total
+  # N). Bare lowercase "n =" is intentionally NOT matched -- it is commonly a
+  # per-group size, and matching it would mis-read a group n as the total N.
+  pat_N  <- "\\b(?:N|nobs)\\s*=\\s*(\\d[\\d,]*\\d|\\d+)"
   pat_n1 <- "\\bn1\\s*=\\s*(\\d[\\d,]*\\d|\\d+)"
   pat_n2 <- "\\bn2\\s*=\\s*(\\d[\\d,]*\\d|\\d+)"
   pat_dims <- "(\\d+)\\s*[x\u00d7]\\s*(\\d+)"
@@ -802,6 +826,8 @@ parse_text <- function(text, context_window_size = 2) {
     m_z <- stringr::str_match(s, pat_z)
     m_r <- stringr::str_match(s, pat_r)
     m_r_nodf <- stringr::str_match(s, pat_r_nodf)
+    m_rho <- stringr::str_match(s, pat_rho)
+    m_tau <- stringr::str_match(s, pat_tau)
     m_chi <- stringr::str_match(s, pat_chi)
     m_chi_nodf <- stringr::str_match(s, pat_chi_nodf)
     m_U <- stringr::str_match(s, pat_U)
@@ -810,6 +836,7 @@ parse_text <- function(text, context_window_size = 2) {
 
     # Match p-values (try scientific notation first, then standard)
     m_p_sci <- stringr::str_match(s, pat_p_sci)
+    m_p_enote <- stringr::str_match(s, pat_p_enote)
     m_p <- stringr::str_match(s, pat_p)
     # If scientific notation p matched, convert to standard format for downstream use
     if (!all(is.na(m_p_sci))) {
@@ -818,6 +845,16 @@ parse_text <- function(text, context_window_size = 2) {
       sci_val <- format(10^(-sci_exp), scientific = FALSE)
       # Override m_p with synthesized match: symbol from original, value as decimal
       m_p <- matrix(c(m_p_sci[1], m_p_sci[2], sci_val), nrow = 1)
+    }
+    # v0.5.3: E-notation p (p = 2.572e-08) -- pat_p cannot match it. Synthesize
+    # m_p with the value as a plain-decimal string; this takes precedence over
+    # any partial pat_p match of the bare mantissa.
+    if (!all(is.na(m_p_enote))) {
+      enote_num <- suppressWarnings(as.numeric(gsub("\\s", "", m_p_enote[3])))
+      if (!is.na(enote_num) && enote_num >= 0 && enote_num <= 1) {
+        m_p <- matrix(c(m_p_enote[1], m_p_enote[2],
+                        format(enote_num, scientific = FALSE)), nrow = 1)
+      }
     }
 
     # Check for "ns" (not significant) notation when no numeric p-value found
@@ -935,6 +972,14 @@ parse_text <- function(text, context_window_size = 2) {
     chi_inline_N <- NA_real_
     df_arity_mismatch <- FALSE
 
+    # Rank-correlation context (Stage 1 / P2): an r(df) reported in a Spearman
+    # or Kendall context must be routed to the rank path, not the Pearson path.
+    rank_ctx <- tolower(paste(c(s, if (exists("context")) context else ""),
+                              collapse = " "))
+    is_kendall_ctx <- isTRUE(grepl("kendall", rank_ctx, fixed = TRUE))
+    is_spearman_ctx <- isTRUE(grepl("spearman", rank_ctx, fixed = TRUE)) ||
+      isTRUE(grepl("rank[ -]order correlation|rank correlation", rank_ctx))
+
     if (!all(is.na(m_t))) {
       test_type <- "t"
       df1 <- numify(m_t[2])
@@ -952,6 +997,23 @@ parse_text <- function(text, context_window_size = 2) {
       df2 <- numify(m_F[3])
       stat_value <- numify(m_F[4])
       stat_value_decimals <- count_decimal_places(m_F[4])
+    } else if (!all(is.na(m_rho)) ||
+               (!all(is.na(m_r)) && is_spearman_ctx && !is_kendall_ctx)) {
+      # Spearman's rho (Stage 1 / P2): symbol form, or an r(df) in a Spearman
+      # context. Group 2 = df, group 3 = coefficient (same arity as pat_r).
+      test_type <- "spearman"
+      m_rank <- if (!all(is.na(m_rho))) m_rho else m_r
+      df1 <- numify(m_rank[2])
+      stat_value <- numify(m_rank[3])
+      stat_value_decimals <- count_decimal_places(m_rank[3])
+    } else if (!all(is.na(m_tau)) ||
+               (!all(is.na(m_r)) && is_kendall_ctx)) {
+      # Kendall's tau (Stage 1 / P2): symbol form, or an r(df) in a Kendall context.
+      test_type <- "kendall"
+      m_rank <- if (!all(is.na(m_tau))) m_tau else m_r
+      df1 <- numify(m_rank[2])
+      stat_value <- numify(m_rank[3])
+      stat_value_decimals <- count_decimal_places(m_rank[3])
     } else if (!all(is.na(m_r))) {
       test_type <- "r"
       df1 <- numify(m_r[2])
@@ -1008,13 +1070,27 @@ parse_text <- function(text, context_window_size = 2) {
         stat_value_decimals <- count_decimal_places(m_U[2])
       }
     } else if (!all(is.na(m_W_stat))) {
-      # Wilcoxon W - require p or z co-occurrence
-      has_p <- !all(is.na(stringr::str_match(s, pat_p)))
-      has_z <- !all(is.na(stringr::str_match(s, pat_z_aux)))
-      if (has_p || has_z) {
-        test_type <- "W"
-        stat_value <- numify(m_W_stat[2])
+      # The bare "W =" token is shared by Wilcoxon's W (a large rank-sum) and
+      # Kendall's W (the coefficient of concordance, mathematically bounded
+      # 0-1). Disambiguate before classifying: a W in [0, 1] reported in a
+      # "Kendall" / "concordance" context is Kendall's W, not Wilcoxon's.
+      w_val <- numify(m_W_stat[2])
+      w_ctx <- tolower(paste(s, context))
+      is_kendall_W <- !is.na(w_val) && w_val >= 0 && w_val <= 1 &&
+        grepl("kendall|concordance", w_ctx) && !grepl("wilcoxon", w_ctx)
+      if (is_kendall_W) {
+        test_type <- "kendall_w"
+        stat_value <- w_val
         stat_value_decimals <- count_decimal_places(m_W_stat[2])
+      } else {
+        # Wilcoxon W - require p or z co-occurrence
+        has_p <- !all(is.na(stringr::str_match(s, pat_p)))
+        has_z <- !all(is.na(stringr::str_match(s, pat_z_aux)))
+        if (has_p || has_z) {
+          test_type <- "W"
+          stat_value <- w_val
+          stat_value_decimals <- count_decimal_places(m_W_stat[2])
+        }
       }
     }
     # z-test is checked last - if U or W consumed the sentence, z is auxiliary
@@ -1085,12 +1161,37 @@ parse_text <- function(text, context_window_size = 2) {
     if (!is.na(test_type) && test_type == "t" && !is.na(b_coeff) && !is.na(SE_coeff)) {
       test_type <- "regression"
     }
+    # v0.5.6 (T5): a bare regression line -- "b = .., SE = .., p = .." with NO
+    # test statistic of its own. Create a regression result and synthesize the
+    # coefficient t = b / SE. All three of b, SE and a reported p are required,
+    # so an incidental b/SE co-occurrence cannot spuriously create a result; df
+    # is unknown (no test statistic was reported), so the downstream check is a
+    # NOTE rather than a full verification.
+    if (is.na(test_type) && !is.na(b_coeff) && !is.na(SE_coeff) &&
+        SE_coeff != 0 && !all(is.na(m_p))) {
+      test_type <- "regression"
+      stat_value <- b_coeff / SE_coeff
+    }
 
     # Extract effect size (prioritize by specificity)
     effect_name <- NA_character_
     effect_reported <- NA_real_
     effect_reported_decimals <- NA_integer_
     effect_fallback <- FALSE # NEW: Initialize fallback flag (Phase 2F)
+
+    # v0.4.2 (T3): a Cohen's-d-family token counts as an r-test's reported
+    # effect only when it is reported AFTER the r statistic (APA order:
+    # statistic, then effect size). A d-family token positioned BEFORE the r
+    # belongs to a preceding clause -- e.g. a two-analysis abstract sentence
+    # "...(d=0.39[...]) ... (r=-.34[...])" that the test-stat-only sub-chunk
+    # splitter cannot separate. A d co-reported after the r (e.g.
+    # "r(50)=.40, p=.003, d=0.87") is legitimate and still adopted.
+    is_correlation_test <- !is.na(test_type) && test_type == "r"
+    r_stat_pos <- if (is_correlation_test) {
+      regexpr(if (!all(is.na(m_r))) pat_r else pat_r_nodf, s, perl = TRUE)[1]
+    } else {
+      0L
+    }
 
     # Check more specific patterns first (prioritize more specific over more general)
     # f^2 must come BEFORE plain f
@@ -1138,23 +1239,28 @@ parse_text <- function(text, context_window_size = 2) {
       effect_name <- "f"
       effect_reported <- numify(m_bare_f[2])
       effect_reported_decimals <- count_decimal_places(m_bare_f[2])
-    } else if (!all(is.na(m_dz))) {
+    } else if (!all(is.na(m_dz)) &&
+               (!is_correlation_test || regexpr(pat_dz, s, perl = TRUE)[1] > r_stat_pos)) {
       effect_name <- "dz"
       effect_reported <- numify(m_dz[2])
       effect_reported_decimals <- count_decimal_places(m_dz[2])
-    } else if (!all(is.na(m_dav))) {
+    } else if (!all(is.na(m_dav)) &&
+               (!is_correlation_test || regexpr(pat_dav, s, perl = TRUE)[1] > r_stat_pos)) {
       effect_name <- "dav"
       effect_reported <- numify(m_dav[2])
       effect_reported_decimals <- count_decimal_places(m_dav[2])
-    } else if (!all(is.na(m_drm))) {
+    } else if (!all(is.na(m_drm)) &&
+               (!is_correlation_test || regexpr(pat_drm, s, perl = TRUE)[1] > r_stat_pos)) {
       effect_name <- "drm"
       effect_reported <- numify(m_drm[2])
       effect_reported_decimals <- count_decimal_places(m_drm[2])
-    } else if (!all(is.na(m_g))) {
+    } else if (!all(is.na(m_g)) &&
+               (!is_correlation_test || regexpr(pat_g, s, perl = TRUE)[1] > r_stat_pos)) {
       effect_name <- "g"
       effect_reported <- numify(m_g[2])
       effect_reported_decimals <- count_decimal_places(m_g[2])
-    } else if (!all(is.na(m_d))) {
+    } else if (!all(is.na(m_d)) &&
+               (!is_correlation_test || regexpr(pat_d, s, perl = TRUE)[1] > r_stat_pos)) {
       effect_name <- "d"
       effect_reported <- numify(m_d[2])
       effect_reported_decimals <- count_decimal_places(m_d[2])
@@ -1300,6 +1406,15 @@ parse_text <- function(text, context_window_size = 2) {
           }
         }
       }
+    }
+
+    # Stage 1 Gap 2: a bare Kendall's W IS its own reported effect size (the
+    # coefficient of concordance), so when no other effect was extracted, the
+    # W value carries through as a kendalls_W effect for check.R to recognise.
+    if (!is.na(test_type) && test_type == "kendall_w" &&
+        is.na(effect_name) && !is.na(stat_value)) {
+      effect_name <- "kendalls_W"
+      effect_reported <- stat_value
     }
 
     # Validate effect size is appropriate for test type (DEPRECATED: let check.R handle it)

@@ -81,9 +81,11 @@ test_that("check_text tracks uncertainty", {
 test_that("check_text includes design_inferred", {
   text <- "t(28) = 2.21, d = 0.80"
   result <- check_text(text)
-  if (nrow(result) > 0) {
-    expect_true("design_inferred" %in% names(result))
-  }
+  expect_true("design_inferred" %in% names(result))
+  # A reported Cohen's d with no design keyword is inferred as independent.
+  # Strict assertion (Stage 1 P-test hardening): a categorization regression
+  # to "unclear" must fail the suite.
+  expect_equal(result$design_inferred[1], "independent")
 })
 
 test_that("check_text includes variants_tested", {

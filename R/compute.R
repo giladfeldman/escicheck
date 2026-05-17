@@ -1465,3 +1465,218 @@ ci_cohens_f <- function(F_val, df1, df2, level = 0.95) {
   }
   ci_result(bounds = bounds, method = "from_eta2_ncf", success = TRUE)
 }
+
+# ============================================================================
+# Stage 1 / P2: Rank-correlation inference (Spearman's rho, Kendall's tau)
+# ============================================================================
+
+#' P-value for Spearman's rho (large-sample t approximation)
+#'
+#' Matches the approximation that `cor.test(method = "spearman",
+#' exact = FALSE)` uses: `t = rho * sqrt((n - 2) / (1 - rho^2))` on n - 2 df.
+#'
+#' @param rho Spearman correlation coefficient.
+#' @param n Sample size.
+#' @return Two-sided p-value, or NA if inputs are unusable.
+#' @keywords internal
+spearman_pvalue <- function(rho, n) {
+  if (is.na(rho) || is.na(n) || n < 4 || abs(rho) >= 1) return(NA_real_)
+  df <- n - 2
+  t_stat <- rho * sqrt(df / (1 - rho^2))
+  2 * stats::pt(-abs(t_stat), df)
+}
+
+#' Confidence interval for Spearman's rho (Bonett & Wright, 2000)
+#'
+#' Fisher z-transform with the Spearman variance correction
+#' `SE = sqrt((1 + rho^2 / 2) / (n - 3))`, distinguishing it from the plain
+#' Pearson Fisher-z interval.
+#'
+#' @param rho Spearman correlation coefficient.
+#' @param n Sample size.
+#' @param conf_level Confidence level.
+#' @return list(ci_low, ci_high).
+#' @keywords internal
+ci_spearman <- function(rho, n, conf_level = 0.95) {
+  if (is.na(rho) || is.na(n) || n < 5 || abs(rho) >= 1) {
+    return(list(ci_low = NA_real_, ci_high = NA_real_))
+  }
+  z <- atanh(rho)
+  se <- sqrt((1 + rho^2 / 2) / (n - 3))
+  zcrit <- stats::qnorm(1 - (1 - conf_level) / 2)
+  list(ci_low = tanh(z - zcrit * se), ci_high = tanh(z + zcrit * se))
+}
+
+#' P-value for Kendall's tau (normal approximation)
+#'
+#' Matches `cor.test(method = "kendall", exact = FALSE)`:
+#' `z = 3 * tau * sqrt(n(n-1)) / sqrt(2(2n+5))`.
+#'
+#' @param tau Kendall correlation coefficient.
+#' @param n Sample size.
+#' @return Two-sided p-value, or NA if inputs are unusable.
+#' @keywords internal
+kendall_pvalue <- function(tau, n) {
+  if (is.na(tau) || is.na(n) || n < 4 || abs(tau) > 1) return(NA_real_)
+  z <- 3 * tau * sqrt(n * (n - 1)) / sqrt(2 * (2 * n + 5))
+  2 * stats::pnorm(-abs(z))
+}
+
+#' Confidence interval for Kendall's tau (Fisher z; Fieller et al., 1957)
+#'
+#' Fisher z-transform with `SE = sqrt(0.437 / (n - 3))`.
+#'
+#' @param tau Kendall correlation coefficient.
+#' @param n Sample size.
+#' @param conf_level Confidence level.
+#' @return list(ci_low, ci_high).
+#' @keywords internal
+ci_kendall <- function(tau, n, conf_level = 0.95) {
+  if (is.na(tau) || is.na(n) || n < 5 || abs(tau) >= 1) {
+    return(list(ci_low = NA_real_, ci_high = NA_real_))
+  }
+  z <- atanh(tau)
+  se <- sqrt(0.437 / (n - 3))
+  zcrit <- stats::qnorm(1 - (1 - conf_level) / 2)
+  list(ci_low = tanh(z - zcrit * se), ci_high = tanh(z + zcrit * se))
+}
+
+# ============================================================================
+# Stage 1 / P6: Cohen's h (effect size for a difference in two proportions)
+# ============================================================================
+
+#' Cohen's h from two proportions
+#'
+#' `h = |2*asin(sqrt(p1)) - 2*asin(sqrt(p2))|` (Cohen, 1988).
+#'
+#' @param p1,p2 Proportions, each in the range 0 to 1.
+#' @return Cohen's h, or NA if either proportion is unusable.
+#' @keywords internal
+h_from_proportions <- function(p1, p2) {
+  if (is.na(p1) || is.na(p2) || p1 < 0 || p1 > 1 || p2 < 0 || p2 > 1) {
+    return(NA_real_)
+  }
+  abs(2 * asin(sqrt(p1)) - 2 * asin(sqrt(p2)))
+}
+
+#' Confidence interval for Cohen's h
+#'
+#' The arcsine transform `phi = 2*asin(sqrt(p))` is variance-stabilising with
+#' variance `1/n`, so the transformed difference has `SE = sqrt(1/n1 + 1/n2)`.
+#'
+#' @param p1,p2 Proportions, each in the range 0 to 1.
+#' @param n1,n2 Group sample sizes.
+#' @param conf_level Confidence level.
+#' @return list(ci_low, ci_high).
+#' @keywords internal
+ci_h <- function(p1, p2, n1, n2, conf_level = 0.95) {
+  if (any(is.na(c(p1, p2, n1, n2))) || n1 < 1 || n2 < 1) {
+    return(list(ci_low = NA_real_, ci_high = NA_real_))
+  }
+  h <- h_from_proportions(p1, p2)
+  if (is.na(h)) return(list(ci_low = NA_real_, ci_high = NA_real_))
+  se <- sqrt(1 / n1 + 1 / n2)
+  zcrit <- stats::qnorm(1 - (1 - conf_level) / 2)
+  list(ci_low = max(0, h - zcrit * se), ci_high = h + zcrit * se)
+}
+
+# ============================================================================
+# Stage 1 / P7: confidence intervals for analytic effect-size families.
+# omega2 / partial omega2 / epsilon2 / f2 are monotone transforms of the
+# variance-explained quantity already CI'd by ci_etap2 (noncentral-F
+# inversion): each ci_etap2 bound is mapped to its equivalent F, then through
+# the existing point-estimate function. adjusted R2 is a monotone transform of
+# R2. Cohen's w uses a noncentral-chi-square inversion (lambda = N * w^2).
+# ============================================================================
+
+# Convert a variance-explained bound (partial eta^2 scale) to its equivalent F.
+.eta_bound_to_F <- function(e, df1, df2) {
+  if (is.na(e) || e < 0 || e >= 1) return(NA_real_)
+  (e * df2) / (df1 * (1 - e))
+}
+
+# Shared: map the ci_etap2 bounds through a point-estimate conversion.
+.ci_from_etap2 <- function(F_val, df1, df2, level, conv) {
+  base <- ci_etap2(F_val, df1, df2, level)
+  if (!isTRUE(base$success)) return(base)
+  bounds <- vapply(base$bounds, function(e) {
+    Fb <- .eta_bound_to_F(e, df1, df2)
+    if (is.na(Fb)) NA_real_ else conv(Fb)
+  }, numeric(1))
+  if (any(is.na(bounds))) return(ci_result(reason = "CI bound not computable"))
+  ci_result(bounds = sort(pmax(0, bounds)), method = "from_etap2_ncf",
+            success = TRUE)
+}
+
+#' CI for omega-squared
+#' @keywords internal
+ci_omega2 <- function(F_val, df1, df2, level = 0.95) {
+  .ci_from_etap2(F_val, df1, df2, level,
+                 function(F) omega2_from_F(F, df1, df2))
+}
+
+#' CI for partial omega-squared
+#' @keywords internal
+ci_partial_omega2 <- function(F_val, df1, df2, level = 0.95) {
+  .ci_from_etap2(F_val, df1, df2, level,
+                 function(F) partial_omega2_from_F(F, df1, df2))
+}
+
+#' CI for epsilon-squared (ANOVA)
+#' @keywords internal
+ci_epsilon2 <- function(F_val, df1, df2, level = 0.95) {
+  .ci_from_etap2(F_val, df1, df2, level,
+                 function(F) epsilon2_anova_from_F(F, df1, df2))
+}
+
+#' CI for Cohen's f-squared
+#' @keywords internal
+ci_f2 <- function(F_val, df1, df2, level = 0.95) {
+  .ci_from_etap2(F_val, df1, df2, level,
+                 function(F) cohens_f2_from_F(F, df1, df2))
+}
+
+#' CI for adjusted R-squared (monotone transform of the R^2 CI)
+#' @keywords internal
+ci_adjusted_R2 <- function(R2, N, k, df1, df2, level = 0.95) {
+  base <- ci_R2_all(R2, df1, df2, level = level)
+  if (length(base) == 0L) return(ci_result(reason = "R2 CI unavailable"))
+  b0 <- base[[1]]$bounds
+  if (is.null(b0) || length(b0) < 2L || any(is.na(b0))) {
+    return(ci_result(reason = "R2 CI unavailable"))
+  }
+  bounds <- vapply(b0, function(r) adjusted_R2_from_R2(r, N, k), numeric(1))
+  ci_result(bounds = sort(bounds), method = "from_R2", success = TRUE)
+}
+
+# Noncentral-chi-square NCP confidence limits (analogue of get_ncp_F).
+.get_ncp_chisq <- function(chisq, df, level = 0.95) {
+  alpha <- 1 - level
+  limits <- c(0, NA_real_)
+  max_lambda <- max(chisq * 4, 1000)
+  f_upper <- function(lam) stats::pchisq(chisq, df, ncp = lam) - alpha / 2
+  ul <- tryCatch(stats::uniroot(f_upper, c(0, max_lambda))$root,
+                 error = function(e) NA_real_)
+  limits[2] <- ul
+  if (stats::pchisq(chisq, df, ncp = 0) > (1 - alpha / 2)) {
+    f_lower <- function(lam) stats::pchisq(chisq, df, ncp = lam) - (1 - alpha / 2)
+    ll <- tryCatch(stats::uniroot(f_lower, c(0, max_lambda))$root,
+                   error = function(e) NA_real_)
+    limits[1] <- ll
+  }
+  limits
+}
+
+#' CI for Cohen's w (noncentral-chi-square inversion; lambda = N * w^2)
+#' @keywords internal
+ci_cohens_w <- function(chisq, df, N, level = 0.95) {
+  if (any(is.na(c(chisq, df, N))) || N <= 0 || df <= 0 || chisq < 0) {
+    return(ci_result(reason = "Missing or invalid parameters"))
+  }
+  lambdas <- .get_ncp_chisq(chisq, df, level)
+  if (any(is.na(lambdas))) {
+    return(ci_result(reason = "Could not converge on NCP"))
+  }
+  bounds <- sqrt(pmax(0, lambdas) / N)
+  ci_result(bounds = sort(bounds), method = "ncchisq_inversion", success = TRUE)
+}
