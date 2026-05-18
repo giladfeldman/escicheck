@@ -2783,6 +2783,17 @@ compute_and_compare_one <- function(row,
       paste("Kendall's W reported as a standalone coefficient of concordance -",
             "cannot independently verify without the Friedman chi-square or the",
             "rater/item counts"))
+  } else if (tt == "dscf") {
+    # ------ DSCF (Dwass-Steel-Critchlow-Fligner) POST-HOC W ------
+    # The DSCF W is the studentized-range statistic of a Kruskal-Wallis
+    # pairwise post-hoc comparison. No standard effect size is recoverable
+    # from the W alone (it needs the full rank data), so this is an honest
+    # "cannot verify" NOTE -- the same conservative route as kendall_w,
+    # rather than the Wilcoxon-W mis-classification it used to fall into.
+    uncertainty <- c(uncertainty,
+      paste("DSCF (Dwass-Steel-Critchlow-Fligner) post-hoc pairwise W reported -",
+            "no standard effect size is recoverable from the W statistic alone;",
+            "cannot independently verify"))
   }
 
   # ============================================================================
@@ -5186,7 +5197,8 @@ compute_and_compare_one <- function(row,
 #' summary(result)
 check_text <- function(text,
                        stats = c("t", "F", "r", "chisq", "z", "U", "W", "H",
-                                 "regression", "spearman", "kendall", "kendall_w"),
+                                 "regression", "spearman", "kendall", "kendall_w",
+                                 "dscf"),
                        ci_level = 0.95,
                        alpha = 0.05,
                        one_tailed = FALSE,

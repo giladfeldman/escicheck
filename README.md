@@ -10,6 +10,13 @@
 
 **EffectCheck** is a conservative, assumption-aware statistical consistency checker for published research results. It parses statistical results across multiple citation styles (APA, Harvard, Frontiers, PLOS ONE, Scientific Reports, Nature Human Behaviour, PeerJ, eLife, PNAS, and more), uses **type-matched comparison** to verify reported effect sizes against computed variants of the **same type**, explicitly flags all assumptions and uncertainty, and validates internal consistency between test statistics, effect sizes, and confidence intervals.
 
+`effectcheck` works on **already-extracted text**. Since v0.4.0 the package no
+longer reads files itself — `check_text()` is the single entry point. To check
+a PDF or Word document, extract its text first (with an external extractor such
+as [docpluck](https://docpluck.vercel.app), or via the
+[ESCIMate web app](https://escimate.app)) and pass the resulting text to
+`check_text()`. See **Input** below.
+
 ## Reference
 
 This package implements effect size computations following the [Guide to Effect Sizes and Confidence Intervals](https://matthewbjane.quarto.pub/) by Jané et al. (2024). The `effectsize` R package is used as the primary computation engine when available.
@@ -27,7 +34,7 @@ This package implements effect size computations following the [Guide to Effect 
 - **Contingency Tables**: Phi (φ), Cramer's V
 - **Regression / GLM**: Standardized β, partial r, semi-partial r, f², R²
 - **Ratio Measures**: OR, RR, IRR
-- **Nonparametric**: Rank-biserial r, Cliff's delta, Kendall's W, ε²
+- **Nonparametric**: Mann-Whitney U, Wilcoxon W, Kruskal-Wallis H, Kendall's W, DSCF post-hoc; rank-biserial r, Cliff's delta, ε²
 
 ### Key Capabilities
 
@@ -39,23 +46,21 @@ This package implements effect size computations following the [Guide to Effect 
 - **Uncertainty framework** that tracks all assumptions and design inferences
 - **Context window extraction** for design inference (±2 sentences)
 - **Decision error detection** (significance reversals) similar to statcheck
-- **statcheck-compatible API** for batch processing of files and directories
+- **statcheck comparison**: `compare_with_statcheck()` runs both tools on the same text and reports agreement
 - **Multiple export formats**: HTML (with expandable sections), CSV, JSON
 - **S3 class with methods**: print, summary, plot, ec_identify, get_variants
 
 ## Installation
 
-### From Source
-
 ```r
-# Install dependencies
-install.packages(c("devtools", "stringr", "stringi", "dplyr", "purrr", 
-                   "tibble", "tidyr", "xml2", "rvest",
-                   "DT", "shiny", "shinythemes", "testthat", "jsonlite"))
-
-# Install effectcheck
+# Install devtools, then install effectcheck from source
+install.packages("devtools")
 devtools::install_local("effectcheck")
 ```
+
+`effectcheck` depends only on common CRAN packages (stringr, stringi, dplyr,
+purrr, tibble, glue, logger); `devtools::install_local()` resolves them
+automatically.
 
 ### Optional Dependencies
 
@@ -70,20 +75,11 @@ For enhanced CI computation:
 ```r
 library(effectcheck)
 
-# Check text directly
+# Check a string of already-extracted text
 text <- "t(28) = 2.21, p = .035, d = 0.80, 95% CI [0.12, 1.48]"
 result <- check_text(text)
 print(result)
 summary(result)
-
-# Check a single file
-result <- check_file("paper.pdf")
-
-# Check multiple files
-results <- check_files(c("paper1.docx", "paper2.html"))
-
-# Check a directory (recursively)
-results <- check_dir("manuscripts/")
 
 # Export results
 render_report(result, "report.html")
@@ -91,20 +87,26 @@ export_csv(result, "results.csv")
 export_json(result, "results.json")
 ```
 
-### statcheck-Compatible API
+### Checking a PDF or Word document
+
+The package itself does not extract text from files. Extract the text first,
+then pass it to `check_text()`:
 
 ```r
-# Check PDF files (like statcheck's checkPDF)
-results <- checkPDF(c("paper1.pdf", "paper2.pdf"))
+# Read text that was already extracted from a document
+paper_text <- paste(readLines("paper.txt", warn = FALSE), collapse = "\n")
+result <- check_text(paper_text)
+```
 
-# Check HTML files (like statcheck's checkHTML)
-results <- checkHTML(c("paper1.html", "paper2.html"))
+For end-to-end PDF/DOCX checking without writing your own extraction step, use
+the [ESCIMate web app](https://escimate.app), which pairs `effectcheck` with a
+document extractor.
 
-# Check directory of PDFs (like statcheck's checkPDFdir)
-results <- checkPDFdir("manuscripts/")
+### Comparing against statcheck
 
-# Check directory of HTML files (like statcheck's checkHTMLdir)
-results <- checkHTMLdir("manuscripts/")
+```r
+# Run effectcheck and statcheck on the same text and report agreement
+comparison <- compare_with_statcheck(text)
 ```
 
 ### Working with Results
@@ -132,7 +134,7 @@ count_by(result, "status")
 count_by(result, "test_type")
 ```
 
-### Working with Variants (New in v2.0)
+### Working with Variants
 
 ```r
 # Get all variants for a specific row
@@ -161,6 +163,7 @@ print(metadata$when_to_use)
 ### Status Levels
 
 - **PASS**: Computed effect size matches reported value within tolerance
+- **OK**: Test statistic and p-value are internally consistent
 - **WARN**: Minor mismatch (rounding, CI method difference, design ambiguity)
 - **ERROR**: Significant mismatch (incompatible values)
 - **SKIP**: Extraction-only result with nothing to check
@@ -181,7 +184,7 @@ Key columns in results:
 - `effect_reported`: Reported effect size value
 - `effect_reported_name`: Original name as parsed from text
 
-**Type-Matched Comparison (New in v2.0):**
+**Type-Matched Comparison:**
 - `matched_variant`: Which same-type variant matched best
 - `matched_value`: The computed value of that variant
 - `delta_effect`: Absolute difference between reported and matched
@@ -190,7 +193,7 @@ Key columns in results:
 - `all_variants`: JSON structure with all computed variants and alternatives
 
 **Legacy Columns (backward compatible):**
-- `test_type`: Type of test (t, F, r, chisq, z)
+- `test_type`: Type of test (t, F, r, chisq, z, ...)
 - `closest_method`: Alias for matched_variant
 - `delta_effect_abs`: Alias for delta_effect
 
@@ -200,15 +203,13 @@ Key columns in results:
 - `decision_error`: TRUE if significance reversal detected
 
 **Status and Uncertainty:**
-- `status`: PASS/WARN/ERROR/INSUFFICIENT_DATA
+- `status`: PASS / OK / WARN / ERROR / SKIP / NOTE
 - `uncertainty_level`: Low/medium/high
 - `uncertainty_reasons`: Specific sources of uncertainty
 - `assumptions_used`: All assumptions made during computation
-- `design_inferred`: Inferred study design (paired, independent, etc.)
-- `assumptions_used`: All assumptions made during computation
 - `design_inferred`: Best guess at experimental design
 - `variants_tested`: All effect size variants computed
-- `source`: Source file name (or "text" for direct input)
+- `source`: Source label ("text" for direct input)
 
 ## Examples
 
@@ -270,22 +271,22 @@ EffectCheck automatically detects CI level from text:
 - `95% CI [0.12, 0.45]` → uses 95%
 - `CI [0.12, 0.45]` → defaults to 95% (flagged as assumption)
 
-## File Format Support
+## Input
 
-- **.pdf**: PDF files (via `pdftotext` from poppler-utils, with optional table extraction and OCR)
-- **.docx**: Microsoft Word documents (via `pandoc`; requires pandoc on PATH)
-- **.html**: HTML files (via `rvest` package)
-- **.txt**: Plain text files
+`check_text()` accepts a character vector of **already-extracted text**. The
+package does not read PDF, DOCX, or HTML files — that responsibility moved to
+an external extractor in v0.4.0. The former file-input functions
+(`check_file()`, `check_files()`, `check_dir()`, `checkPDF()`, `checkHTML()`,
+`checkPDFdir()`, `checkHTMLdir()`, `checkDOCXdir()`, `read_any_text()`,
+`compare_file_with_statcheck()`) are now defunct and error with a pointer to
+`check_text()`.
 
-### PDF Options
+To check a document:
 
-```r
-# Enable table extraction from PDFs
-results <- checkPDF("paper.pdf", try_tables = TRUE)
-
-# Enable OCR for scanned PDFs
-results <- checkPDF("scanned_paper.pdf", try_ocr = TRUE)
-```
+1. Extract its text with any extractor (e.g.
+   [docpluck](https://docpluck.vercel.app)), or use the
+   [ESCIMate web app](https://escimate.app) which does this for you.
+2. Pass the extracted text to `check_text()`.
 
 ## Philosophy
 
@@ -301,7 +302,7 @@ EffectCheck follows these principles:
 - Some effect sizes require additional information (e.g., generalized eta² for within-subjects)
 - CI methods may differ from those used in original papers (flagged as WARN)
 - Design inference from context is heuristic-based
-- OCR for scanned PDFs requires `tesseract` and `magick` packages
+- The package checks already-extracted text; extraction quality depends on the upstream extractor
 
 ## API Reference
 
@@ -309,20 +310,9 @@ EffectCheck follows these principles:
 
 | Function | Description |
 |----------|-------------|
-| `check_text(text, ...)` | Check plain text for statistical consistency |
-| `check_file(path, ...)` | Check a single file |
-| `check_files(paths, ...)` | Check multiple files |
-| `check_dir(dir, ...)` | Check all files in a directory |
-
-### statcheck-Compatible Functions
-
-| Function | Description |
-|----------|-------------|
-| `checkPDF(files, ...)` | Check PDF files |
-| `checkHTML(files, ...)` | Check HTML files |
-| `checkPDFdir(dir, ...)` | Check directory of PDFs |
-| `checkHTMLdir(dir, ...)` | Check directory of HTML files |
-| `checkDOCXdir(dir, ...)` | Check directory of Word documents |
+| `check_text(text, ...)` | Check already-extracted text for statistical consistency |
+| `parse_text(text)` | Parse statistics from text without checking |
+| `compare_with_statcheck(text, ...)` | Run effectcheck and statcheck on the same text and compare |
 
 ### S3 Methods
 
@@ -342,7 +332,7 @@ EffectCheck follows these principles:
 | `get_decision_errors(x)` | Get significance reversals |
 | `filter_by_test_type(x, types)` | Filter by test type |
 | `filter_by_uncertainty(x, levels)` | Filter by uncertainty level |
-| `filter_by_source(x, files)` | Filter by source file |
+| `filter_by_source(x, sources)` | Filter by source label |
 | `filter_by_delta(x, min, max)` | Filter by effect size delta |
 | `count_by(x, by)` | Count results by category |
 
@@ -360,7 +350,7 @@ If you use EffectCheck in your research, please cite:
 
 ```
 EffectCheck: Statistical Consistency Checker for Published Research Results
-Version 0.3.0
+Version 0.5.7
 ```
 
 ## License

@@ -535,6 +535,17 @@ parse_text <- function(text, context_window_size = 2) {
   # pat_chi_nodf / pat_chi_two_dfs so every chi path recognises the subscript.
   chi_sub <- "(?:[\\s_]*(?:[Gg][Oo][Ff]|[Pp]earson|[Yy]ates|[Ll][Rr]|[Mm][Hh]|[Ww]ald))?"
 
+  # v0.5.9: the chi-square token alternation, hoisted to one shared definition.
+  # It was duplicated across the sub-chunk splitter and pat_chi / pat_chi_nodf /
+  # pat_chi_two_dfs, and the copies had drifted: the splitter copy lacked the
+  # precomposed superscript forms, and the word form "chi" lacked the optional
+  # caret that the symbol forms (chi^2, X^2) already allowed -- so "chi^2(1)"
+  # parsed as a chi-square only via the symbol forms, never the word form.
+  # Every chi path now uses chi_tok so the accepted forms can never drift again.
+  # The Greek chi and the superscript-two are written as \u escapes so the R
+  # source stays pure ASCII (R CMD check warns on non-ASCII in code).
+  chi_tok <- "(?:chi-?square|Chi-?square|chi\\s*\\^?2|\u03c7\\s*\\^?2|\u03c7\u00b2|X\\s*\\^?2|X\u00b2)"
+
   # Sub-chunk splitting: when a sentence contains multiple test statistics,
   # split it so each sub-chunk has exactly one test statistic.
   # This prevents str_match() from silently dropping 2nd/3rd/4th matches.
@@ -545,11 +556,11 @@ parse_text <- function(text, context_window_size = 2) {
     "|(?:^|(?<=\\s|,|;|\\(|\\{))t\\s*=\\s*[-+]?\\.?\\d",  # t = value (bare, for t_nodf; .5 ok)
     "|(?:^|(?<=\\s|,|;|\\(|\\{))r\\s*\\(\\s*\\d",  # r(df)
     "|(?:^|(?<=\\s|,|;|\\(|\\{))(?<![a-zA-Z])r\\s*=\\s*[-+]?\\.?\\d",  # r = value (bare, for r_nodf; .45 ok)
-    "|(?:chi-?square|\u03c7\\s*\\^?2|Chi-?square|chi2|X\\s*\\^?2)", chi_sub, "\\s*[\\(\\[]\\s*\\d",
+    "|", chi_tok, chi_sub, "\\s*[\\(\\[]\\s*\\d",  # chi-square(df), shared chi_tok
     "|(?:^|(?<=\\s|,|;|\\(|\\{))H\\s*\\(\\s*\\d",  # H(df)
     "|(?:^|(?<=\\s|,|;|\\(|\\{))(?:Sobel\\s+)?[Zz]\\s*=\\s*[-+]?\\.?\\d",  # z = value, Sobel Z = value; .5 ok
     "|(?:^|(?<=\\s|,|;|\\(|\\{))U\\s*=\\s*\\d",    # U = value
-    "|(?:^|(?<=\\s|,|;|\\(|\\{))W\\s*=\\s*\\d",    # W = value
+    "|(?:^|(?<=\\s|,|;|\\(|\\{))W\\s*=\\s*[-+]?\\.?\\d",    # W = value (DSCF W may be negative)
     ")"
   )
   chunks <- unlist(lapply(chunks, function(chunk) {
@@ -659,9 +670,9 @@ parse_text <- function(text, context_window_size = 2) {
   # APA format includes optional N inside parens: \u03c7\u00b2(2, N = 150) = 8.73
   # chi_sub (defined above, shared with the sub-chunk splitter) allows a
   # JASP-style subscript label glued to the chi token.
-  pat_chi <- paste0("(?:chi-?square|\u03c7\\s*\\^?2|\u03c7\u00b2|Chi-?square|chi2|X\\s*\\^?2|X\u00b2)", chi_sub, "\\s*\\(\\s*(\\d+(?:\\.\\d+)?)\\s*(?:,\\s*[Nn]\\s*=\\s*([\\d,]+))?\\s*\\)\\s*=\\s*([-+]?\\d*\\.?\\d+)")
+  pat_chi <- paste0(chi_tok, chi_sub, "\\s*\\(\\s*(\\d+(?:\\.\\d+)?)\\s*(?:,\\s*[Nn]\\s*=\\s*([\\d,]+))?\\s*\\)\\s*=\\s*([-+]?\\d*\\.?\\d+)")
   # Chi-square without parenthesized df: chi2 = 27.04, df = 1 (or chi2(N = 100) = 5.03)
-  pat_chi_nodf <- paste0("(?:chi-?square|\u03c7\\s*\\^?2|\u03c7\u00b2|Chi-?square|chi2|X\\s*\\^?2|X\u00b2)", chi_sub, "\\s*=\\s*([-+]?\\d*\\.?\\d+)")
+  pat_chi_nodf <- paste0(chi_tok, chi_sub, "\\s*=\\s*([-+]?\\d*\\.?\\d+)")
 
   # v0.3.6: Shadow patterns for df_arity_mismatch detection.
   # These run only when the strict patterns above fail (see dispatch chain
@@ -670,7 +681,7 @@ parse_text <- function(text, context_window_size = 2) {
   # See docs/superpowers/specs/2026-05-03-deception-detection-design.md sec 5.
   pat_F_one_df <- "F\\s*[\\(\\[]\\s*(\\d+(?:\\.\\d+)?)\\s*[\\)\\]]\\s*=\\s*([-+]?\\d*\\.?\\d+)"
   pat_t_two_dfs <- "\\bt\\s*\\(\\s*(\\d+(?:\\.\\d+)?)\\s*,\\s*(\\d+(?:\\.\\d+)?)\\s*\\)\\s*=\\s*([-+]?\\d*\\.?\\d+)"
-  pat_chi_two_dfs <- paste0("(?:chi-?square|\u03c7\\s*\\^?2|\u03c7\u00b2|Chi-?square|chi2|X\\s*\\^?2|X\u00b2)", chi_sub, "\\s*\\(\\s*(\\d+(?:\\.\\d+)?)\\s*,\\s*(?![Nn]\\s*=)(\\d+(?:\\.\\d+)?)\\s*\\)\\s*=\\s*([-+]?\\d*\\.?\\d+)")
+  pat_chi_two_dfs <- paste0(chi_tok, chi_sub, "\\s*\\(\\s*(\\d+(?:\\.\\d+)?)\\s*,\\s*(?![Nn]\\s*=)(\\d+(?:\\.\\d+)?)\\s*\\)\\s*=\\s*([-+]?\\d*\\.?\\d+)")
   pat_r_two_dfs <- "(?<![a-zA-Z])r\\s*\\(\\s*(\\d+(?:\\.\\d+)?)\\s*,\\s*(\\d+(?:\\.\\d+)?)\\s*\\)\\s*=\\s*([-+]?\\d*\\.?\\d+)"
 
   # Rank-correlation patterns (Stage 1 / P2): Spearman's rho and Kendall's tau
@@ -682,8 +693,10 @@ parse_text <- function(text, context_window_size = 2) {
   # Nonparametric test patterns
   # Mann-Whitney U: require co-occurrence with p or z to avoid bare "U" false positives
   pat_U <- "U\\s*=\\s*(\\d+(?:\\.\\d+)?)"
-  # Wilcoxon W
-  pat_W <- "W\\s*=\\s*(\\d+(?:\\.\\d+)?)"
+  # W: shared by Wilcoxon's W, Kendall's W, and the DSCF post-hoc W. The DSCF
+  # statistic can be negative, so an optional leading sign is allowed; the W
+  # block below disambiguates the three.
+  pat_W <- "W\\s*=\\s*([-+]?\\d+(?:\\.\\d+)?)"
   # Kruskal-Wallis H: H(df) = value
 
   pat_H <- "H\\s*\\(\\s*(\\d+(?:\\.\\d+)?)\\s*\\)\\s*=\\s*([-+]?\\d*\\.?\\d+)"
@@ -1070,24 +1083,36 @@ parse_text <- function(text, context_window_size = 2) {
         stat_value_decimals <- count_decimal_places(m_U[2])
       }
     } else if (!all(is.na(m_W_stat))) {
-      # The bare "W =" token is shared by Wilcoxon's W (a large rank-sum) and
-      # Kendall's W (the coefficient of concordance, mathematically bounded
-      # 0-1). Disambiguate before classifying: a W in [0, 1] reported in a
-      # "Kendall" / "concordance" context is Kendall's W, not Wilcoxon's.
+      # The bare "W =" token is shared by three different statistics:
+      #   - Wilcoxon's W : a rank-sum, always >= 0
+      #   - Kendall's W  : the coefficient of concordance, bounded 0-1
+      #   - DSCF's W     : the Dwass-Steel-Critchlow-Fligner post-hoc statistic
+      #                    for Kruskal-Wallis pairwise comparisons; can be < 0.
+      # Disambiguate before classifying. A W in [0, 1] in a "Kendall" /
+      # "concordance" context is Kendall's W. A negative W cannot be Wilcoxon's
+      # (a rank-sum) nor Kendall's (bounded 0-1), so it is DSCF; an explicit
+      # DSCF / Dwass / Kruskal-pairwise context confirms a positive DSCF W.
+      # DSCF is routed (in check.R) to an honest "cannot verify" NOTE -- no
+      # standard effect size is recoverable from the W alone.
       w_val <- numify(m_W_stat[2])
       w_ctx <- tolower(paste(s, context))
       is_kendall_W <- !is.na(w_val) && w_val >= 0 && w_val <= 1 &&
         grepl("kendall|concordance", w_ctx) && !grepl("wilcoxon", w_ctx)
+      is_dscf <- !is_kendall_W && !is.na(w_val) && (
+        w_val < 0 ||
+          grepl("dscf|dwass", w_ctx) ||
+          (grepl("kruskal", w_ctx) && grepl("pairwise|post[ -]?hoc", w_ctx)))
       if (is_kendall_W) {
         test_type <- "kendall_w"
         stat_value <- w_val
         stat_value_decimals <- count_decimal_places(m_W_stat[2])
       } else {
-        # Wilcoxon W - require p or z co-occurrence
+        # Wilcoxon's W or DSCF's W -- both require a p or z co-occurrence to
+        # avoid a bare "W =" false positive.
         has_p <- !all(is.na(stringr::str_match(s, pat_p)))
         has_z <- !all(is.na(stringr::str_match(s, pat_z_aux)))
         if (has_p || has_z) {
-          test_type <- "W"
+          test_type <- if (is_dscf) "dscf" else "W"
           stat_value <- w_val
           stat_value_decimals <- count_decimal_places(m_W_stat[2])
         }
@@ -1150,6 +1175,24 @@ parse_text <- function(text, context_window_size = 2) {
     if (test_type == "chisq" && !is.na(chi_inline_N)) {
       N_value <- chi_inline_N
       N_source <- "chi_inline"
+    }
+
+    # v0.5.8 (T3 residual): chi-square-scoped bare-n fallback. A bare lowercase
+    # "n = X" is deliberately NOT in pat_N -- it is commonly a per-group size.
+    # But for a chi-square with no N from any other source, a single bare "n ="
+    # reported alongside it is the total sample size (e.g. the JASP goodness-of-
+    # fit line "chi2gof(1) = 31.01, p = ..., n = 329"). Fire only when:
+    # test_type is chisq, N is still NA, the chunk carries no per-group token
+    # (n1/n2), and EXACTLY ONE "n =" appears in the chunk -- two or more "n ="
+    # are per-group counts, not a total, so the fallback must not fire.
+    if (!is.na(test_type) && test_type == "chisq" && is.na(N_value)) {
+      n_bare_all <- stringr::str_match_all(s, "\\bn\\s*=\\s*(\\d[\\d,]*\\d|\\d+)")[[1]]
+      has_group_n <- !all(is.na(stringr::str_match(s, pat_n1))) ||
+        !all(is.na(stringr::str_match(s, pat_n2)))
+      if (nrow(n_bare_all) == 1 && !has_group_n) {
+        N_value <- numify_int(n_bare_all[1, 2])
+        N_source <- "chi_bare_n"
+      }
     }
 
     # Extract regression coefficients
