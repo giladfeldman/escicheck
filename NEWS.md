@@ -1,3 +1,57 @@
+# effectcheck 0.5.9
+
+Chi-square `chi^2` caret token — a parse fix found by escicheck-iterate.
+
+## Bug fixes
+
+* **A chi-square written as `chi^2(df)` (the word "chi" with a caret
+  superscript) is now parsed.** The chi-square token alternation was
+  duplicated across four call sites — the sub-chunk splitter and `pat_chi` /
+  `pat_chi_nodf` / `pat_chi_two_dfs` — and the copies had drifted: the symbol
+  forms allowed an optional caret (`X^2`, and the Greek-letter form) but the
+  word form only matched `chi2` with no caret, and the splitter copy lacked
+  the precomposed superscript forms entirely. So `chi^2(1) = 3.74` returned
+  zero statistics. The alternation is now hoisted to one shared `chi_tok`
+  definition used by every chi path, so the accepted notations can no longer
+  drift apart. No behaviour change for the previously-recognised forms
+  (`chi2`, `chi-square`, `X2`, the Greek-letter and precomposed-superscript
+  forms).
+
+# effectcheck 0.5.8
+
+Chi-square bare-`n` sample size — a parse fix found by escicheck-iterate.
+
+## Bug fixes
+
+* **A bare lowercase `n =` is now read as the total N for a chi-square** when
+  no other sample-size token is present. `pat_N` deliberately matches only
+  `N` / `nobs` because a bare `n =` is commonly a per-group size — but a
+  chi-square reporting `chi2gof(1) = 31.01, p = ..., n = 329` (the JASP
+  goodness-of-fit form) then had N come back NA and could not compute its
+  effect size. A chi-square-scoped fallback now accepts a single bare `n =`
+  as the total N, but only when the chunk carries no `n1` / `n2` per-group
+  token and exactly one `n =` appears (two or more are per-group counts, not
+  a total).
+
+# effectcheck 0.5.7
+
+DSCF (Dwass-Steel-Critchlow-Fligner) post-hoc W — a parse + categorisation fix
+found by escicheck-iterate.
+
+## Bug fixes
+
+* **DSCF (Dwass-Steel-Critchlow-Fligner) post-hoc pairwise comparisons** —
+  reported as `W = ...`, the post-hoc test following a significant
+  Kruskal-Wallis — are now recognised. A negative DSCF W (`W = -3.84,
+  p = .018`) returned 0 stats because `pat_W` and the sub-chunk splitter both
+  rejected the leading minus; a positive DSCF W (`W = 5.99`) parsed but was
+  mislabelled Wilcoxon's W. `pat_W` and the splitter now accept a leading
+  sign, and a new `dscf` test type is assigned to a negative W, or to a W in
+  an explicit DSCF / Dwass / Kruskal-pairwise context. No standard effect size
+  is recoverable from the W statistic alone, so a DSCF result is an honest
+  "cannot verify" NOTE — the same conservative route as Kendall's W, not the
+  Wilcoxon-W mis-route it used to fall into.
+
 # effectcheck 0.5.6
 
 Bare regression-coefficient lines — a parse fix found by escicheck-iterate.

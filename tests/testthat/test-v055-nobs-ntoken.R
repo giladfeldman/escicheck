@@ -37,12 +37,18 @@ test_that("v0.5.5: nobs N enables effect-size verification on a chi-square", {
   expect_equal(row$status[1], "PASS")
 })
 
-test_that("v0.5.5 guard: bare lowercase 'n =' is NOT matched as total N", {
-  # "n =" is commonly a per-group size; matching it as total N would mis-infer.
+test_that("v0.5.8 supersedes v0.5.5: a single bare 'n =' IS total N for a chi-square", {
+  # v0.5.5 deliberately DEFERRED bare-'n' handling (a bare "n =" is commonly a
+  # per-group size). v0.5.8 (TRIAGE T3 residual) implemented the chi-square-
+  # scoped fallback: a single bare "n = 659" with no n1/n2 is now read as the
+  # total N (N_source = "chi_bare_n"), enabling the Cohen's w match. The
+  # per-group-size safety (multiple "n =", n1/n2 present) is covered by
+  # test-v058-chi-bare-n.R.
   res <- check_text("chi2(1) = 8.0, p = .005, w = 0.11, n = 659")
   row <- chisq_row(res)
   expect_equal(nrow(row), 1)
-  expect_true(is.na(row$N[1]))
+  expect_equal(row$N[1], 659)
+  expect_equal(row$matched_variant[1], "cohens_w")
 })
 
 test_that("v0.5.5 guard: capital 'N =' still works", {

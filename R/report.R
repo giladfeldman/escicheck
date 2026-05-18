@@ -27,6 +27,7 @@
     chisq = "Chi-square", chi2 = "Chi-square", z = "z-test",
     U = "Mann-Whitney U", W = "Wilcoxon W", H = "Kruskal-Wallis H",
     kendall_w = "Kendall's W (concordance)",
+    dscf = "DSCF post-hoc (Kruskal-Wallis)",
     regression = "Regression"
   )
   if (type %in% names(lookup)) return(lookup[type])
