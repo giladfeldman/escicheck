@@ -117,15 +117,14 @@ test_that("ambiguity_reason is populated when ambiguous", {
   expect_true("ambiguity_reason" %in% names(result))
 })
 
-test_that("unknown effect size type is marked as highly_ambiguous", {
-  # This tests when the reported effect size type is not recognized
+test_that("unrecognized effect-size token (xyz=) is not parsed as an effect", {
+  # "xyz = 0.80" is not a known effect-size label: the t-test parses but the
+  # token is not adopted as a reported effect size (no false positive).
   text <- "t(28) = 2.21, p = .035, xyz = 0.80"
   result <- check_text(text)
-  
-  # If parsed, should be marked as highly ambiguous
-  if (nrow(result) > 0 && !is.na(result$effect_reported[1])) {
-    expect_true(result$ambiguity_level[1] %in% c("ambiguous", "highly_ambiguous"))
-  }
+
+  expect_equal(nrow(result), 1)
+  expect_true(is.na(result$effect_reported[1]))
 })
 
 # ============================================================================

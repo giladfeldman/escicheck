@@ -51,12 +51,12 @@ test_that("Golden example 6: Mixed decimal styles", {
 })
 
 test_that("Golden example 7: CI without level", {
-  text <- "d = 0.80, CI [0.12, 1.48]"
+  # A CI written without a "95%" prefix is still captured.
+  text <- "t(28) = 2.21, d = 0.80, CI [0.12, 1.48]"
   result <- check_text(text)
-  if (nrow(result) > 0) {
-    expect_true(!is.na(result$ciL_reported[1]))
-    expect_true(!is.na(result$ciU_reported[1]))
-  }
+  expect_true(nrow(result) > 0)
+  expect_false(is.na(result$ciL_reported[1]))
+  expect_false(is.na(result$ciU_reported[1]))
 })
 
 test_that("Golden example 8: Multiple stats", {
@@ -105,12 +105,12 @@ test_that("Golden example 13: Negative values", {
 })
 
 test_that("Golden example 14: Leading zeros", {
-  text <- "d = .45, CI [.12, .78]"
+  # Effect size and CI bounds written without a leading 0 (.45) are parsed.
+  text <- "t(28) = 2.21, d = .45, CI [.12, .78]"
   result <- check_text(text)
-  if (nrow(result) > 0) {
-    expect_equal(result$effect_reported[1], 0.45)
-    expect_equal(result$ciL_reported[1], 0.12)
-  }
+  expect_true(nrow(result) > 0)
+  expect_equal(result$effect_reported[1], 0.45)
+  expect_equal(result$ciL_reported[1], 0.12)
 })
 
 test_that("Golden example 15: Unicode minus", {

@@ -1,3 +1,20 @@
+# effectcheck 0.5.10
+
+Bare `r =` with a confidence interval — a parse fix found by escicheck-iterate.
+
+## Bug fixes
+
+* **A bare correlation `r = value` reported with a confidence interval but no
+  p-value is now extracted.** The `r =` (no-df) pattern previously required a
+  nearby p-value before it would emit a result — a guard against casual
+  `r = .3` mentions. A correlation reported with a CI (e.g. `r = -.74
+  [-0.92, -0.30]`) is a genuine result even without a p, so the guard now
+  accepts *a p-value OR a confidence interval*, mirroring the chi-square
+  (`p` or `df`) and Mann-Whitney (`p` or `z`) no-df guards. An explicitly
+  labelled CI (`95% CI [...]`) always counts; a bare bracketed pair counts
+  only when its bounds bracket the r value, so an unrelated bracketed pair
+  (a page range, a citation index) is not mistaken for a CI.
+
 # effectcheck 0.5.9
 
 Chi-square `chi^2` caret token — a parse fix found by escicheck-iterate.
@@ -239,8 +256,6 @@ resulting text to `check_text()`:
 * `check_file()`, `check_dir()`, `check_files()`
 * `checkPDF()`, `checkPDFdir()`
 * `checkHTML()`, `checkHTMLdir()`, `checkDOCXdir()`
-* `extract_text_pdf()`, `extract_text_pdf_with_ocr()`,
-  `extract_text_docx()`, `extract_text_html()`
 * `compare_file_with_statcheck()` — replaced by `compare_with_statcheck()`
   (text input)
 

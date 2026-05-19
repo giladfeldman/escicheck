@@ -53,11 +53,10 @@ test_that("Hedges G parsed correctly", {
 
 test_that("SD = 2.5 not falsely matched as D", {
   r <- parse_text("t(50) = 3.0, p = .004, SD = 2.5")
-  # SD should NOT be parsed as d=2.5
-  if (nrow(r) > 0 && !is.na(r$effect_reported_name[1])) {
-    expect_true(r$effect_reported_name[1] != "d" ||
-                r$effect_reported[1] != 2.5)
-  }
+  expect_true(nrow(r) >= 1)
+  # SD must NOT be adopted as a Cohen's d of 2.5
+  expect_false(isTRUE(r$effect_reported_name[1] == "d") &&
+               isTRUE(r$effect_reported[1] == 2.5))
 })
 
 # =========================================================================
@@ -143,14 +142,11 @@ test_that("d > 10 rejected at parse time", {
   expect_true(is.na(r$effect_reported_name[1]))
 })
 
-test_that("dz = 5 still parsed (within range)", {
+test_that("dz = 5 is rejected at parse time (integer/implausible guard)", {
+  # An integer dz = 5 on t(50) = 5.0 is implausibly large (plausible |d| ~ 1.4)
+  # and is rejected, consistent with the dz/dav integer guard below.
   r <- parse_text("t(50) = 5.0, p < .001, dz = 5")
-  # dz=5 is integer, > 2, but within bounds
-  # May or may not be rejected by spurious context check
-  # At minimum: if parsed, value should be 5
-  if (!is.na(r$effect_reported[1])) {
-    expect_equal(r$effect_reported[1], 5)
-  }
+  expect_true(is.na(r$effect_reported_name[1]))
 })
 
 # =========================================================================

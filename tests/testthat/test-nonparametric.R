@@ -18,10 +18,8 @@ test_that("Mann-Whitney U is parsed with p co-occurrence", {
 test_that("Mann-Whitney U is NOT parsed without p or z", {
   # Bare "U = 245" should not match to avoid false positives
   res <- parse_text("U = 245 with no other stats.")
-  # Should either have 0 rows or not match as U
-  if (nrow(res) > 0) {
-    expect_true(all(res$test_type != "U"))
-  }
+  # Correct behavior: no row at all, or nothing parsed as a U test
+  expect_true(nrow(res) == 0 || all(res$test_type != "U"))
 })
 
 test_that("Wilcoxon W is parsed with z co-occurrence", {
