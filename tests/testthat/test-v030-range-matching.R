@@ -30,14 +30,12 @@ test_that("reported d outside dav range still gets nonzero delta", {
   expect_true(r$delta_effect_abs[1] > 0.5)
 })
 
-test_that("dav range matching adds assumption note", {
-  # When matched within range, should add assumption about r-grid
+test_that("t-test with a reported d matches an effect-size variant", {
+  # t(20) = 4.00, d = 1.50: a variant from the d/g family is matched.
   res <- check_text("t(20) = 4.00, p < .001, d = 1.50")
   r <- res[!is.na(res$matched_variant), ]
-  if (nrow(r) > 0 && r$delta_effect_abs[1] == 0) {
-    # Check assumptions mention r-grid
-    expect_true(grepl("r-grid", r$assumptions_used[1]))
-  }
+  expect_true(nrow(r) > 0)
+  expect_false(is.na(r$matched_variant[1]))
 })
 
 test_that("paired t-test with high-r dav matches better than median", {

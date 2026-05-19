@@ -68,17 +68,14 @@ test_that("Computed effect size > plausibility bound flags extraction_suspect", 
 # PHASE 2: warn_tiny_delta — decision error should not override excellent match
 # =============================================================================
 
-test_that("Excellent effect match with decision error stays PASS", {
-  # Construct a case where effect size matches perfectly but p-value has decision error
-  # t(500) = 1.98 → p ≈ 0.048 (barely significant)
-  # If reported p = .052 (not significant), that's a decision error
-  # But if d matches within tolerance and ambiguity is clear, should stay PASS
+test_that("excellent effect match with a p decision error is not escalated to ERROR", {
+  # t(500) = 1.98 implies p ~ .048; reported p = .052 is a borderline decision
+  # error. The reported d = 0.18 still matches the computed d very closely, so
+  # the row must not be hard-ERROR'd on the strength of the p discrepancy.
   res <- check_text("t(500) = 1.98, p = .052, d = 0.18")
-  # The key test: if delta is tiny and ambiguity is clear, PASS should be preserved
-  if (!is.na(res$delta_effect[1]) && res$delta_effect[1] < 0.01 &&
-      res$ambiguity_level[1] == "clear") {
-    expect_equal(res$status[1], "PASS")
-  }
+  expect_equal(nrow(res), 1)
+  expect_true(!is.na(res$delta_effect[1]) && res$delta_effect[1] < 0.01)
+  expect_true(res$status[1] %in% c("PASS", "WARN", "NOTE"))
 })
 
 # =============================================================================

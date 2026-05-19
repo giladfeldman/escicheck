@@ -1033,11 +1033,34 @@ parse_text <- function(text, context_window_size = 2) {
       stat_value <- numify(m_r[3])
       stat_value_decimals <- count_decimal_places(m_r[3])
     } else if (!all(is.na(m_r_nodf))) {
-      # r = value without df (requires p-value nearby to avoid false positives)
+      # r = value without df. Extract when corroborated by a nearby p-value OR
+      # a confidence interval -- a bare r with neither is too ambiguous (it
+      # could be any ratio labelled r). A CI is as strong a signal as a p that
+      # this is a genuine reported correlation, mirroring the chi_nodf
+      # ("p OR df") and U ("p OR z") guards. v0.5.10.
       has_p <- !all(is.na(stringr::str_match(s, pat_p)))
       r_val <- numify(m_r_nodf[2])
-      # Only accept if: (a) p-value nearby AND (b) |r| <= 1 to avoid matching unrelated "r = ..."
-      if (has_p && !is.na(r_val) && abs(r_val) <= 1) {
+      # has_ci: an explicitly-labelled CI (pat_CI1 / pat_CI2) always counts; a
+      # bare bracketed pair (pat_CI3) counts only when its bounds bracket the r
+      # value -- the straddle check disambiguates a real CI from an unrelated
+      # bracketed pair (a page range, a citation index, etc.).
+      has_ci <- !all(is.na(stringr::str_match(s, pat_CI1))) ||
+                !all(is.na(stringr::str_match(s, pat_CI2)))
+      if (!has_ci && !is.na(r_val)) {
+        m_ci3 <- stringr::str_match(s, pat_CI3)
+        if (!all(is.na(m_ci3))) {
+          ci_lo <- numify(m_ci3[2])
+          ci_hi <- numify(m_ci3[3])
+          if (!is.na(ci_lo) && !is.na(ci_hi) &&
+              r_val >= min(ci_lo, ci_hi) - 1e-6 &&
+              r_val <= max(ci_lo, ci_hi) + 1e-6) {
+            has_ci <- TRUE
+          }
+        }
+      }
+      # Only accept if: (a) a p-value OR a CI nearby AND (b) |r| <= 1, to avoid
+      # matching an unrelated "r = ...".
+      if ((has_p || has_ci) && !is.na(r_val) && abs(r_val) <= 1) {
         test_type <- "r"
         stat_value <- r_val
         stat_value_decimals <- count_decimal_places(m_r_nodf[2])

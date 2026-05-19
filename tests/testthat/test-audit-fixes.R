@@ -154,18 +154,15 @@ test_that("ambiguous design with good match is PASS not NOTE", {
   }
 })
 
-test_that("highly_ambiguous with good delta stays NOTE", {
-  # This test verifies that truly cross-type matches stay NOTE
-  # (only ambiguous should upgrade to PASS)
+test_that("an unrecognized token (xyz=) is not adopted as an effect size", {
+  # "xyz = 0.81" is not a known effect-size label: the t-test parses cleanly
+  # and the unknown token is correctly ignored (no false-positive effect).
   text <- "t(28) = 2.21, p = .035, xyz = 0.81"
   result <- check_text(text)
 
-  # If unknown type and highly_ambiguous, should stay NOTE even with small delta
-  if (nrow(result) > 0 && !is.na(result$ambiguity_level[1]) &&
-      result$ambiguity_level[1] == "highly_ambiguous" &&
-      !is.na(result$delta_effect[1]) && result$delta_effect[1] < 0.02) {
-    expect_equal(result$status[1], "NOTE")
-  }
+  expect_equal(nrow(result), 1)
+  expect_equal(result$test_type[1], "t")
+  expect_true(is.na(result$effect_reported_name[1]))
 })
 
 # ===========================================================================

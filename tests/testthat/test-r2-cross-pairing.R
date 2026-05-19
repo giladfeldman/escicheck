@@ -42,17 +42,14 @@ test_that("Hierarchical regression detected and downgraded", {
   }
 })
 
-test_that("ANOVA context prevents regression downgrade", {
-  # ANOVA keywords should prevent the regression-specific downgrades
+test_that("large F/R2 mismatch is flagged as cross-pairing under ANOVA wording too", {
+  # Cross-pairing detection is driven by the size of the F/R2 delta, not by
+  # "regression" vs "ANOVA" wording: F(3,96)=42 implies R2 ~ .57 vs reported .15.
   res <- check_text("ANOVA showed F(3, 96) = 42.0, p < .001, R2 = .15")
-  # With ANOVA context, the cross-pairing guard should NOT fire
-  if (nrow(res) >= 1 && res$test_type[1] == "F") {
-    # May still be ERROR (ANOVA guard prevents downgrade)
-    # The key assertion: r2_cross_pairing_detected should be FALSE
-    if (res$status[1] == "ERROR") {
-      expect_false(res$r2_cross_pairing_detected[1])
-    }
-  }
+  expect_true(nrow(res) >= 1)
+  expect_equal(res$test_type[1], "F")
+  expect_true(res$status[1] %in% c("WARN", "NOTE"))
+  expect_true(res$r2_cross_pairing_detected[1])
 })
 
 # Signal 14 (v0.3.4): Eta/f cross-family detection

@@ -126,18 +126,20 @@ test_that("F(1,df) with d far from all variants triggers structural ambiguity (F
 })
 
 test_that("F(1,df) with explicit dz reported is NOT promoted to ambiguous (Fix C guard)", {
-  # When author explicitly reports dz, design is known (paired)
+  # When the author explicitly reports dz, the design is known (paired), so
+  # the Fix-C structural design ambiguity must not fire.
   r <- check_text("F(1, 30) = 9.00, p = .005, dz = 0.55")
   df <- as.data.frame(r)
-  # dz family does not include d_ind → no structural ambiguity
-  # (unless the system computes d_ind as an alternative, which it might)
+  expect_false(isTRUE(df$design_ambiguous))
 })
 
-test_that("F(2,30) is NOT affected by structural ambiguity (Fix C guard)", {
-  # df1=2 → not F(1,df), should not trigger structural ambiguity
+test_that("F(2,df) with a reported Cohen's d is flagged, not silently PASS'd", {
+  # A Cohen's d is a two-group effect size; F(2,30) is a 3-group ANOVA, so
+  # reporting d on it is design-inconsistent and the row must be flagged.
   r <- check_text("F(2, 30) = 5.00, p = .013, d = 0.60")
   df <- as.data.frame(r)
-  # F(2,df) doesn't compute d_ind/dz paired variants → no structural ambiguity
+  expect_equal(nrow(df), 1)
+  expect_false(df$status == "PASS")
 })
 
 test_that("t-test with both d_ind and dz has structural ambiguity (Fix C)", {
