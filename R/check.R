@@ -3063,7 +3063,13 @@ compute_and_compare_one <- function(row,
               "t-statistic alone (a multi-predictor / mediation beta depends",
               "on the model), so it cannot be independently verified"))
     } else {
-      # No same-type variants computed - fall back to all variants
+      # No same-type variants computed - fall back to all variants.
+      # Category B (cross-family fallback): the reported ES type cannot be
+      # anchored within its own family because none of its variants were
+      # computed from this test (e.g. d reported on an F(2,_) omnibus). The
+      # output design_ambiguous flag below at the tibble construction site
+      # picks this up; the [category: cross-family] tag is appended to
+      # ambiguity_reason just before the tibble is built. See LESSONS.md.
       ambiguity_level <- "highly_ambiguous"
       ambiguity_reason <- paste0("No same-type variants available for '", canonical_type, "' - using all computed variants")
 
@@ -3086,7 +3092,10 @@ compute_and_compare_one <- function(row,
       }
     }
   } else if (!is.na(effect_reported)) {
-    # No reported type - compare to all variants
+    # No reported type - compare to all variants.
+    # Category B (cross-family fallback) sub-case: an effect-size number was
+    # reported but its type couldn't be parsed. The [category: cross-family]
+    # tag is appended to ambiguity_reason just before the output tibble.
     ambiguity_level <- "highly_ambiguous"
     ambiguity_reason <- "Effect size type not specified - compared to all computed variants"
 
@@ -3827,6 +3836,12 @@ compute_and_compare_one <- function(row,
   # ambiguity_level to "ambiguous" so Phase 8B can fire.
   # Also: z-tests with d/g canonical_type are inherently design-ambiguous
   # (Mann-Whitney vs Wilcoxon) even if only one family was computed.
+  #
+  # Category A (structural-design): this is the canonical source of the
+  # design_ambiguous=TRUE output flag's NARROW meaning -- paired vs
+  # independent. The structural_design_ambiguous local set below is the
+  # signal the [category: structural-design] tag uses just before the output
+  # tibble is built. See LESSONS.md and API.md "design_ambiguous categories".
   # ============================================================================
 
   structural_design_ambiguous <- FALSE
@@ -4905,6 +4920,49 @@ compute_and_compare_one <- function(row,
     matched_variant <- corr_method
   }
 
+  # v0.5.11: append a stable category tag to ambiguity_reason so downstream
+  # consumers can programmatically distinguish the two semantically distinct
+  # cases the design_ambiguous boolean (set just below in the output tibble)
+  # rolls together. The flag's name was kept intentionally broad for
+  # backwards-compatibility; the tag lets a careful consumer split if needed.
+  # See LESSONS.md "design_ambiguous covers two semantically distinct cases"
+  # and API.md section "design_ambiguous and ambiguity_reason categories".
+  #
+  #   [category: structural-design]  -- Phase 8A-bis case: a t / F(1,_) / z
+  #                                     test reports d or g, AND both an
+  #                                     independent variant family (d_ind,
+  #                                     g_ind) and a paired variant family
+  #                                     (dz, dav, drm) were computed. The
+  #                                     experimental design (paired vs
+  #                                     independent / Mann-Whitney vs
+  #                                     Wilcoxon) is the ambiguous factor.
+  #
+  #   [category: cross-family]       -- the reported ES type has NO same-type
+  #                                     variants in the computed-variants
+  #                                     set (e.g. a Cohen's d reported on an
+  #                                     F(2,_) omnibus, or ES type not
+  #                                     specified at all). The matcher
+  #                                     cross-falls to a different family
+  #                                     and the row cannot be independently
+  #                                     verified within its declared family.
+  #
+  # The block is idempotent (won't double-tag) and additive (existing reason
+  # substrings remain intact, so downstream substring matches like the
+  # "No same-type" check on line 3415 keep working).
+  if (!is.na(ambiguity_reason) && nchar(ambiguity_reason) > 0 &&
+      !grepl("[category:", ambiguity_reason, fixed = TRUE)) {
+    cat_tag <- ""
+    if (isTRUE(structural_design_ambiguous)) {
+      cat_tag <- " [category: structural-design]"
+    } else if (ambiguity_level == "highly_ambiguous" &&
+               grepl("No same-type|not specified", ambiguity_reason)) {
+      cat_tag <- " [category: cross-family]"
+    }
+    if (nchar(cat_tag) > 0) {
+      ambiguity_reason <- paste0(ambiguity_reason, cat_tag)
+    }
+  }
+
   tibble::tibble(
     location = row$location,
     raw_text = row$raw_text,
@@ -5189,7 +5247,43 @@ compute_and_compare_one <- function(row,
 #' @param design_ambiguous_action Action when design-ambiguous t-test (or F(1,df)) effect size ERROR occurs ("WARN", "NOTE", or "ERROR"; default "WARN")
 #' @param unknown_groups_action Action when d/g ERROR occurs with unknown group sizes n1/n2 ("WARN", "NOTE", or "ERROR"; default "WARN")
 #' @param min_confidence Minimum confidence score (0-10) for results to be included in output (default 0)
-#' @return An effectcheck S3 object with consistency check results
+#' @return An effectcheck S3 object whose `results` tibble carries the
+#'   parsed and recomputed statistics. Notable output columns:
+#'   \describe{
+#'     \item{\code{design_ambiguous}}{Logical. TRUE when the row's matching
+#'       is design-uncertain. INTENTIONALLY BROAD -- see \code{ambiguity_reason}
+#'       for the specific category (one of two: \emph{structural-design} for
+#'       a t / F(1,df) / z that reports d or g and produced BOTH paired and
+#'       independent variant families; \emph{cross-family} for a reported ES
+#'       type that has no same-type variants in the computed-variants set,
+#'       e.g. a Cohen's d reported on an F(2,df) omnibus). Equal to
+#'       \code{ambiguity_level != "clear"}; the flag never under-reports the
+#'       row's uncertainty.}
+#'     \item{\code{ambiguity_level}}{Character. \code{"clear"},
+#'       \code{"ambiguous"}, or \code{"highly_ambiguous"}. The category-A
+#'       cases tend to land on \code{"ambiguous"}; the category-B cases land
+#'       on \code{"highly_ambiguous"}.}
+#'     \item{\code{ambiguity_reason}}{Character. Human-readable explanation
+#'       of the ambiguity. Since v0.5.11, a stable bracket-tagged category
+#'       suffix is appended when applicable: \code{"[category: structural-design]"}
+#'       or \code{"[category: cross-family]"}. Consumers can grep for the tag
+#'       to programmatically split the two semantics without parsing English.}
+#'     \item{\code{matched_variant}}{The computed variant matched against
+#'       the reported ES. A cross-family fallback row will name a variant
+#'       from a different family than the reported ES type (e.g.
+#'       \code{matched_variant="eta"} when \code{effect_reported_name="d"}).}
+#'   }
+#'   Plus all other columns: \code{location}, \code{raw_text}, test
+#'   identification (\code{test_type}, \code{chisq_subtype}, \code{df1},
+#'   \code{df2}, \code{stat_value}, \code{N}), p-values (\code{p_reported},
+#'   \code{p_computed}, \code{decision_error}), effect-size family columns
+#'   (\code{d_ind}, \code{dz}, \code{g_ind}, \code{eta2}, \code{partial_eta2},
+#'   \code{omega2}, ...), CI metadata (\code{ci_reported}, \code{ci_expected},
+#'   \code{ci_width_ratio}, \code{ci_level_source}, ...), and status
+#'   (\code{status}, \code{check_type}, \code{check_scope},
+#'   \code{extraction_suspect}, \code{design_inferred},
+#'   \code{uncertainty_level}, \code{uncertainty_reasons}, ...).
+#'
 #' @export
 #' @examples
 #' result <- check_text("t(28) = 2.21, p = .035, d = 0.80")

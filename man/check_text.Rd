@@ -79,7 +79,42 @@ check_text(
 \item{min_confidence}{Minimum confidence score (0-10) for results to be included in output (default 0)}
 }
 \value{
-An effectcheck S3 object with consistency check results
+An effectcheck S3 object whose \code{results} tibble carries the
+parsed and recomputed statistics. Notable output columns:
+\describe{
+\item{\code{design_ambiguous}}{Logical. TRUE when the row's matching
+is design-uncertain. INTENTIONALLY BROAD -- see \code{ambiguity_reason}
+for the specific category (one of two: \emph{structural-design} for
+a t / F(1,df) / z that reports d or g and produced BOTH paired and
+independent variant families; \emph{cross-family} for a reported ES
+type that has no same-type variants in the computed-variants set,
+e.g. a Cohen's d reported on an F(2,df) omnibus). Equal to
+\code{ambiguity_level != "clear"}; the flag never under-reports the
+row's uncertainty.}
+\item{\code{ambiguity_level}}{Character. \code{"clear"},
+\code{"ambiguous"}, or \code{"highly_ambiguous"}. The category-A
+cases tend to land on \code{"ambiguous"}; the category-B cases land
+on \code{"highly_ambiguous"}.}
+\item{\code{ambiguity_reason}}{Character. Human-readable explanation
+of the ambiguity. Since v0.5.11, a stable bracket-tagged category
+suffix is appended when applicable: \code{"[category: structural-design]"}
+or \code{"[category: cross-family]"}. Consumers can grep for the tag
+to programmatically split the two semantics without parsing English.}
+\item{\code{matched_variant}}{The computed variant matched against
+the reported ES. A cross-family fallback row will name a variant
+from a different family than the reported ES type (e.g.
+\code{matched_variant="eta"} when \code{effect_reported_name="d"}).}
+}
+Plus all other columns: \code{location}, \code{raw_text}, test
+identification (\code{test_type}, \code{chisq_subtype}, \code{df1},
+\code{df2}, \code{stat_value}, \code{N}), p-values (\code{p_reported},
+\code{p_computed}, \code{decision_error}), effect-size family columns
+(\code{d_ind}, \code{dz}, \code{g_ind}, \code{eta2}, \code{partial_eta2},
+\code{omega2}, ...), CI metadata (\code{ci_reported}, \code{ci_expected},
+\code{ci_width_ratio}, \code{ci_level_source}, ...), and status
+(\code{status}, \code{check_type}, \code{check_scope},
+\code{extraction_suspect}, \code{design_inferred},
+\code{uncertainty_level}, \code{uncertainty_reasons}, ...).
 }
 \description{
 Parses APA-style statistical results from text and checks for consistency
