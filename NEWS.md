@@ -1,3 +1,34 @@
+# effectcheck 0.5.11
+
+Documentation-only release. The `design_ambiguous` output flag has always
+combined two semantically distinct cases under one name; this release makes
+the distinction explicit and parseable without changing behaviour.
+
+## Documentation / output-string clarifications
+
+* **`ambiguity_reason` now carries a stable bracket-tagged category suffix**
+  when applicable: `"[category: structural-design]"` for the Phase 8A-bis
+  paired-vs-independent case (a t / F(1,df) / z test reports d or g and BOTH
+  the independent variant family and the paired variant family were
+  computed), or `"[category: cross-family]"` when the reported ES type has
+  no same-type variants in the computed-variants set (e.g. a Cohen's d
+  reported on an F(2,df) omnibus, or ES type not specified at all). Existing
+  reason substrings are preserved untouched (so downstream substring matches
+  like the internal `"No same-type"` check continue to work); the tag is
+  appended idempotently just before the output tibble is built. Consumers
+  that want to programmatically distinguish the two semantics should grep
+  the reason for the bracketed `category:` tag.
+* **`design_ambiguous` flag semantics** are now documented end-to-end. The
+  flag is intentionally broad (`ambiguity_level != "clear"`) and covers
+  BOTH categories above; downstream consumers that only want the narrow
+  paired-vs-independent meaning can filter on the new category tag.
+  Documented in the `check_text()` `@return` block, in `API.md`, in the
+  frontend `/api-docs` page, and in `LESSONS.md`. No code behaviour changed.
+* **`@return` for `check_text()`** now enumerates the notable output columns
+  inline (previously a single sentence "tibble with comparison results"),
+  starting with `design_ambiguous`, `ambiguity_level`, `ambiguity_reason`,
+  and `matched_variant`.
+
 # effectcheck 0.5.10
 
 Bare `r =` with a confidence interval — a parse fix found by escicheck-iterate.
