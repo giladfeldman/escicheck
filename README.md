@@ -13,7 +13,7 @@
 `effectcheck` works on **already-extracted text**. Since v0.4.0 the package no
 longer reads files itself — `check_text()` is the single entry point. To check
 a PDF or Word document, extract its text first (with an external extractor such
-as [docpluck](https://docpluck.vercel.app), or via the
+as [docpluck](https://docpluck.app), or via the
 [ESCIMate web app](https://escimate.app)) and pass the resulting text to
 `check_text()`. See **Input** below.
 
@@ -284,7 +284,7 @@ an external extractor in v0.4.0. The former file-input functions
 To check a document:
 
 1. Extract its text with any extractor (e.g.
-   [docpluck](https://docpluck.vercel.app)), or use the
+   [docpluck](https://docpluck.app)), or use the
    [ESCIMate web app](https://escimate.app) which does this for you.
 2. Pass the extracted text to `check_text()`.
 

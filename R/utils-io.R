@@ -5,7 +5,7 @@
 .extraction_defunct_msg <- function() {
   paste0(
     "effectcheck v0.4.0+ no longer ships file extraction. ",
-    "Extract text via docpluck (https://docpluck.vercel.app/api-docs) and ",
+    "Extract text via docpluck (https://docpluck.app/api-docs) and ",
     "pass the result to check_text(). See effectcheck NEWS.md for the ",
     "migration guide."
   )
@@ -14,7 +14,7 @@
 #' Read text from .docx, .html, .txt, or .pdf (DEFUNCT in v0.4.0)
 #'
 #' This function was removed in effectcheck 0.4.0. ESCImate now delegates
-#' file extraction to [docpluck](https://docpluck.vercel.app). Extract text
+#' file extraction to [docpluck](https://docpluck.app). Extract text
 #' externally and pass the result to [check_text()].
 #'
 #' @param path File path

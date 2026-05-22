@@ -2,7 +2,7 @@
 #'
 #' All file-input functions in this file became `.Defunct()` in
 #' effectcheck 0.4.0. ESCImate delegates document extraction to
-#' [docpluck](https://docpluck.vercel.app/api-docs); pass the resulting
+#' [docpluck](https://docpluck.app/api-docs); pass the resulting
 #' text to [check_text()] for analysis.
 #'
 #' Migration:
@@ -14,7 +14,7 @@
 #'   library(httr2)
 #'   pdfs <- list.files("path/to/pdfs/", pattern = "\\\\.pdf$", full.names = TRUE)
 #'   results <- purrr::map_dfr(pdfs, function(p) \{
-#'     resp <- request("https://docpluck.vercel.app/api/extract") |>
+#'     resp <- request("https://docpluck.app/api/extract") |>
 #'       req_headers(Authorization = paste("Bearer", Sys.getenv("DOCPLUCK_API_KEY"))) |>
 #'       req_url_query(normalize = "academic", quality = "true") |>
 #'       req_body_multipart(file = curl::form_file(p)) |>
