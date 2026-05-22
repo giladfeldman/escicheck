@@ -6,7 +6,7 @@
 \description{
 All file-input functions in this file became \code{.Defunct()} in
 effectcheck 0.4.0. ESCImate delegates document extraction to
-\href{https://docpluck.vercel.app/api-docs}{docpluck}; pass the resulting
+\href{https://docpluck.app/api-docs}{docpluck}; pass the resulting
 text to \code{\link[=check_text]{check_text()}} for analysis.
 }
 \details{
@@ -19,7 +19,7 @@ Migration:
   library(httr2)
   pdfs <- list.files("path/to/pdfs/", pattern = "\\\\.pdf$", full.names = TRUE)
   results <- purrr::map_dfr(pdfs, function(p) \{
-    resp <- request("https://docpluck.vercel.app/api/extract") |>
+    resp <- request("https://docpluck.app/api/extract") |>
       req_headers(Authorization = paste("Bearer", Sys.getenv("DOCPLUCK_API_KEY"))) |>
       req_url_query(normalize = "academic", quality = "true") |>
       req_body_multipart(file = curl::form_file(p)) |>

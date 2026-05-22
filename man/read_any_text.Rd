@@ -18,7 +18,7 @@ Errors with a migration message.
 }
 \description{
 This function was removed in effectcheck 0.4.0. ESCImate now delegates
-file extraction to \href{https://docpluck.vercel.app}{docpluck}. Extract text
+file extraction to \href{https://docpluck.app}{docpluck}. Extract text
 externally and pass the result to \code{\link[=check_text]{check_text()}}.
 }
 \keyword{internal}

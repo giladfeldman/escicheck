@@ -280,7 +280,7 @@ coverage roadmap (P1, P2, P3, P6, P7).
 ## Breaking changes — extraction layer removed
 
 All file-input functions are now `.Defunct()` and emit an error directing
-callers to extract via [docpluck](https://docpluck.vercel.app) and pass the
+callers to extract via [docpluck](https://docpluck.app) and pass the
 resulting text to `check_text()`:
 
 * `read_any_text()`
@@ -298,7 +298,7 @@ The package no longer requires `poppler-utils`, `tesseract`, `magick`, or
 `qpdf` system dependencies. `SystemRequirements` field removed from
 DESCRIPTION; corresponding entries removed from `Suggests`.
 
-Migration: see <https://docpluck.vercel.app/api-docs> for the API contract.
+Migration: see <https://docpluck.app/api-docs> for the API contract.
 Working R reference implementation in the ESCImate web-app repo at
 `tests/scripts/docpluck_shootout.R`.
 
