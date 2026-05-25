@@ -2783,6 +2783,50 @@ compute_and_compare_one <- function(row,
       paste("Kendall's W reported as a standalone coefficient of concordance -",
             "cannot independently verify without the Friedman chi-square or the",
             "rater/item counts"))
+  } else if (tt == "RR") {
+    # ------ RISK RATIO (clinical trial, two-proportion form) ------
+    # v0.5.16: An RR reported with a 95% CI and a p-value (typical PLOS
+    # Medicine / NEJM clinical-trial form) is captured for surface
+    # transparency, but full independent verification requires the per-arm
+    # cell counts (n1/N1, n2/N2). When the two-proportion slash form is in
+    # the same sentence, the parser captures the cells (future v0.6.x);
+    # for now the row is an honest "extracted but not yet verified" NOTE.
+    uncertainty <- c(uncertainty,
+      paste("Risk ratio reported with 95% CI and p-value (clinical-trial form) -",
+            "row captured; full independent verification of RR vs per-arm cell",
+            "counts is a v0.6.x feature. Reported value preserved."))
+  } else if (tt == "md_hl") {
+    # ------ MEDIAN-DIFFERENCE (HODGES-LEHMANN) with IQR ------
+    # v0.5.18: Row captured for surface transparency. Hodges-Lehmann
+    # estimate independent verification requires the per-arm rank data;
+    # cannot be recomputed from a sentence-level extraction. Reported as
+    # NOTE.
+    uncertainty <- c(uncertainty,
+      paste("Median-difference (Hodges-Lehmann) with 95% CI - row captured;",
+            "full independent verification requires per-arm rank data and is",
+            "out of scope for sentence-level extraction. Reported value preserved."))
+  } else if (tt == "rdpct") {
+    # ------ RISK-DIFFERENCE PERCENT (clinical trial, Farrington-Manning) ------
+    # v0.5.17: Row captured for surface transparency; full verification
+    # against per-arm proportions / Farrington-Manning noninferiority test
+    # is a v0.6.x feature.
+    uncertainty <- c(uncertainty,
+      paste("Risk-difference percent with 95% CI (clinical-trial noninferiority",
+            "form) - row captured; full independent verification against per-arm",
+            "proportions / Farrington-Manning noninferiority test is a v0.6.x",
+            "feature. Reported value preserved."))
+  } else if (tt == "cochran_q") {
+    # ------ COCHRAN Q HETEROGENEITY (meta-analysis) ------
+    # v0.5.15: Q is chi-square(df) distributed under the homogeneity null.
+    # The p-value verification has already been wired into the p_computed
+    # dispatch above (same path as Kruskal-Wallis H). No standard effect
+    # size is recoverable from Q alone; I-squared is a heterogeneity index
+    # reported separately and is not the test's effect-size analogue. The
+    # consistency check on this row is the reported-vs-computed p-value.
+    uncertainty <- c(uncertainty,
+      paste("Cochran Q reported as a meta-analytic heterogeneity test -",
+            "no standard effect size; consistency check is on the reported",
+            "p-value vs chi-square(Q, df). I-squared not independently verified."))
   } else if (tt == "dscf") {
     # ------ DSCF (Dwass-Steel-Critchlow-Fligner) POST-HOC W ------
     # The DSCF W is the studentized-range statistic of a Kruskal-Wallis
@@ -4388,6 +4432,10 @@ compute_and_compare_one <- function(row,
           }
         } else if (tt == "H" && !is.na(df1)) {
           stats::pchisq(stat, df = df1, lower.tail = FALSE)
+        } else if (tt == "cochran_q" && !is.na(df1)) {
+          # v0.5.15: Cochran Q for heterogeneity is chi-square distributed
+          # under the null of homogeneity, same dispatch as H.
+          stats::pchisq(stat, df = df1, lower.tail = FALSE)
         } else if (tt %in% c("U", "W")) {
           z_aux <- if ("z_auxiliary" %in% names(row) && length(row$z_auxiliary) > 0) {
             as.numeric(row$z_auxiliary[1])
@@ -5292,7 +5340,7 @@ compute_and_compare_one <- function(row,
 check_text <- function(text,
                        stats = c("t", "F", "r", "chisq", "z", "U", "W", "H",
                                  "regression", "spearman", "kendall", "kendall_w",
-                                 "dscf"),
+                                 "dscf", "cochran_q", "RR", "rdpct", "md_hl"),
                        ci_level = 0.95,
                        alpha = 0.05,
                        one_tailed = FALSE,

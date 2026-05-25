@@ -700,6 +700,39 @@ parse_text <- function(text, context_window_size = 2) {
   # Kruskal-Wallis H: H(df) = value
 
   pat_H <- "H\\s*\\(\\s*(\\d+(?:\\.\\d+)?)\\s*\\)\\s*=\\s*([-+]?\\d*\\.?\\d+)"
+  # v0.5.15: Cochran Q heterogeneity test for meta-analysis. Forms in the wild:
+  #   "Q_T [40] = 104.65"  (Bartos / RoBMA convention; T = total, df in brackets)
+  #   "Q_T(40) = 104.65"   (parenthesized df variant)
+  #   "Q[40] = 104.65" / "Q(40) = 104.65"  (bare Q)
+  #   "Q_M[k] = ..." / "Q_B[k] = ..." / "Q_W[k] = ..."  (model / between / within
+  #   subscripts -- treated identically here, all chi-square distributed under
+  #   homogeneity null with the reported df). The "_<letter>" subscript is
+  #   optional; the df may be in [brackets] or (parens) with optional spaces.
+  pat_cochran_q <- "\\bQ(?:_[A-Za-z])?\\s*[\\[(]\\s*(\\d+(?:\\.\\d+)?)\\s*[\\])]\\s*=\\s*([-+]?\\d*\\.?\\d+)"
+  # v0.5.16: clinical-trial risk ratio with two-proportion slash counts.
+  # Form: "<n1>/<N1> (<pct1>%) versus|and|vs <n2>/<N2> (<pct2>%) ... RR <val>;
+  # 95% CI <lo> to <hi>; p[-]?(value)? = <pval>". The two-proportion clause
+  # and the RR clause are matched separately and conjoined in the dispatch.
+  # Found in PLOS Medicine 10.1371/journal.pmed.1004323 PROSECCO trial
+  # (4-5 results in body text); previously returned 0 stats because RR was
+  # not a recognised test_type and the slash-count form is non-APA.
+  pat_two_props_slash <- "(\\d+)\\s*/\\s*(\\d+)\\s*\\(\\s*\\d+(?:\\.\\d+)?\\s*%\\s*\\)\\s*(?:versus|vs\\.?|and|compared\\s+to)\\s*(\\d+)\\s*/\\s*(\\d+)\\s*\\(\\s*\\d+(?:\\.\\d+)?\\s*%\\s*\\)"
+  pat_RR_ci_p <- "\\bRR\\s*=?\\s*([-+]?\\d*\\.?\\d+)\\s*[;,]?\\s*95\\s*%\\s*CI\\s*([-+]?\\d*\\.?\\d+)\\s*(?:to|-)\\s*([-+]?\\d*\\.?\\d+)\\s*[;,]?\\s*[pP][- ]?(?:value)?\\s*([<=>]{0,2})\\s*([01]?\\.\\d+|[01])"
+  # v0.5.17: risk-difference percent with CI (clinical trial, Farrington-
+  # Manning noninferiority). Form: "risk difference <val>%; 95% [confidence
+  # interval (CI)|CI] <lo> to <hi>; ... p[-value]? = <pval>". The p-clause
+  # may be in the same clause (";", ",") or further along ("; noninferiority,
+  # P = 0.09"). Found in PLOS Medicine 10.1371/journal.pmed.1004323
+  # PROSECCO trial; previously returned 0 stats because risk-difference
+  # percent was not a recognised test_type.
+  pat_risk_diff <- "risk[- ]?difference\\s+(?:was\\s+|of\\s+)?([-+]?\\d+(?:\\.\\d+)?)\\s*%?\\s*[;,]?\\s*95\\s*%\\s*(?:confidence\\s*interval\\s*\\(CI\\)|CI)\\s*([-+]?\\d+(?:\\.\\d+)?)\\s*(?:to|-)\\s*([-+]?\\d+(?:\\.\\d+)?)"
+  # v0.5.18: median-difference (Hodges-Lehmann) with IQR. Form: "median
+  # difference <val>; 95% CI <lo> to <hi>; p[-value]? = <pval>". Often
+  # preceded by per-arm "<med> (<iqr_lo> to <iqr_hi>) versus <med> (...)".
+  # Found in PLOS Medicine 10.1371/journal.pmed.1004323; previously
+  # returned 0 stats because median-difference was not a recognised
+  # test_type.
+  pat_median_diff <- "median\\s+difference\\s+(?:was\\s+|of\\s+)?([-+]?\\d+(?:\\.\\d+)?)\\s*[;,]?\\s*95\\s*%\\s*(?:confidence\\s*interval\\s*\\(CI\\)|CI)\\s*([-+]?\\d+(?:\\.\\d+)?)\\s*(?:to|-)\\s*([-+]?\\d+(?:\\.\\d+)?)(?:[^a-zA-Z]*?[pP][- ]?(?:value)?\\s*([<=>]{0,2})\\s*([01]?\\.\\d+|[01]))?"
   # Auxiliary z for nonparametric tests (z co-reported with U/W)
   pat_z_aux <- "(?<![a-zA-Z])z\\s*=\\s*([-+]?\\d*\\.?\\d+)"
 
@@ -744,7 +777,14 @@ parse_text <- function(text, context_window_size = 2) {
   # Handles plain text (eta2=), caret (eta^2=), Unicode (eta-squared=), superscript (after normalize_text)
   # v0.3.0m: Added negative lookbehind to prevent matching within "beta2", "beta-squared"
   pat_eta2 <- "(?<![a-zA-Z])(?:eta\\s*[-]?squared|eta[-]?2|\u03b7\u00b2|eta\\^2|\u03b7\\^2)\\s*=\\s*([-+]?\\d*\\.?\\d+)"
-  pat_etap2 <- "(?:partial\\s*eta\\s*[-]?squared|partial\\s*eta[-]?2|partial\\s*\u03b7\u00b2|\u03b7p\u00b2|partial\\s*\u03b7\\^2|\u03b7p\\^2)\\s*=\\s*([-+]?\\d*\\.?\\d+)"
+  # v0.5.12: added eta^2p / eta^2_p forms (subscript-p AFTER the squared) \u2014 the
+  # Collabra / APA convention in the Identifiable-Victim, Experiential-vs-Material,
+  # and Less-Is-Better replications all write `\u03b7^2p = .008` with the `p`
+  # trailing the caret-2 (eta-squared-partial). Previously only `\u03b7p^2` was
+  # recognized; 13+ rows across two papers dropped their reported point estimate
+  # despite the CI being captured. Caught by the 2026-05-23 escicheck-iterate
+  # validation against the AI stats gold.
+  pat_etap2 <- "(?:partial\\s*eta\\s*[-]?squared|partial\\s*eta[-]?2|partial\\s*\u03b7\u00b2|\u03b7p\u00b2|partial\\s*\u03b7\\^2|\u03b7p\\^2|\u03b7\\^2p|\u03b7\\^2_p|eta\\^2p|eta\\^2_p)\\s*=\\s*([-+]?\\d*\\.?\\d+)"
   # v0.3.0f: Generalized eta-squared — explicit labels + PDF corruption forms
   # Must be checked BEFORE pat_eta2 since "geta-squared" contains "eta-squared"
   pat_gen_eta2 <- paste0(
@@ -846,6 +886,11 @@ parse_text <- function(text, context_window_size = 2) {
     m_U <- stringr::str_match(s, pat_U)
     m_W_stat <- stringr::str_match(s, pat_W)
     m_H <- stringr::str_match(s, pat_H)
+    m_cochran_q <- stringr::str_match(s, pat_cochran_q)
+    m_RR_ci_p <- stringr::str_match(s, pat_RR_ci_p)
+    m_two_props <- stringr::str_match(s, pat_two_props_slash)
+    m_risk_diff <- stringr::str_match(s, pat_risk_diff)
+    m_median_diff <- stringr::str_match(s, pat_median_diff)
 
     # Match p-values (try scientific notation first, then standard)
     m_p_sci <- stringr::str_match(s, pat_p_sci)
@@ -923,10 +968,26 @@ parse_text <- function(text, context_window_size = 2) {
       }
     }
 
+    # v0.5.13: suppress global-N attribution when the chunk is a Bayesian
+    # model-averaged effect (RoBMA, Bayesian model-averaging, posterior model
+    # average). Such estimates have no recoverable per-study sample size; the
+    # earlier code fell through to global_N and pulled an unrelated paper's N
+    # onto the model-averaged r, producing rows like `r = 0.002, df1 = 1002,
+    # N = 1004` (the 1004 came from a much later sentence about a frequentist
+    # r(1002) regression). Caught by the 2026-05-24 escicheck-iterate cycle 4
+    # validation against the Collabra Identifiable-Victim stats gold (finding
+    # F-002, R04).
+    bayesian_model_ctx <- grepl(
+      "\\b(?:RoBMA|Bayesian\\s+model[- ]?averag|model[- ]?averaged|posterior\\s+model\\s+average|PMA)\\b",
+      paste(s, context), ignore.case = TRUE, perl = TRUE
+    )
+
     # Fall back to global N if both failed
-    if (is.na(N_value) && !is.na(global_N)) {
+    if (is.na(N_value) && !is.na(global_N) && !bayesian_model_ctx) {
       N_value <- global_N
       N_source <- "global_text"
+    } else if (is.na(N_value) && bayesian_model_ctx) {
+      N_source <- "bayesian_model_no_n"
     }
 
     # If still no N, mark as not found
@@ -1090,6 +1151,52 @@ parse_text <- function(text, context_window_size = 2) {
           df1 <- numify(m_df_sep[2])
         }
       }
+    } else if (!all(is.na(m_RR_ci_p))) {
+      # v0.5.16: clinical-trial risk ratio with two-proportion slash counts.
+      # The two-proportion clause may or may not be in the same chunk -- if
+      # present, capture n1/N1/n2/N2 as supplementary cells; otherwise emit
+      # the RR row with cells = NA and let downstream check.R route to a
+      # NOTE (cannot independently verify without per-arm counts).
+      test_type <- "RR"
+      stat_value <- numify(m_RR_ci_p[2])
+      stat_value_decimals <- count_decimal_places(m_RR_ci_p[2])
+      # df not meaningful for RR (2x2 table); leave NA.
+      # Synthesize m_p from the RR clause when "p-value 0.44" form (no '='
+      # operator) was missed by pat_p. pat_p requires <,=,> so a bare
+      # whitespace-separated "p-value 0.44" returns no match.
+      if (all(is.na(m_p))) {
+        p_op_rr <- if (!is.na(m_RR_ci_p[5]) && nchar(m_RR_ci_p[5]) > 0) m_RR_ci_p[5] else "="
+        p_val_rr <- m_RR_ci_p[6]
+        m_p <- matrix(c(paste0("p", p_op_rr, p_val_rr), p_op_rr, p_val_rr), nrow = 1)
+      }
+    } else if (!all(is.na(m_median_diff))) {
+      # v0.5.18: median-difference (Hodges-Lehmann) with IQR + CI.
+      test_type <- "md_hl"
+      stat_value <- numify(m_median_diff[2])
+      stat_value_decimals <- count_decimal_places(m_median_diff[2])
+      # Same operator-optional p synthesis as RR -- captures "p-value 0.027".
+      if (all(is.na(m_p)) && !is.na(m_median_diff[6])) {
+        p_op_md <- if (!is.na(m_median_diff[5]) && nchar(m_median_diff[5]) > 0) m_median_diff[5] else "="
+        p_val_md <- m_median_diff[6]
+        m_p <- matrix(c(paste0("p", p_op_md, p_val_md), p_op_md, p_val_md), nrow = 1)
+      }
+    } else if (!all(is.na(m_risk_diff))) {
+      # v0.5.17: risk-difference percent with CI (clinical-trial, Farrington-
+      # Manning noninferiority). p-value may be in the same clause or later
+      # in the sentence; if pat_p didn't match anywhere in the chunk, leave
+      # p_reported NA -- check.R routes to a NOTE either way.
+      test_type <- "rdpct"
+      stat_value <- numify(m_risk_diff[2])
+      stat_value_decimals <- count_decimal_places(m_risk_diff[2])
+    } else if (!all(is.na(m_cochran_q))) {
+      # v0.5.15: Cochran Q heterogeneity (meta-analysis). Q is chi-square
+      # distributed under the homogeneity null with the bracketed/parenthesized
+      # df. No standard effect size; I-squared is a heterogeneity proportion
+      # reported separately (verified in check.R if extractable).
+      test_type <- "cochran_q"
+      df1 <- numify(m_cochran_q[2])
+      stat_value <- numify(m_cochran_q[3])
+      stat_value_decimals <- count_decimal_places(m_cochran_q[3])
     } else if (!all(is.na(m_H))) {
       # Kruskal-Wallis H(df) = value
       test_type <- "H"
@@ -1694,6 +1801,85 @@ parse_text <- function(text, context_window_size = 2) {
     ))
   }
 
-  dplyr::bind_rows(out) %>%
+  raw_out <- dplyr::bind_rows(out) %>%
     dplyr::filter(!is.na(test_type))
+
+  # v0.5.14: dedup table-fragment duplicates of body-text statistics.
+  # Replication/extension papers commonly print a summary table that lists the
+  # same correlations / effect sizes already reported in the Results body
+  # text. Each numeric appears twice in the extracted corpus: once with a full
+  # parenthesized form (e.g. `r(741) = -.43, 95% CI [-.49, -.37]`) and once
+  # as a table cell with the same value (e.g. `r = -.43 [-.49, -.37]`). The
+  # parser legitimately picks up both — but they are the same statistical
+  # result, so emitting two rows inflates the row count and lets the table
+  # fragment's check_scope drag the user-facing summary toward extraction-only
+  # status.
+  #
+  # Dedup conservatively: only collapse rows that match exactly on
+  # (test_type, stat_value within 1e-3, df1, df2, N). When two rows match,
+  # keep the one whose raw_text contains the parenthesized canonical form
+  # (e.g. `r(741)`, `t(50)`, `F(2,40)`) — that is the body-text version. The
+  # table fragment is dropped.
+  #
+  # Caught by the 2026-05-23 escicheck-iterate cycle-1 validation against
+  # collabra_57785 (Experiential-vs-Material): 3 r-row duplicates between
+  # body text and Table 8 summary.
+  if (nrow(raw_out) > 1L) {
+    has_paren <- grepl("\\b[a-zA-Z]+\\s*\\(\\d", raw_out$raw_text, perl = TRUE)
+    # For r-rows, df1 is deterministic from N (df1 = N - 2). The body-text
+    # form prints df1 explicitly (e.g. `r(741)`); the table-fragment form
+    # omits it (e.g. `r = -.43 [-.49, -.37]`). To recognize them as
+    # duplicates, normalize df1 for r-rows: when missing, fill from N-2.
+    norm_df1 <- raw_out$df1
+    is_r <- raw_out$test_type == "r"
+    fillable <- is_r & is.na(norm_df1) & !is.na(raw_out$N)
+    norm_df1[fillable] <- raw_out$N[fillable] - 2L
+
+    # Build a dedup key per row. v0.5.14 also keys on the reported CI bounds
+    # (round-tripped via the per-row ciL_reported / ciU_reported fields) and
+    # the reported effect size. The 2026-05-24 cycle-4 verifiers caught a
+    # too-coarse v0.5.14a key collapsing distinct hypothesis tests that
+    # happened to share (test_type, stat_value, df, N) but differed in CI
+    # bounds (H1a r(261)=0.45 with CI [.35,.55] vs H2a r(261)=0.45 with CI
+    # [.35,.54]) or in effect-size binding (one row has d, another does not).
+    # Two rows collapse only when ALL keyed fields match (or are both NA);
+    # any discriminating signal (CI bound differing by even 0.01, distinct
+    # effect_reported, distinct effect_reported_name) keeps them separate.
+    ciL <- raw_out$ciL_reported
+    ciU <- raw_out$ciU_reported
+    er  <- raw_out$effect_reported
+    ern <- raw_out$effect_reported_name
+    keys <- paste(
+      raw_out$test_type,
+      round(raw_out$stat_value, 3L),
+      ifelse(is.na(norm_df1), "NA", as.character(norm_df1)),
+      ifelse(is.na(raw_out$df2), "NA", as.character(raw_out$df2)),
+      ifelse(is.na(raw_out$N),   "NA", as.character(raw_out$N)),
+      ifelse(is.na(ciL), "NA", as.character(round(ciL, 3L))),
+      ifelse(is.na(ciU), "NA", as.character(round(ciU, 3L))),
+      ifelse(is.na(er),  "NA", as.character(round(er,  4L))),
+      ifelse(is.na(ern), "NA", as.character(ern)),
+      sep = "|"
+    )
+    keep <- rep(TRUE, nrow(raw_out))
+    for (k in unique(keys)) {
+      idx <- which(keys == k)
+      if (length(idx) > 1L) {
+        # Prefer rows whose raw_text has a parenthesized form (body text).
+        paren_idx <- idx[has_paren[idx]]
+        if (length(paren_idx) > 0L) {
+          # Keep the FIRST parenthesized row, drop all others in this key
+          keep[idx] <- FALSE
+          keep[paren_idx[1L]] <- TRUE
+        } else {
+          # No parenthesized form — keep the first, drop the rest
+          keep[idx] <- FALSE
+          keep[idx[1L]] <- TRUE
+        }
+      }
+    }
+    raw_out <- raw_out[keep, , drop = FALSE]
+  }
+
+  raw_out
 }

@@ -1,3 +1,122 @@
+# effectcheck 0.5.18
+
+Median-difference (Hodges-Lehmann) with IQR + CI (escicheck-iterate
+cycle 8). Completes the PLOS Med PROSECCO-trial PARSE-MISS punch-list
+opened in cycle 1.
+
+## New test type
+
+* **Median-difference (`test_type = "md_hl"`).** Parses Hodges-Lehmann
+  median-difference reports of the form `median difference <val>; 95%
+  CI <lo> to <hi>; p[-value]? = <pval>`. The HL estimate cannot be
+  independently recomputed from a sentence-level extraction (needs
+  per-arm rank data), so the row is captured as a NOTE for surface
+  transparency. Regression tests in
+  `tests/testthat/test-v0518-median-diff.R`. Caught by the 2026-05-23
+  escicheck-iterate validation against the PROSECCO trial AI stats
+  gold (10.1371/journal.pmed.1004323).
+
+# effectcheck 0.5.17
+
+Risk-difference percent with CI (escicheck-iterate cycle 7).
+
+## New test type
+
+* **Risk-difference percent (`test_type = "rdpct"`).** Parses
+  clinical-trial noninferiority risk-difference reports of the form
+  `risk difference <val>%; 95% [confidence interval (CI)|CI] <lo> to
+  <hi>; ... P = <pval>`. Full Farrington-Manning noninferiority
+  verification is deferred to v0.6.x; this cycle resolves the
+  PARSE-MISS aspect so rows appear with status NOTE. Regression tests
+  in `tests/testthat/test-v0517-risk-diff-pct.R`. Caught by the
+  2026-05-23 escicheck-iterate validation against the PROSECCO trial
+  AI stats gold (10.1371/journal.pmed.1004323).
+
+# effectcheck 0.5.16
+
+Clinical-trial risk ratio with two-proportion slash counts
+(escicheck-iterate cycle 7).
+
+## New test type
+
+* **Risk ratio (`test_type = "RR"`).** Parses clinical-trial RR reports
+  of the form `<n1>/<N1> (<pct>%) versus <n2>/<N2> (<pct>%) ... RR <val>;
+  95% CI <lo> to <hi>; p[-value]? = <pval>`. The p-clause supports both
+  `p = 0.15` and the operator-less `p-value 0.44` form common in PLOS
+  Medicine / NEJM tables. Full verification of RR against per-arm cell
+  counts is deferred to v0.6.x; this cycle resolves the PARSE-MISS
+  aspect so the row appears with status NOTE (extracted but
+  not-yet-fully-verified). Regression tests in
+  `tests/testthat/test-v0516-rr-slash-counts.R`. Caught by the
+  2026-05-23 escicheck-iterate validation against the PROSECCO trial
+  AI stats gold (10.1371/journal.pmed.1004323).
+
+# effectcheck 0.5.15
+
+Cochran Q meta-analytic heterogeneity test (escicheck-iterate cycle-5, after
+user scope decision 2026-05-24 to bring Q in-scope).
+
+## New test type
+
+* **Cochran Q (`test_type = "cochran_q"`).** Parses meta-analytic
+  heterogeneity tests of the form `Q_T [40] = 104.65, p < .001` (optional
+  subscript, brackets or parens for df). The Q statistic is chi-square
+  distributed under the homogeneity null with the reported df, so the
+  reported p-value is verified against `pchisq(Q, df, lower.tail = FALSE)`
+  in the same dispatch path as Kruskal-Wallis H. No standard effect size
+  is recoverable from Q alone; an uncertainty note records that I-squared
+  (when reported) is not independently verified. Regression tests in
+  `tests/testthat/test-v0515-cochran-q.R`. Caught by the 2026-05-23
+  escicheck-iterate validation against the Identifiable-Victim AI stats
+  gold (10.1525/collabra.90203, R03).
+
+# effectcheck 0.5.14
+
+Two narrow parse fixes from the 2026-05-24 escicheck-iterate cycle-4
+validation against the Collabra canary.
+
+## Parse fixes
+
+* **Bayesian model-averaged estimates no longer inherit a global-text N.**
+  A `r = 0.002 (95% CI [0; 0.004])` reported as the output of a RoBMA /
+  Bayesian model-averaging / posterior-model-average analysis previously
+  fell through the local -> extended -> global N cascade and picked up an
+  unrelated paper's N from somewhere later in the text (producing a
+  misleading `df1 = N-2, N = 1004` attribution on a model-averaged estimate
+  with no recoverable per-study sample size). The cascade now recognizes
+  "RoBMA", "Bayesian model-averaging", "model-averaged", "posterior model
+  average", and "PMA" markers in the local + extended context and stops
+  before the global fallback, leaving `N_source = "bayesian_model_no_n"`.
+  Regression tests in `tests/testthat/test-v0513-bayesian-no-n.R`.
+
+* **Table-fragment duplicates of body-text statistics now collapse.**
+  Replication / extension papers commonly print a summary table that lists
+  the same correlations / effect sizes already reported in the Results body.
+  Each numeric appeared twice in the extracted output: once with the full
+  parenthesized form (`r(741) = -.43, 95% CI [-.49, -.37]`) and once as a
+  table cell (`r = -.43 [-.49, -.37]`). They are now collapsed to a single
+  row by `(test_type, stat_value, df1, df2, N)` exact match, keeping the
+  parenthesized body-text version. For r-rows, the missing df1 in the
+  table-fragment row is normalized to N-2 before matching. Regression
+  tests in `tests/testthat/test-v0514-dedup-table-fragments.R`.
+
+# effectcheck 0.5.12
+
+Recall fix for the Collabra / APA partial-eta-squared convention.
+
+## Parse fixes
+
+* **`pat_etap2` now recognizes the `eta^2p` / `eta^2_p` form** (subscript-p
+  AFTER the squared symbol) in addition to the previously-supported `etap^2`
+  form (subscript-p BEFORE). Caught by the 2026-05-23 escicheck-iterate
+  validation against the AI stats gold: 13+ F-rows across two Collabra
+  replications (Identifiable Victim, Experiential-vs-Material) dropped their
+  reported partial-eta-squared point estimate (CI was captured, name + value
+  null) because every Collabra paper writes `η^2p = .008` with the p
+  trailing the caret-2. The point estimate now binds correctly; status
+  upgrades OK → PASS once the reported effect matches the computed.
+  Regression tests in `tests/testthat/test-v0512-etap2-caret-p-form.R`.
+
 # effectcheck 0.5.11
 
 Documentation-only release. The `design_ambiguous` output flag has always
