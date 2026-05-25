@@ -726,6 +726,26 @@ parse_text <- function(text, context_window_size = 2) {
   #   homogeneity null with the reported df). The "_<letter>" subscript is
   #   optional; the df may be in [brackets] or (parens) with optional spaces.
   pat_cochran_q <- "\\bQ(?:_[A-Za-z])?\\s*[\\[(]\\s*(\\d+(?:\\.\\d+)?)\\s*[\\])]\\s*=\\s*([-+]?\\d*\\.?\\d+)"
+  # v0.6.2: exact binomial test with Cohen's h effect size.
+  # Form: "(exact )?binomial p [op] <pval>[, ]Cohen('s)? h = <h>[, 95% CI [<lo>, <hi>]]"
+  # The two anchors -- "binomial p" and "Cohen('s)? h" -- are matched together
+  # in one regex (within ~80 non-period chars) so an unrelated bare "h = X"
+  # elsewhere in the verbatim cannot mismatch. Cohen's h is the verifiable
+  # quantity (the binomial p-value can be recomputed only when n/N are
+  # recoverable from the same verbatim -- handled via pat_n_out_of_N below;
+  # otherwise status routes to NOTE per the established NOTE-only template).
+  # Found in CRSP decoy-effect papers (Xiao/Zeng/Feldman 2021 et al), 2-5
+  # rows in the current harness; the analogous template will scale to any
+  # paper using exact-binomial-test reporting with Cohen's h.
+  pat_binom_h <- paste0(
+    "(?:exact\\s+)?binomial\\s+p\\s*([<=>]{1,2})\\s*",
+    "([01]?\\.\\d+|[01])",
+    "[^.]{0,80}?",
+    "Cohen'?s?\\s*h\\s*=\\s*([-+]?\\d*\\.?\\d+)"
+  )
+  # Helper for the binomial branch: "<n> out of <N> (participants|cases|...)"
+  # form, used to recover n_total when present in the same sentence.
+  pat_n_out_of_N <- "\\b(\\d+)\\s+out\\s+of\\s+(\\d+)\\b"
   # v0.5.16: clinical-trial risk ratio with two-proportion slash counts.
   # Form: "<n1>/<N1> (<pct1>%) versus|and|vs <n2>/<N2> (<pct2>%) ... RR <val>;
   # 95% CI <lo> to <hi>; p[-]?(value)? = <pval>". The two-proportion clause
@@ -912,6 +932,8 @@ parse_text <- function(text, context_window_size = 2) {
     m_W_stat <- stringr::str_match(s, pat_W)
     m_H <- stringr::str_match(s, pat_H)
     m_cochran_q <- stringr::str_match(s, pat_cochran_q)
+    m_binom_h   <- stringr::str_match(s, pat_binom_h)
+    m_n_outN    <- stringr::str_match(s, pat_n_out_of_N)
     m_RR_ci_p <- stringr::str_match(s, pat_RR_ci_p)
     m_two_props <- stringr::str_match(s, pat_two_props_slash)
     m_risk_diff <- stringr::str_match(s, pat_risk_diff)
@@ -1231,6 +1253,23 @@ parse_text <- function(text, context_window_size = 2) {
       df1 <- numify(m_cochran_q[2])
       stat_value <- numify(m_cochran_q[3])
       stat_value_decimals <- count_decimal_places(m_cochran_q[3])
+    } else if (!all(is.na(m_binom_h))) {
+      # v0.6.2: exact binomial test reported with Cohen's h. The h is the
+      # verifiable effect size; the p-value may be re-checked against
+      # binom.test() when "<n> out of <N>" is recoverable (handled in check.R).
+      # NOTE-only template -- no compute branch in this parse layer.
+      test_type <- "binomial"
+      stat_value <- numify(m_binom_h[4])
+      stat_value_decimals <- count_decimal_places(m_binom_h[4])
+      # df not meaningful for an exact binomial test (no df concept); leave NA.
+      # Synthesize m_p from the binomial clause when the in-clause "binomial p"
+      # is the ONLY p-value in the verbatim (pat_p may also catch it; this is
+      # belt-and-suspenders).
+      if (all(is.na(m_p)) && !is.na(m_binom_h[3])) {
+        p_op_b  <- if (!is.na(m_binom_h[2]) && nchar(m_binom_h[2]) > 0) m_binom_h[2] else "="
+        p_val_b <- m_binom_h[3]
+        m_p <- matrix(c(paste0("p", p_op_b, p_val_b), p_op_b, p_val_b), nrow = 1)
+      }
     } else if (!all(is.na(m_H))) {
       # Kruskal-Wallis H(df) = value
       test_type <- "H"
@@ -1339,6 +1378,16 @@ parse_text <- function(text, context_window_size = 2) {
     if (test_type == "chisq" && !is.na(chi_inline_N)) {
       N_value <- chi_inline_N
       N_source <- "chi_inline"
+    }
+
+    # v0.6.2: For binomial tests with a "<n> out of <N>" clause in the same
+    # sentence, prefer N from that clause (the binomial trial count) over
+    # context/global. check.R can then verify the reported p against
+    # binom.test(n, N, p_null) when n_total + effect_reported (Cohen's h)
+    # are both present.
+    if (!is.na(test_type) && test_type == "binomial" && !all(is.na(m_n_outN))) {
+      N_value <- numify_int(m_n_outN[3])
+      N_source <- "binom_n_out_of_N"
     }
 
     # v0.5.8 (T3 residual): chi-square-scoped bare-n fallback. A bare lowercase
@@ -1500,9 +1549,11 @@ parse_text <- function(text, context_window_size = 2) {
       effect_reported <- numify(m_IRR[2])
       effect_reported_decimals <- count_decimal_places(m_IRR[2])
     } else if (!all(is.na(m_h))) {
-      # Cohen's h - only accept when co-occurring with a chi-square or z-test
-      # to avoid false positives from bare "h = X" in other contexts
-      if (!is.na(test_type) && test_type %in% c("chisq", "z")) {
+      # Cohen's h - accept when co-occurring with a chi-square, z, or binomial
+      # test (v0.6.2 adds binomial: the binomial-with-h pattern is the v0.6.2
+      # use case). Other contexts left out to avoid false positives from a
+      # bare "h = X" elsewhere.
+      if (!is.na(test_type) && test_type %in% c("chisq", "z", "binomial")) {
         effect_name <- "h"
         effect_reported <- numify(m_h[2])
         effect_reported_decimals <- count_decimal_places(m_h[2])
