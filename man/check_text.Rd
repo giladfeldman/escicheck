@@ -7,7 +7,7 @@
 check_text(
   text,
   stats = c("t", "F", "r", "chisq", "z", "U", "W", "H", "regression", "spearman",
-    "kendall", "kendall_w", "dscf"),
+    "kendall", "kendall_w", "dscf", "cochran_q", "RR", "rdpct", "md_hl"),
   ci_level = 0.95,
   alpha = 0.05,
   one_tailed = FALSE,
