@@ -2922,6 +2922,51 @@ compute_and_compare_one <- function(row,
       paste("Cochran Q reported as a meta-analytic heterogeneity test -",
             "no standard effect size; consistency check is on the reported",
             "p-value vs chi-square(Q, df). I-squared not independently verified."))
+  } else if (tt == "binomial") {
+    # ------ EXACT BINOMIAL TEST WITH COHEN'S H ------
+    # v0.6.2: When the verbatim is "<n> out of <N> ... binomial p [op] X,
+    # Cohen's h = Y", the parser sets test_type="binomial", stat_value=h,
+    # N=N (from pat_n_out_of_N when present). Independent verification:
+    # if both n_obs (from "<n> out of <N>") and the null proportion are
+    # recoverable, recompute the two-sided binomial p via binom.test() and
+    # compare against p_reported. Cohen's h itself is NOT independently
+    # checkable from a single proportion + null (it needs the two compared
+    # proportions explicitly — if only "X% chose the target" is reported,
+    # we accept the h as reported and route to NOTE).
+    rt <- if ("raw_text" %in% names(row) && length(row$raw_text) > 0)
+            as.character(row$raw_text[1]) else ""
+    n_obs <- if (nchar(rt) > 0 && !all(is.na(stringr::str_match(rt, "\\b(\\d+)\\s+out\\s+of\\s+\\d+\\b"))))
+              suppressWarnings(as.integer(stringr::str_match(rt, "\\b(\\d+)\\s+out\\s+of\\s+\\d+\\b")[1, 2]))
+             else NA_integer_
+    # Default null proportion: 0.5 (most common in binomial-vs-chance reports).
+    # Future v0.6.3+: detect a stated null proportion ("vs 1/3 chance" etc.)
+    # from the verbatim and override.
+    p_null_guess <- 0.5
+    if (!is.na(N) && !is.na(n_obs) && N > 0 && n_obs >= 0 && n_obs <= N) {
+      p_computed_binom <- tryCatch(
+        stats::binom.test(n_obs, N, p = p_null_guess)$p.value,
+        error = function(e) NA_real_
+      )
+      if (!is.na(p_computed_binom) && !is.na(p_reported)) {
+        delta_p <- abs(p_computed_binom - p_reported)
+        uncertainty <- c(uncertainty, sprintf(
+          paste("Exact binomial test verified: n=%d, N=%d, p_null=%.2f,",
+                "computed two-sided p=%.4f, reported p=%.4f, |delta|=%.4f.",
+                "(v0.6.2 -- assumes p_null=0.5; future versions will detect",
+                "stated null proportions in the same verbatim.)"),
+          n_obs, N, p_null_guess, p_computed_binom, p_reported, delta_p))
+      } else {
+        uncertainty <- c(uncertainty,
+          paste("Exact binomial test with Cohen's h reported -",
+                "binomial p recomputed from n out of N; verification deferred",
+                "(missing p_reported or computation error)."))
+      }
+    } else {
+      uncertainty <- c(uncertainty,
+        paste("Exact binomial test with Cohen's h reported - n / N not",
+              "recoverable from the same verbatim, so the binomial p cannot",
+              "be independently recomputed. Cohen's h is accepted as reported."))
+    }
   } else if (tt == "dscf") {
     # ------ DSCF (Dwass-Steel-Critchlow-Fligner) POST-HOC W ------
     # The DSCF W is the studentized-range statistic of a Kruskal-Wallis
@@ -5443,7 +5488,8 @@ compute_and_compare_one <- function(row,
 check_text <- function(text,
                        stats = c("t", "F", "r", "chisq", "z", "U", "W", "H",
                                  "regression", "spearman", "kendall", "kendall_w",
-                                 "dscf", "cochran_q", "RR", "rdpct", "md_hl"),
+                                 "dscf", "cochran_q", "RR", "rdpct", "md_hl",
+                                 "binomial"),
                        ci_level = 0.95,
                        alpha = 0.05,
                        one_tailed = FALSE,

@@ -1,3 +1,30 @@
+# effectcheck 0.6.2
+
+Exact binomial test reported with Cohen's h. New `test_type = "binomial"`
+matched via `pat_binom_h`, anchored on a "binomial p [op] <pval>" clause
+followed (within ~80 non-period chars) by "Cohen('s)? h = <h>". When a
+"<n> out of <N>" clause is present in the same verbatim, N is recovered
+(`N_source = "binom_n_out_of_N"`) and check.R re-computes the two-sided
+binomial p via `stats::binom.test()` assuming p_null = 0.5 (the most
+common null in binomial-vs-chance reporting); the recomputed vs reported
+delta appears in `uncertainty_reasons`. When N isn't recoverable, status
+routes to NOTE -- the Cohen's h is accepted as reported.
+
+Surfaced by the 2026-05-25 escicheck-iterate corpus expansion against the
+CRSP decoy-effect papers (Xiao/Zeng/Feldman 2021 et al), where 2-5
+binomial-with-h rows previously fell through to WEAK_GOLD or
+OUT_OF_SCOPE. The NOTE-only template (LESSONS.md "NOTE-only test_type
+template") was extended cleanly: parse layer adds the pattern + dispatch
+branch, check.R adds a `tt == "binomial"` branch with conditional
+recompute. A v0.6.3 follow-up could detect a stated null proportion ("vs
+1/3 chance" etc.) to replace the p_null = 0.5 default.
+
+Regression tests in `tests/testthat/test-v062-binomial-h.R` (7 cases:
+full CRSP verbatim with N recovery, bare binomial+h with N=NA NOTE,
+80-char-lookahead far-apart rejection, "h" without "binomial p" anchor
+guard, chisq+h still routes to chisq, lowercase "cohen h" form, and
+uncertainty-message contents when N is recovered).
+
 # effectcheck 0.6.1
 
 Bare `t = X, p [op] Y` (no df) extraction. Surfaced by the Lee-Feldman 2025
