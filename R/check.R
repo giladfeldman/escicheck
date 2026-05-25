@@ -573,7 +573,12 @@ compute_and_compare_one <- function(row,
       stat_value_decimals      = NA_integer_,
       ci_expected              = FALSE,
       ci_reported              = FALSE,
-      df_arity_mismatch        = TRUE
+      df_arity_mismatch        = TRUE,
+      # v0.6.0: per-arm cells (NA on the df-arity-mismatch short-circuit)
+      arm1_events = NA_real_,
+      arm1_total  = NA_real_,
+      arm2_events = NA_real_,
+      arm2_total  = NA_real_
     ))
   }
 
@@ -2785,36 +2790,126 @@ compute_and_compare_one <- function(row,
             "rater/item counts"))
   } else if (tt == "RR") {
     # ------ RISK RATIO (clinical trial, two-proportion form) ------
-    # v0.5.16: An RR reported with a 95% CI and a p-value (typical PLOS
-    # Medicine / NEJM clinical-trial form) is captured for surface
-    # transparency, but full independent verification requires the per-arm
-    # cell counts (n1/N1, n2/N2). When the two-proportion slash form is in
-    # the same sentence, the parser captures the cells (future v0.6.x);
-    # for now the row is an honest "extracted but not yet verified" NOTE.
-    uncertainty <- c(uncertainty,
-      paste("Risk ratio reported with 95% CI and p-value (clinical-trial form) -",
-            "row captured; full independent verification of RR vs per-arm cell",
-            "counts is a v0.6.x feature. Reported value preserved."))
+    # v0.6.0: when the per-arm cells were captured by pat_two_props_slash
+    # (parse.R), compute the RR independently from (e1/N1)/(e2/N2) and a
+    # Wald-on-log 95% CI; surface computed-vs-reported delta in the NOTE.
+    # When cells are NOT in the same sentence, fall back to the v0.5.16
+    # "captured but unverified" NOTE.
+    e1 <- if ("arm1_events" %in% names(row)) row$arm1_events[1] else NA_real_
+    N1 <- if ("arm1_total"  %in% names(row)) row$arm1_total[1]  else NA_real_
+    e2 <- if ("arm2_events" %in% names(row)) row$arm2_events[1] else NA_real_
+    N2 <- if ("arm2_total"  %in% names(row)) row$arm2_total[1]  else NA_real_
+    has_cells <- !any(is.na(c(e1, N1, e2, N2))) && N1 > 0 && N2 > 0 &&
+                 e1 >= 0 && e2 >= 0 && e1 <= N1 && e2 <= N2 && e2 > 0
+    if (has_cells) {
+      p1 <- e1 / N1; p2 <- e2 / N2
+      RR_computed <- p1 / p2
+      RR_reported <- stat
+      delta_RR <- abs(RR_reported - RR_computed)
+      # Wald-on-log CI (large-sample; standard FDA/CONSORT method).
+      # SE_log_RR uses Katz-type formula; zero events handled by has_cells gate.
+      se_log_rr <- if (e1 > 0) sqrt(1/e1 - 1/N1 + 1/e2 - 1/N2) else NA_real_
+      ci_msg <- if (!is.na(se_log_rr) && is.finite(se_log_rr)) {
+        ci_lo <- RR_computed * exp(-1.96 * se_log_rr)
+        ci_hi <- RR_computed * exp( 1.96 * se_log_rr)
+        sprintf("computed 95%% CI [%.2f, %.2f] (Wald-on-log)", ci_lo, ci_hi)
+      } else ""
+      uncertainty <- c(uncertainty, sprintf(
+        paste("Risk ratio verified against per-arm cells:",
+              "reported RR=%.3f, computed RR=(%g/%g)/(%g/%g)=%.3f,",
+              "delta=%.3f. %s. (v0.6.0 -- Wald-on-log CI;",
+              "Fisher-exact / chi-square p-value not yet wired.)"),
+        RR_reported, e1, N1, e2, N2, RR_computed, delta_RR, ci_msg))
+    } else {
+      uncertainty <- c(uncertainty,
+        paste("Risk ratio reported with 95% CI and p-value (clinical-trial form) -",
+              "per-arm cells not in the same sentence as RR;",
+              "independent verification requires the slash-count clause",
+              "(<events1>/<total1> versus <events2>/<total2>) in scope."))
+    }
   } else if (tt == "md_hl") {
     # ------ MEDIAN-DIFFERENCE (HODGES-LEHMANN) with IQR ------
-    # v0.5.18: Row captured for surface transparency. Hodges-Lehmann
-    # estimate independent verification requires the per-arm rank data;
-    # cannot be recomputed from a sentence-level extraction. Reported as
-    # NOTE.
-    uncertainty <- c(uncertainty,
-      paste("Median-difference (Hodges-Lehmann) with 95% CI - row captured;",
-            "full independent verification requires per-arm rank data and is",
-            "out of scope for sentence-level extraction. Reported value preserved."))
+    # v0.6.0: Hodges-Lehmann point estimate cannot be recomputed from a
+    # sentence-level extraction (needs raw per-arm ranks), but we CAN
+    # sanity-check (a) CI symmetry around the point estimate -- HL CIs are
+    # usually symmetric when the per-arm distributions are symmetric, so
+    # strong asymmetry flags a likely reporting/extraction error -- and
+    # (b) p-CI consistency (p<.05 iff 0 outside the 95% CI).
+    cl <- if ("ciL_reported" %in% names(row)) row$ciL_reported[1] else NA_real_
+    cu <- if ("ciU_reported" %in% names(row)) row$ciU_reported[1] else NA_real_
+    md_msg_parts <- character(0)
+    if (!is.na(cl) && !is.na(cu) && !is.na(stat)) {
+      width  <- cu - cl
+      below  <- stat - cl
+      above  <- cu - stat
+      asym   <- if (width > 0) abs(below - above) / width else NA_real_
+      if (!is.na(asym) && asym > 0.15) {
+        md_msg_parts <- c(md_msg_parts, sprintf(
+          "CI is asymmetric around the point estimate (|below-above|/width=%.2f > 0.15)",
+          asym))
+      }
+      if (!is.na(p_reported)) {
+        zero_in_ci <- (cl <= 0 && cu >= 0)
+        sig_p <- p_reported < 0.05
+        if (sig_p && zero_in_ci) {
+          md_msg_parts <- c(md_msg_parts,
+            "p < .05 but 0 lies inside the 95% CI (p-CI inconsistency)")
+        } else if (!sig_p && !zero_in_ci) {
+          md_msg_parts <- c(md_msg_parts,
+            "p >= .05 but 0 lies outside the 95% CI (p-CI inconsistency)")
+        }
+      }
+    }
+    if (length(md_msg_parts) > 0) {
+      uncertainty <- c(uncertainty, paste0(
+        "Median-difference (Hodges-Lehmann) sanity-check flags: ",
+        paste(md_msg_parts, collapse = "; "),
+        ". (v0.6.0; full HL recompute requires per-arm rank data.)"))
+    } else {
+      uncertainty <- c(uncertainty,
+        paste("Median-difference (Hodges-Lehmann) with 95% CI - CI-symmetry",
+              "and p-CI-consistency sanity checks passed. Full HL recompute",
+              "requires per-arm rank data and is out of scope for sentence-level",
+              "extraction."))
+    }
   } else if (tt == "rdpct") {
     # ------ RISK-DIFFERENCE PERCENT (clinical trial, Farrington-Manning) ------
-    # v0.5.17: Row captured for surface transparency; full verification
-    # against per-arm proportions / Farrington-Manning noninferiority test
-    # is a v0.6.x feature.
-    uncertainty <- c(uncertainty,
-      paste("Risk-difference percent with 95% CI (clinical-trial noninferiority",
-            "form) - row captured; full independent verification against per-arm",
-            "proportions / Farrington-Manning noninferiority test is a v0.6.x",
-            "feature. Reported value preserved."))
+    # v0.6.0: when per-arm cells are captured by pat_two_props_slash, compute
+    # the RD (in percent units) independently and a Wald CI; surface
+    # computed-vs-reported delta in the NOTE. Farrington-Manning iterative
+    # MLE noninferiority p is NOT implemented; the Wald CI is an honest
+    # large-sample approximation suitable for sanity-checking the reported
+    # point estimate, not for noninferiority decisions.
+    e1 <- if ("arm1_events" %in% names(row)) row$arm1_events[1] else NA_real_
+    N1 <- if ("arm1_total"  %in% names(row)) row$arm1_total[1]  else NA_real_
+    e2 <- if ("arm2_events" %in% names(row)) row$arm2_events[1] else NA_real_
+    N2 <- if ("arm2_total"  %in% names(row)) row$arm2_total[1]  else NA_real_
+    has_cells <- !any(is.na(c(e1, N1, e2, N2))) && N1 > 0 && N2 > 0 &&
+                 e1 >= 0 && e2 >= 0 && e1 <= N1 && e2 <= N2
+    if (has_cells) {
+      p1 <- e1 / N1; p2 <- e2 / N2
+      RD_pct_computed <- 100 * (p1 - p2)
+      delta_RD <- abs(stat - RD_pct_computed)
+      se_rd_pct <- 100 * sqrt(p1 * (1 - p1) / N1 + p2 * (1 - p2) / N2)
+      ci_msg <- if (is.finite(se_rd_pct) && se_rd_pct > 0) {
+        ci_lo <- RD_pct_computed - 1.96 * se_rd_pct
+        ci_hi <- RD_pct_computed + 1.96 * se_rd_pct
+        sprintf("computed 95%% CI [%.2f, %.2f]%% (Wald)", ci_lo, ci_hi)
+      } else ""
+      uncertainty <- c(uncertainty, sprintf(
+        paste("Risk-difference percent verified against per-arm cells:",
+              "reported RD=%.2f%%, computed RD=100*(%g/%g - %g/%g)=%.2f%%,",
+              "delta=%.2f pp. %s. (v0.6.0 -- Wald CI;",
+              "Farrington-Manning noninferiority MLE not yet wired.)"),
+        stat, e1, N1, e2, N2, RD_pct_computed, delta_RD, ci_msg))
+    } else {
+      uncertainty <- c(uncertainty,
+        paste("Risk-difference percent with 95% CI (clinical-trial noninferiority",
+              "form) - per-arm cells not in the same sentence as the",
+              "risk-difference clause; independent verification requires the",
+              "slash-count clause (<events1>/<total1> versus <events2>/<total2>)",
+              "in scope."))
+    }
   } else if (tt == "cochran_q") {
     # ------ COCHRAN Q HETEROGENEITY (meta-analysis) ------
     # v0.5.15: Q is chi-square(df) distributed under the homogeneity null.
@@ -5262,7 +5357,15 @@ compute_and_compare_one <- function(row,
     alternative_formulas = alternative_formulas,
     best_practice_notes = best_practice_notes,
     # v0.3.6: df_arity_mismatch flag (FALSE for normal computation path)
-    df_arity_mismatch = FALSE
+    df_arity_mismatch = FALSE,
+    # v0.6.0: per-arm cells from pat_two_props_slash (RR / rdpct rows).
+    # NA on any row where the slash-count clause was absent or test_type is
+    # not RR / rdpct. Surfaced for downstream visibility (frontend table,
+    # MetaESCI audit).
+    arm1_events = if ("arm1_events" %in% names(row)) row$arm1_events[1] else NA_real_,
+    arm1_total  = if ("arm1_total"  %in% names(row)) row$arm1_total[1]  else NA_real_,
+    arm2_events = if ("arm2_events" %in% names(row)) row$arm2_events[1] else NA_real_,
+    arm2_total  = if ("arm2_total"  %in% names(row)) row$arm2_total[1]  else NA_real_
   )
 }
 
@@ -5526,7 +5629,12 @@ check_text <- function(text,
           ci_expected              = FALSE,
           ci_reported              = FALSE,
           # v0.3.6: df_arity_mismatch flag (FALSE on error path)
-          df_arity_mismatch        = FALSE
+          df_arity_mismatch        = FALSE,
+          # v0.6.0: per-arm cells (NA on the error path)
+          arm1_events = NA_real_,
+          arm1_total  = NA_real_,
+          arm2_events = NA_real_,
+          arm2_total  = NA_real_
         )
       }
     )

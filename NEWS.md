@@ -1,3 +1,56 @@
+# effectcheck 0.6.1
+
+Bare `t = X, p [op] Y` (no df) extraction. Surfaced by the Lee-Feldman 2025
+RSOS Newman-2014 RR replication during the 2026-05-25 escicheck-iterate
+corpus expansion (24 occurrences in one paper's Tables 10-15: compact
+`<label> M = m (sd), t = X, p < .001` form where df lives only in the table
+header, not the immediate sentence). Before v0.6.1 such reports returned 0
+rows from `check_text()`.
+
+A new `pat_t_p_nodf` pattern matches `t = X` followed within ~80 chars by a
+`p [<=>]` clause; `(?<![a-zA-Z])` keeps `dt =`, `pt =`, etc. from
+false-positive matching, and the 80-char lookahead bound prevents a stray
+`t = X` from being yoked to an unrelated downstream `p =` in long prose.
+`df1` stays NA — check.R routes to status NOTE because the exact p-check
+needs df. Dispatch position: AFTER `pat_t_nodf` (`t = X, df = Y` form keeps
+priority and yields status=OK with full verification when df is present).
+
+Regression tests in `tests/testthat/test-v061-bare-t-p-nodf.R`.
+
+# effectcheck 0.6.0
+
+Clinical-trial RR / rdpct / md_hl independent verification, completing the
+v0.5.16/17/18 PROSECCO-trial test-type set. Closes the deferred v0.6.x
+follow-through promised in the v0.5.16-18 NEWS entries.
+
+## Verification (the v0.5.x NOTE rows now compute a comparison)
+
+* **`RR`** -- when the per-arm slash-count clause
+  (`<events1>/<total1> ... versus <events2>/<total2>`) is in the same
+  sentence as the RR clause, `check_text()` computes
+  `RR = (events1/total1) / (events2/total2)` independently and reports the
+  reported-vs-computed delta + a Wald-on-log 95% CI in the row's
+  uncertainty message. Fisher-exact / chi-square p-value verification
+  remains future work (v0.6.x+).
+* **`rdpct`** -- same per-arm cells produce
+  `RD = 100 * (events1/total1 - events2/total2)` and a Wald 95% CI.
+  Farrington-Manning iterative-MLE noninferiority p is honestly
+  not-yet-wired and the message says so; the Wald approximation is
+  suitable for sanity-checking the point estimate, not for
+  noninferiority decisions.
+* **`md_hl`** -- the Hodges-Lehmann point estimate cannot be recomputed
+  from sentence-level text (needs per-arm rank data), so the row carries
+  two sanity checks instead: (a) CI symmetry around the point estimate
+  (asymmetric CIs are flagged: `|below - above| / width > 0.15`); (b)
+  p-CI consistency (`p < .05 iff 0 outside the 95% CI`).
+* **New per-row columns**: `arm1_events`, `arm1_total`, `arm2_events`,
+  `arm2_total` -- the captured per-arm cells (NA for any row not parsed
+  as RR or rdpct, or where the slash-count clause was absent). Additive
+  schema change; does not break MetaESCI-critical columns.
+
+Regression tests in `tests/testthat/test-v060-rr-rdpct-mdhl-verification.R`.
+Closes the `2026-05-25-v06x-clinical-trial-compute-branches` handoff.
+
 # effectcheck 0.5.18
 
 Median-difference (Hodges-Lehmann) with IQR + CI (escicheck-iterate
