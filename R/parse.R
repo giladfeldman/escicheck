@@ -516,7 +516,11 @@ parse_text <- function(text, context_window_size = 2) {
       b_coeff = numeric(0),
       SE_coeff = numeric(0),
       adj_R2 = numeric(0),
-      df_arity_mismatch = logical(0)
+      df_arity_mismatch = logical(0),
+      arm1_events = numeric(0),
+      arm1_total  = numeric(0),
+      arm2_events = numeric(0),
+      arm2_total  = numeric(0)
     ))
   }
 
@@ -643,7 +647,11 @@ parse_text <- function(text, context_window_size = 2) {
       b_coeff = numeric(0),
       SE_coeff = numeric(0),
       adj_R2 = numeric(0),
-      df_arity_mismatch = logical(0)
+      df_arity_mismatch = logical(0),
+      arm1_events = numeric(0),
+      arm1_total  = numeric(0),
+      arm2_events = numeric(0),
+      arm2_total  = numeric(0)
     ))
   }
 
@@ -652,6 +660,15 @@ parse_text <- function(text, context_window_size = 2) {
   pat_t <- "t\\s*\\(\\s*(\\d+(?:\\.\\d+)?)\\s*\\)\\s*=\\s*([-+]?\\d*\\.?\\d+)"
   # t-test without parenthetical df: "t = value, df = value"
   pat_t_nodf <- "\\bt\\s*=\\s*([-+]?\\d*\\.?\\d+)\\s*,\\s*df\\s*=\\s*(\\d+(?:\\.\\d+)?)"
+  # v0.6.1: bare "t = value, ..., p [op] value" with NO df anywhere.
+  # Common in compact tables / inline reports where df lives in a header / sample
+  # description but not in the immediate sentence. Accepts t followed (within
+  # ~80 chars) by a p-clause. Word-boundary lookbehind avoids matching `dt =`,
+  # `pt = `, etc. The trailing p-anchor distinguishes a genuine t-test report
+  # from any unrelated "t = value" (e.g. a time variable). df1 stays NA and the
+  # downstream NA-N guard at check.R:1390 yields status=NOTE (extracted but not
+  # exactly verifiable without df).
+  pat_t_p_nodf <- "(?<![a-zA-Z])t\\s*=\\s*([-+]?\\d*\\.?\\d+)(?=[^a-zA-Z]{1,80}?[pP]\\s*[<=>])"
   # F-test: F(df1, df2) = value OR F[df1, df2] = value (square brackets for Scientific Reports)
   pat_F <- "F\\s*[\\(\\[]\\s*(\\d+(?:\\.\\d+)?)\\s*,\\s*(\\d+(?:\\.\\d+)?)\\s*[\\)\\]]\\s*=\\s*([-+]?\\d*\\.?\\d+)"
   # z-test: z = value, z=value (with/without spaces)
@@ -716,7 +733,14 @@ parse_text <- function(text, context_window_size = 2) {
   # Found in PLOS Medicine 10.1371/journal.pmed.1004323 PROSECCO trial
   # (4-5 results in body text); previously returned 0 stats because RR was
   # not a recognised test_type and the slash-count form is non-APA.
-  pat_two_props_slash <- "(\\d+)\\s*/\\s*(\\d+)\\s*\\(\\s*\\d+(?:\\.\\d+)?\\s*%\\s*\\)\\s*(?:versus|vs\\.?|and|compared\\s+to)\\s*(\\d+)\\s*/\\s*(\\d+)\\s*\\(\\s*\\d+(?:\\.\\d+)?\\s*%\\s*\\)"
+  # v0.6.0: relaxed to allow up to ~30 characters of non-comma/non-semicolon
+  # text between the closing %) and the separator word, so clinical-trial
+  # sentences with intervening descriptors -- "8/106 (7.5%) women under PSA
+  # and 5/101 (5.0%) women under GA" -- still capture the per-arm cells.
+  # Limited to [^,;] to prevent the match from crossing into a different
+  # clause; clinical-trial sentences universally keep arm descriptors
+  # comma/semicolon-free.
+  pat_two_props_slash <- "(\\d+)\\s*/\\s*(\\d+)\\s*\\(\\s*\\d+(?:\\.\\d+)?\\s*%\\s*\\)\\s*[^,;]{0,40}?\\s*(?:versus|vs\\.?|and|compared\\s+to)\\s*[^,;]{0,40}?\\s*(\\d+)\\s*/\\s*(\\d+)\\s*\\(\\s*\\d+(?:\\.\\d+)?\\s*%\\s*\\)"
   pat_RR_ci_p <- "\\bRR\\s*=?\\s*([-+]?\\d*\\.?\\d+)\\s*[;,]?\\s*95\\s*%\\s*CI\\s*([-+]?\\d*\\.?\\d+)\\s*(?:to|-)\\s*([-+]?\\d*\\.?\\d+)\\s*[;,]?\\s*[pP][- ]?(?:value)?\\s*([<=>]{0,2})\\s*([01]?\\.\\d+|[01])"
   # v0.5.17: risk-difference percent with CI (clinical trial, Farrington-
   # Manning noninferiority). Form: "risk difference <val>%; 95% [confidence
@@ -875,6 +899,7 @@ parse_text <- function(text, context_window_size = 2) {
     # Match test statistics
     m_t <- stringr::str_match(s, pat_t)
     m_t_nodf <- stringr::str_match(s, pat_t_nodf)
+    m_t_p_nodf <- stringr::str_match(s, pat_t_p_nodf)
     m_F <- stringr::str_match(s, pat_F)
     m_z <- stringr::str_match(s, pat_z)
     m_r <- stringr::str_match(s, pat_r)
@@ -1065,6 +1090,18 @@ parse_text <- function(text, context_window_size = 2) {
       stat_value <- numify(m_t_nodf[2])
       stat_value_decimals <- count_decimal_places(m_t_nodf[2])
       df1 <- numify(m_t_nodf[3])
+    } else if (!all(is.na(m_t_p_nodf))) {
+      # v0.6.1: bare "t = value" near a p-clause, NO df. Compact table /
+      # inline-report form. df1 stays NA; check.R routes to NOTE because the
+      # exact p-check needs df. Less strict than pat_t_nodf — the p-clause
+      # anchor in the regex is what disambiguates a real t-test from any
+      # unrelated "t = value". See parse.R::pat_t_p_nodf for the rationale.
+      test_type <- "t"
+      stat_value <- numify(m_t_p_nodf[2])
+      stat_value_decimals <- count_decimal_places(m_t_p_nodf[2])
+      # df1 remains NA — downstream Phase 5/6/7 paths handle NA-df by either
+      # using a back-computed bound from N (when N is recoverable) or returning
+      # status=NOTE.
     } else if (!all(is.na(m_F))) {
       test_type <- "F"
       df1 <- numify(m_F[2])
@@ -1153,17 +1190,14 @@ parse_text <- function(text, context_window_size = 2) {
       }
     } else if (!all(is.na(m_RR_ci_p))) {
       # v0.5.16: clinical-trial risk ratio with two-proportion slash counts.
-      # The two-proportion clause may or may not be in the same chunk -- if
-      # present, capture n1/N1/n2/N2 as supplementary cells; otherwise emit
-      # the RR row with cells = NA and let downstream check.R route to a
-      # NOTE (cannot independently verify without per-arm counts).
+      # v0.6.0: when the two-proportion clause IS in the same chunk, capture
+      # the per-arm event/total cells so check.R can compute RR independently.
       test_type <- "RR"
       stat_value <- numify(m_RR_ci_p[2])
       stat_value_decimals <- count_decimal_places(m_RR_ci_p[2])
       # df not meaningful for RR (2x2 table); leave NA.
       # Synthesize m_p from the RR clause when "p-value 0.44" form (no '='
-      # operator) was missed by pat_p. pat_p requires <,=,> so a bare
-      # whitespace-separated "p-value 0.44" returns no match.
+      # operator) was missed by pat_p.
       if (all(is.na(m_p))) {
         p_op_rr <- if (!is.na(m_RR_ci_p[5]) && nchar(m_RR_ci_p[5]) > 0) m_RR_ci_p[5] else "="
         p_val_rr <- m_RR_ci_p[6]
@@ -1684,6 +1718,36 @@ parse_text <- function(text, context_window_size = 2) {
       ci_level <- 0.95
     }
 
+    # v0.6.0: clinical-trial CI fallback. The pat_CI1..4 patterns only match
+    # bracket / parenthesis forms ([lo, hi], (lo; hi)); the "<lo> to <hi>"
+    # form used by RR / rdpct / md_hl sentences is captured INSIDE
+    # pat_RR_ci_p (groups 3, 4) / pat_risk_diff (3, 4) / pat_median_diff
+    # (3, 4) and would otherwise be discarded. Pull the CI bounds from
+    # whichever clinical-trial pattern is in scope when no other CI was
+    # matched, so md_hl can sanity-check CI symmetry and downstream CI-audit
+    # columns (ci_reported etc.) see the bounds.
+    if (is.na(ciL) && is.na(ciU)) {
+      if (!is.na(test_type) && test_type == "RR" && !all(is.na(m_RR_ci_p))) {
+        ciL <- numify(m_RR_ci_p[3])
+        ciU <- numify(m_RR_ci_p[4])
+        ciL_reported_decimals <- count_decimal_places(m_RR_ci_p[3])
+        ciU_reported_decimals <- count_decimal_places(m_RR_ci_p[4])
+        if (is.na(ci_level)) { ci_level <- 0.95; ci_level_source <- "assumed_95" }
+      } else if (!is.na(test_type) && test_type == "rdpct" && !all(is.na(m_risk_diff))) {
+        ciL <- numify(m_risk_diff[3])
+        ciU <- numify(m_risk_diff[4])
+        ciL_reported_decimals <- count_decimal_places(m_risk_diff[3])
+        ciU_reported_decimals <- count_decimal_places(m_risk_diff[4])
+        if (is.na(ci_level)) { ci_level <- 0.95; ci_level_source <- "assumed_95" }
+      } else if (!is.na(test_type) && test_type == "md_hl" && !all(is.na(m_median_diff))) {
+        ciL <- numify(m_median_diff[3])
+        ciU <- numify(m_median_diff[4])
+        ciL_reported_decimals <- count_decimal_places(m_median_diff[3])
+        ciU_reported_decimals <- count_decimal_places(m_median_diff[4])
+        if (is.na(ci_level)) { ci_level <- 0.95; ci_level_source <- "assumed_95" }
+      }
+    }
+
     # Only return row if we found a test statistic
     if (is.na(test_type)) {
       return(NULL)
@@ -1750,7 +1814,21 @@ parse_text <- function(text, context_window_size = 2) {
       b_coeff = b_coeff,
       SE_coeff = SE_coeff,
       adj_R2 = adj_R2_val,
-      df_arity_mismatch = df_arity_mismatch
+      df_arity_mismatch = df_arity_mismatch,
+      # v0.6.0: clinical-trial per-arm cells (events / totals) extracted from
+      # pat_two_props_slash when a "<n1>/<N1> ... versus <n2>/<N2>" clause is
+      # in the same chunk as an RR or risk-difference report. Used by check.R
+      # to compute RR / RD% independently and verify against the reported value.
+      # NA for any row where the slash-count clause was absent or the test is
+      # not RR / rdpct.
+      arm1_events = if (!all(is.na(m_two_props)) && !is.na(test_type) &&
+                        test_type %in% c("RR", "rdpct")) numify_int(m_two_props[2]) else NA_real_,
+      arm1_total  = if (!all(is.na(m_two_props)) && !is.na(test_type) &&
+                        test_type %in% c("RR", "rdpct")) numify_int(m_two_props[3]) else NA_real_,
+      arm2_events = if (!all(is.na(m_two_props)) && !is.na(test_type) &&
+                        test_type %in% c("RR", "rdpct")) numify_int(m_two_props[4]) else NA_real_,
+      arm2_total  = if (!all(is.na(m_two_props)) && !is.na(test_type) &&
+                        test_type %in% c("RR", "rdpct")) numify_int(m_two_props[5]) else NA_real_
     )
   })
 
@@ -1797,7 +1875,11 @@ parse_text <- function(text, context_window_size = 2) {
       b_coeff = numeric(0),
       SE_coeff = numeric(0),
       adj_R2 = numeric(0),
-      df_arity_mismatch = logical(0)
+      df_arity_mismatch = logical(0),
+      arm1_events = numeric(0),
+      arm1_total  = numeric(0),
+      arm2_events = numeric(0),
+      arm2_total  = numeric(0)
     ))
   }
 
