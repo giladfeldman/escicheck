@@ -567,6 +567,7 @@ compute_and_compare_one <- function(row,
       ci_level_mismatch   = NA_character_,
       ci_clipped_to_bound = NA_character_,
       ci_symmetry_class   = NA_character_,
+      sign_ci_violation   = NA,
       effect_reported_decimals = NA_integer_,
       ciL_reported_decimals    = NA_integer_,
       ciU_reported_decimals    = NA_integer_,
@@ -2799,6 +2800,15 @@ compute_and_compare_one <- function(row,
     N1 <- if ("arm1_total"  %in% names(row)) row$arm1_total[1]  else NA_real_
     e2 <- if ("arm2_events" %in% names(row)) row$arm2_events[1] else NA_real_
     N2 <- if ("arm2_total"  %in% names(row)) row$arm2_total[1]  else NA_real_
+    # v0.6.3 (E1): the combined N of a two-arm clinical-trial result is the SUM
+    # of the per-arm totals, not a single arm. Earlier the row inherited a
+    # single-arm N from global_text/extended_context (e.g. N=106 for an RR with
+    # arms 106 + 101). When both arm totals are present and positive, use their
+    # sum and tag the provenance so the value is auditable.
+    if (!is.na(N1) && !is.na(N2) && N1 > 0 && N2 > 0) {
+      N <- N1 + N2
+      row$N_source[1] <- "arm_totals_sum"
+    }
     has_cells <- !any(is.na(c(e1, N1, e2, N2))) && N1 > 0 && N2 > 0 &&
                  e1 >= 0 && e2 >= 0 && e1 <= N1 && e2 <= N2 && e2 > 0
     if (has_cells) {
@@ -2884,6 +2894,12 @@ compute_and_compare_one <- function(row,
     N1 <- if ("arm1_total"  %in% names(row)) row$arm1_total[1]  else NA_real_
     e2 <- if ("arm2_events" %in% names(row)) row$arm2_events[1] else NA_real_
     N2 <- if ("arm2_total"  %in% names(row)) row$arm2_total[1]  else NA_real_
+    # v0.6.3 (E1): combined N is the sum of the per-arm totals (see the RR
+    # block above for the rationale).
+    if (!is.na(N1) && !is.na(N2) && N1 > 0 && N2 > 0) {
+      N <- N1 + N2
+      row$N_source[1] <- "arm_totals_sum"
+    }
     has_cells <- !any(is.na(c(e1, N1, e2, N2))) && N1 > 0 && N2 > 0 &&
                  e1 >= 0 && e2 >= 0 && e1 <= N1 && e2 <= N2
     if (has_cells) {
@@ -3320,6 +3336,8 @@ compute_and_compare_one <- function(row,
   ci_level_mismatch <- NA_character_
   ci_clipped_to_bound <- NA_character_
   ci_symmetry_class <- NA_character_
+  # v0.6.3 (R-0007): dropped-minus sign-error flag (estimate-in-CI invariant)
+  sign_ci_violation <- FALSE
 
   # Helper: collect all CI candidates from a variant
   collect_ci_candidates <- function(variant, name_prefix) {
@@ -3509,6 +3527,62 @@ compute_and_compare_one <- function(row,
     ci_check_status <- "UNVERIFIABLE"  # Only one bound reported
   } else {
     ci_check_status <- "MISSING"  # No CI reported
+  }
+
+  # ------------------------------------------------------------------
+  # v0.6.3 (R-0007): dropped-minus sign-error detector (FLAG ONLY).
+  # ------------------------------------------------------------------
+  # The estimate-in-CI invariant: a reported point estimate must lie within its
+  # reported CI. When PDF text extraction drops a leading minus glyph (e.g.
+  # `r = .74` reported with `95% CI [-0.92, -0.30]`, true value -.74), the
+  # estimate parses positive and lands OUTSIDE its own CI while the sign-flip
+  # lands inside -- a dropped-minus signature, and a sign error inverts the
+  # statistical conclusion. Per the 2026-06-17 user decision this is FLAG-ONLY:
+  # surface a NOTE-level uncertainty reason and set `sign_ci_violation`, but
+  # NEVER mutate the parsed value (matching proceeds on the value as reported).
+  # Conservative guards (CRAN design principle 5 -- never emit garbage):
+  #   * sign-bearing effect families only (a negative is meaningful);
+  #   * both CI bounds present, finite, well-formed (ciL < ciU);
+  #   * fire only when exactly -x is inside and x is outside (both-in / both-out
+  #     is a different defect, left alone);
+  #   * rounding-aware epsilon so a value on a CI bound is not spuriously flagged;
+  #   * effect_reported != 0.
+  {
+    sign_bearing_fam <- c("d", "g", "dz", "dav", "drm", "r",
+                          "beta", "partial_r", "semi_partial_r")
+    fam_sign_bearing <-
+      (!is.na(canonical_type) && canonical_type %in% sign_bearing_fam) ||
+      (!is.na(effect_reported_name) && effect_reported_name %in% sign_bearing_fam) ||
+      (!is.na(tt) && tt == "r")
+    # The reported point estimate: for a correlation the statistic IS the r
+    # (effect_reported is adopted from `stat` later in the pipeline, so it is
+    # still NA here); for every other family it is the parsed effect_reported.
+    reported_estimate <- if (!is.na(tt) && tt == "r" && !is.na(stat)) {
+      stat
+    } else {
+      effect_reported
+    }
+    if (fam_sign_bearing &&
+        !is.na(reported_estimate) && reported_estimate != 0 &&
+        !is.na(ciL_rep) && !is.na(ciU_rep) &&
+        is.finite(ciL_rep) && is.finite(ciU_rep) && ciL_rep < ciU_rep) {
+      decs <- c(effect_reported_decimals, ciL_reported_decimals, ciU_reported_decimals)
+      decs <- decs[!is.na(decs)]
+      eps <- if (length(decs) > 0) 0.5 * 10^(-min(decs)) else 0.005
+      eps <- max(eps, 0.005)
+      in_ci <- function(v) v >= (ciL_rep - eps) && v <= (ciU_rep + eps)
+      pos_in <- in_ci(reported_estimate)
+      neg_in <- in_ci(-reported_estimate)
+      if (!pos_in && neg_in) {
+        sign_ci_violation <- TRUE
+        uncertainty <- c(uncertainty, sprintf(
+          paste0("Reported estimate %s lies outside its reported CI [%s, %s], ",
+                 "but %s does: likely a dropped-minus sign error (estimate-in-CI ",
+                 "invariant). Value left unchanged -- verify the sign in the source."),
+          format(reported_estimate), format(ciL_rep), format(ciU_rep),
+          format(-reported_estimate)))
+      }
+    }
   }
 
   # If no CI was matched but we computed some, extract the "primary" CI for display
@@ -3993,6 +4067,19 @@ compute_and_compare_one <- function(row,
     if (design_inferred == "one-sample" && !is.na(matched_variant) &&
         matched_variant %in% c("dz", "dav", "drm")) {
       matched_variant <- "d_onesample"
+    }
+    # v0.6.3 (E2): a paired t-test has integer df (= n - 1). A NON-integer df is
+    # a definitive Welch / independent-samples signal, so design_inferred must
+    # never be "paired" when df1 is fractional. Reclassify to independent and
+    # record the reason. Found on the PROSECCO-adjacent collabra.77859 Welch
+    # rows (df1 = 257.03) tagged paired.
+    if (!is.na(df1) && abs(df1 - round(df1)) > 1e-9 &&
+        design_inferred == "paired") {
+      design_inferred <- "independent"
+      uncertainty <- c(uncertainty,
+        paste0("Non-integer df (", format(df1), ") indicates a Welch / ",
+               "independent-samples t-test (a paired t has integer df = n-1); ",
+               "design reclassified from paired to independent"))
     }
   } else if (tt == "F") {
     context_text <- ""
@@ -5268,6 +5355,8 @@ compute_and_compare_one <- function(row,
     ci_level_mismatch   = ci_level_mismatch,
     ci_clipped_to_bound = ci_clipped_to_bound,
     ci_symmetry_class   = ci_symmetry_class,
+    # v0.6.3 (R-0007): dropped-minus sign-error flag (estimate-in-CI invariant)
+    sign_ci_violation   = sign_ci_violation,
     # Status and metadata
 
     # REPRO code generation
@@ -5468,6 +5557,14 @@ compute_and_compare_one <- function(row,
 #'       the reported ES. A cross-family fallback row will name a variant
 #'       from a different family than the reported ES type (e.g.
 #'       \code{matched_variant="eta"} when \code{effect_reported_name="d"}).}
+#'     \item{\code{sign_ci_violation}}{Logical (since v0.6.3, R-0007). TRUE when
+#'       a sign-bearing reported estimate (d, g, dz, dav, drm, r, beta,
+#'       partial_r) lies OUTSIDE its reported CI but its sign-flip lies inside
+#'       -- the signature of a dropped-minus extraction error (e.g. \code{r = .74}
+#'       reported with \code{95\% CI [-0.92, -0.30]}). FLAG ONLY: the parsed value
+#'       is never mutated; the violation is also surfaced in
+#'       \code{uncertainty_reasons}. NA on error/short-circuit rows, FALSE
+#'       otherwise.}
 #'   }
 #'   Plus all other columns: \code{location}, \code{raw_text}, test
 #'   identification (\code{test_type}, \code{chisq_subtype}, \code{df1},
@@ -5666,6 +5763,7 @@ check_text <- function(text,
           ci_level_mismatch   = NA_character_,
           ci_clipped_to_bound = NA_character_,
           ci_symmetry_class   = NA_character_,
+          sign_ci_violation   = NA,
           # v0.3.5 (MetaESCI 2A): decimal precision tracking
           effect_reported_decimals = NA_integer_,
           ciL_reported_decimals    = NA_integer_,

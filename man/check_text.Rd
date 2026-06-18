@@ -104,6 +104,14 @@ to programmatically split the two semantics without parsing English.}
 the reported ES. A cross-family fallback row will name a variant
 from a different family than the reported ES type (e.g.
 \code{matched_variant="eta"} when \code{effect_reported_name="d"}).}
+\item{\code{sign_ci_violation}}{Logical (since v0.6.3, R-0007). TRUE when
+a sign-bearing reported estimate (d, g, dz, dav, drm, r, beta,
+partial_r) lies OUTSIDE its reported CI but its sign-flip lies inside
+-- the signature of a dropped-minus extraction error (e.g. \code{r = .74}
+reported with \code{95\% CI [-0.92, -0.30]}). FLAG ONLY: the parsed value
+is never mutated; the violation is also surfaced in
+\code{uncertainty_reasons}. NA on error/short-circuit rows, FALSE
+otherwise.}
 }
 Plus all other columns: \code{location}, \code{raw_text}, test
 identification (\code{test_type}, \code{chisq_subtype}, \code{df1},

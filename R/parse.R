@@ -725,7 +725,10 @@ parse_text <- function(text, context_window_size = 2) {
   #   subscripts -- treated identically here, all chi-square distributed under
   #   homogeneity null with the reported df). The "_<letter>" subscript is
   #   optional; the df may be in [brackets] or (parens) with optional spaces.
-  pat_cochran_q <- "\\bQ(?:_[A-Za-z])?\\s*[\\[(]\\s*(\\d+(?:\\.\\d+)?)\\s*[\\])]\\s*=\\s*([-+]?\\d*\\.?\\d+)"
+  # v0.6.3 (E5): the subscript underscore is ALSO optional -- PDF text extraction
+  #   (docpluck) flattens the "Q_T" subscript to a glued "QT" (e.g.
+  #   "QT [40] = 104.65" in collabra.90203), so accept "Q", "QT", and "Q_T".
+  pat_cochran_q <- "\\bQ(?:_?[A-Za-z])?\\s*[\\[(]\\s*(\\d+(?:\\.\\d+)?)\\s*[\\])]\\s*=\\s*([-+]?\\d*\\.?\\d+)"
   # v0.6.2: exact binomial test with Cohen's h effect size.
   # Form: "(exact )?binomial p [op] <pval>[, ]Cohen('s)? h = <h>[, 95% CI [<lo>, <hi>]]"
   # The two anchors -- "binomial p" and "Cohen('s)? h" -- are matched together
@@ -760,7 +763,20 @@ parse_text <- function(text, context_window_size = 2) {
   # Limited to [^,;] to prevent the match from crossing into a different
   # clause; clinical-trial sentences universally keep arm descriptors
   # comma/semicolon-free.
-  pat_two_props_slash <- "(\\d+)\\s*/\\s*(\\d+)\\s*\\(\\s*\\d+(?:\\.\\d+)?\\s*%\\s*\\)\\s*[^,;]{0,40}?\\s*(?:versus|vs\\.?|and|compared\\s+to)\\s*[^,;]{0,40}?\\s*(\\d+)\\s*/\\s*(\\d+)\\s*\\(\\s*\\d+(?:\\.\\d+)?\\s*%\\s*\\)"
+  # v0.6.3 (E1): a per-arm cell may carry a short alphabetic descriptor
+  # BETWEEN the slash-count and the percent -- "86/98 women (87.8%)" in the
+  # PROSECCO primary-outcome sentence previously bound no cells because the
+  # word "women" sat between "86/98" and "(87.8%)". The descriptor is
+  # letters/spaces only (no digits) and bounded, so it cannot swallow an
+  # adjacent fraction. The single-source `prop_cell` token is shared by both
+  # arm groups so the two halves never drift apart (a duplicated-alternation
+  # bug class documented in LESSONS.md). Capture groups stay (e1, N1) then
+  # (e2, N2): m_two_props[2..5] downstream is unchanged.
+  prop_cell <- "(\\d+)\\s*/\\s*(\\d+)\\s*(?:[A-Za-z][A-Za-z ]{0,24}\\s*)?\\(\\s*\\d+(?:\\.\\d+)?\\s*%\\s*\\)"
+  pat_two_props_slash <- paste0(
+    prop_cell,
+    "\\s*[^,;]{0,40}?\\s*(?:versus|vs\\.?|and|compared\\s+to)\\s*[^,;]{0,40}?\\s*",
+    prop_cell)
   pat_RR_ci_p <- "\\bRR\\s*=?\\s*([-+]?\\d*\\.?\\d+)\\s*[;,]?\\s*95\\s*%\\s*CI\\s*([-+]?\\d*\\.?\\d+)\\s*(?:to|-)\\s*([-+]?\\d*\\.?\\d+)\\s*[;,]?\\s*[pP][- ]?(?:value)?\\s*([<=>]{0,2})\\s*([01]?\\.\\d+|[01])"
   # v0.5.17: risk-difference percent with CI (clinical trial, Farrington-
   # Manning noninferiority). Form: "risk difference <val>%; 95% [confidence
@@ -870,14 +886,42 @@ parse_text <- function(text, context_window_size = 2) {
   pat_adj_R2 <- "(?:adjusted\\s*R\\^?2|adj\\.?\\s*R\\^?2|R\\^?2\\s*adj)\\s*=\\s*([-+]?\\d*\\.?\\d+)"
 
   # Comprehensive CI patterns (Phase 2H - Enhanced with level detection)
-  pat_CI1 <- "(\\d+\\.?\\d*)%\\s*(?:CI|C\\.I\\.|confidence\\s*interval)\\s*\\[\\s*([-+]?\\d*\\.?\\d+)\\s*,\\s*([-+]?\\d*\\.?\\d+)\\s*\\]"
-  pat_CI2 <- "(?:CI|C\\.I\\.|confidence\\s*interval)\\s*(\\d+\\.?\\d*)%\\s*\\[\\s*([-+]?\\d*\\.?\\d+)\\s*,\\s*([-+]?\\d*\\.?\\d+)\\s*\\]"
+  # The labeled forms (CI1/CI2) accept an optional ":" or "=" between the CI
+  # label and the bracket -- "95% CI: [..]" / "95% CI = [..]" are common APA
+  # variants, and the colon form previously fell through to the bare-bracket
+  # pat_CI3 (v0.6.3 E3: a "95%CI: [.21, .56]" body CI lost its labeled status
+  # and the first bare bracket in the sub-chunk -- a flattened table cell --
+  # won instead).
+  pat_CI1 <- "(\\d+\\.?\\d*)%\\s*(?:CI|C\\.I\\.|confidence\\s*interval)\\s*[:=]?\\s*\\[\\s*([-+]?\\d*\\.?\\d+)\\s*,\\s*([-+]?\\d*\\.?\\d+)\\s*\\]"
+  pat_CI2 <- "(?:CI|C\\.I\\.|confidence\\s*interval)\\s*(\\d+\\.?\\d*)%\\s*[:=]?\\s*\\[\\s*([-+]?\\d*\\.?\\d+)\\s*,\\s*([-+]?\\d*\\.?\\d+)\\s*\\]"
   pat_CI3 <- "\\[\\s*([-+]?\\d*\\.?\\d+)\\s*,\\s*([-+]?\\d*\\.?\\d+)\\s*\\]"
   pat_CI4 <- "\\(\\s*([-+]?\\d*\\.?\\d+)\\s*[;,]\\s*([-+]?\\d*\\.?\\d+)\\s*\\)"
   # Pattern for standalone CI level (when stated separately from bounds)
   pat_CI_level <- "(\\d+\\.?\\d*)%\\s*(?:CI|C\\.I\\.|confidence\\s*interval)"
   # Pattern 5: "90% CI [-0.3, 1.2]" (with negative values)
   # (covered by pat_CI1, but ensure it handles negatives)
+
+  # v0.6.3 (E3/E4): choose, among several CI matches in one sub-chunk, the one
+  # bound to THIS row's effect size rather than the first bracket in the chunk.
+  # A docpluck-flattened table interleaved between body sentences, or an
+  # adjacent effect clause, can place a foreign bracketed CI earlier in the
+  # sub-chunk than the row's own; binding the first match silently adopts the
+  # neighbour's CI (E3: a Table-4 cell [.50, 1.02]; E4: an abstract d-clause
+  # [0.25, 0.54] preceding the r). Given the character positions of every CI
+  # match and an anchor (the effect-size value position), prefer the match
+  # at/after the anchor nearest to it; fall back to the nearest one before it,
+  # and to the first match when no anchor is known -- identical to the
+  # pre-0.6.3 first-match behaviour for the common single-CI sub-chunk.
+  pick_ci_idx <- function(positions, anchor) {
+    n <- length(positions)
+    if (n <= 1L) return(1L)
+    if (is.na(anchor) || anchor < 1L) return(1L)
+    after <- which(positions >= anchor)
+    if (length(after) > 0L) {
+      return(after[which.min(positions[after] - anchor)])
+    }
+    which.min(anchor - positions)
+  }
 
   # ============================================================================
   # GLOBAL SAMPLE SIZE EXTRACTION (Phase 2C Enhancement)
@@ -1688,35 +1732,79 @@ parse_text <- function(text, context_window_size = 2) {
     ciU_reported_decimals <- NA_integer_
     ci_level_source <- NA_character_
 
-    # Match all patterns
-    m_CI1 <- stringr::str_match(s, pat_CI1)
-    m_CI2 <- stringr::str_match(s, pat_CI2)
-    m_CI3 <- stringr::str_match(s, pat_CI3)
+    # v0.6.3 (E3/E4): textual anchor for CI selection -- the position of the
+    # reported effect-size token in s. The CI bound to this row sits adjacent
+    # to (and in APA order, after) the effect-size value, so bind the CI
+    # nearest this anchor rather than the first bracket in the chunk. For a
+    # correlation test the effect IS the r statistic (adopted later in check.R,
+    # so effect_name is still NA here); use the r statistic's position instead.
+    effect_match_text <- NA_character_
+    if (!is.na(effect_name)) {
+      em <- switch(effect_name,
+        "f2" = m_f2, "etap2" = m_etap2, "generalized_eta2" = m_eta2_corrupted,
+        "eta2" = m_eta2, "eta" = m_eta, "partial_omega2" = m_partial_omega2,
+        "omega2" = m_omega2, "epsilon_squared" = m_epsilon2,
+        "f" = if (!all(is.na(m_cohens_f))) m_cohens_f else m_bare_f,
+        "dz" = m_dz, "dav" = m_dav, "drm" = m_drm, "g" = m_g, "d" = m_d,
+        "phi" = m_phi, "V" = m_V, "beta" = m_beta, "R2" = m_R2, "OR" = m_OR,
+        "RR" = m_RR, "IRR" = m_IRR, "h" = m_h, "cohens_w" = m_cohens_w,
+        NULL)
+      if (is.null(em) && isTRUE(effect_fallback) && !all(is.na(m_fallback_es))) {
+        em <- m_fallback_es
+      }
+      if (!is.null(em) && !all(is.na(em))) {
+        effect_match_text <- em[1]
+      }
+    }
+    es_anchor <- if (!is.na(effect_match_text)) {
+      regexpr(effect_match_text, s, fixed = TRUE)[1]
+    } else if (isTRUE(is_correlation_test) && r_stat_pos > 0) {
+      r_stat_pos
+    } else {
+      NA_integer_
+    }
+    if (!is.na(es_anchor) && es_anchor < 1L) es_anchor <- NA_integer_
+
+    # Match all CI patterns, collecting ALL occurrences with their character
+    # positions so the CI bound to this row's effect size can be chosen by
+    # proximity (pick_ci_idx + es_anchor) rather than by first-in-chunk. A
+    # single-CI sub-chunk yields one candidate -> index 1 -> identical to the
+    # pre-0.6.3 first-match behaviour.
+    m_CI1_all <- stringr::str_match_all(s, pat_CI1)[[1]]
+    m_CI2_all <- stringr::str_match_all(s, pat_CI2)[[1]]
+    m_CI3_all <- stringr::str_match_all(s, pat_CI3)[[1]]
     m_CI4_all <- stringr::str_match_all(s, pat_CI4)[[1]]
+    p_CI1_all <- gregexpr(pat_CI1, s, perl = TRUE)[[1]]
+    p_CI2_all <- gregexpr(pat_CI2, s, perl = TRUE)[[1]]
+    p_CI3_all <- gregexpr(pat_CI3, s, perl = TRUE)[[1]]
+    p_CI4_all <- gregexpr(pat_CI4, s, perl = TRUE)[[1]]
     m_CI_level <- stringr::str_match(s, pat_CI_level)
 
-    if (!all(is.na(m_CI1))) {
+    if (nrow(m_CI1_all) > 0L) {
       # Pattern 1: Level explicitly with bounds
-      ci_level <- numify(m_CI1[2]) / 100
-      ciL <- numify(m_CI1[3])
-      ciU <- numify(m_CI1[4])
-      ciL_reported_decimals <- count_decimal_places(m_CI1[3])
-      ciU_reported_decimals <- count_decimal_places(m_CI1[4])
+      k <- if (length(p_CI1_all) == nrow(m_CI1_all)) pick_ci_idx(p_CI1_all, es_anchor) else 1L
+      ci_level <- numify(m_CI1_all[k, 2]) / 100
+      ciL <- numify(m_CI1_all[k, 3])
+      ciU <- numify(m_CI1_all[k, 4])
+      ciL_reported_decimals <- count_decimal_places(m_CI1_all[k, 3])
+      ciU_reported_decimals <- count_decimal_places(m_CI1_all[k, 4])
       ci_level_source <- "explicit_with_bounds"
-    } else if (!all(is.na(m_CI2))) {
+    } else if (nrow(m_CI2_all) > 0L) {
       # Pattern 2: Level explicitly with bounds (alternate format)
-      ci_level <- numify(m_CI2[2]) / 100
-      ciL <- numify(m_CI2[3])
-      ciU <- numify(m_CI2[4])
-      ciL_reported_decimals <- count_decimal_places(m_CI2[3])
-      ciU_reported_decimals <- count_decimal_places(m_CI2[4])
+      k <- if (length(p_CI2_all) == nrow(m_CI2_all)) pick_ci_idx(p_CI2_all, es_anchor) else 1L
+      ci_level <- numify(m_CI2_all[k, 2]) / 100
+      ciL <- numify(m_CI2_all[k, 3])
+      ciU <- numify(m_CI2_all[k, 4])
+      ciL_reported_decimals <- count_decimal_places(m_CI2_all[k, 3])
+      ciU_reported_decimals <- count_decimal_places(m_CI2_all[k, 4])
       ci_level_source <- "explicit_with_bounds"
-    } else if (!all(is.na(m_CI3))) {
+    } else if (nrow(m_CI3_all) > 0L) {
       # Pattern 3: Bounds without level in brackets
-      ciL <- numify(m_CI3[2])
-      ciU <- numify(m_CI3[3])
-      ciL_reported_decimals <- count_decimal_places(m_CI3[2])
-      ciU_reported_decimals <- count_decimal_places(m_CI3[3])
+      k <- if (length(p_CI3_all) == nrow(m_CI3_all)) pick_ci_idx(p_CI3_all, es_anchor) else 1L
+      ciL <- numify(m_CI3_all[k, 2])
+      ciU <- numify(m_CI3_all[k, 3])
+      ciL_reported_decimals <- count_decimal_places(m_CI3_all[k, 2])
+      ciU_reported_decimals <- count_decimal_places(m_CI3_all[k, 3])
 
       # Look for level stated separately in same sentence
       if (!all(is.na(m_CI_level))) {
@@ -1727,31 +1815,30 @@ parse_text <- function(text, context_window_size = 2) {
         ci_level <- 0.95
         ci_level_source <- "assumed_95"
       }
-    } else if (nrow(m_CI4_all) > 0) {
-      # Pattern 4: Bounds without level (parentheses)
-      # Use str_match_all to find ALL matches, then skip F-test df notation.
-      # F(df1, df2) matches CI4 pattern but is NOT a CI — skip that match
-      # and use the next one if present (e.g., the actual CI after effect size).
-      ci4_found <- FALSE
+    } else if (nrow(m_CI4_all) > 0L) {
+      # Pattern 4: Bounds without level (parentheses). F(df1, df2) df notation
+      # also matches this pattern but is NOT a CI -- drop those candidates,
+      # then pick the CI nearest the effect-size anchor among the remainder.
+      keep_rows <- integer(0)
       for (ci4_row_idx in seq_len(nrow(m_CI4_all))) {
         ci4_val1 <- numify(m_CI4_all[ci4_row_idx, 2])
         ci4_val2 <- numify(m_CI4_all[ci4_row_idx, 3])
-
         is_f_test_df <- (!is.na(test_type) && test_type == "F" &&
                          !is.na(df1) && !is.na(df2) &&
                          isTRUE(ci4_val1 == df1) && isTRUE(ci4_val2 == df2))
-
-        if (!is_f_test_df) {
-          ciL <- ci4_val1
-          ciU <- ci4_val2
-          ciL_reported_decimals <- count_decimal_places(m_CI4_all[ci4_row_idx, 2])
-          ciU_reported_decimals <- count_decimal_places(m_CI4_all[ci4_row_idx, 3])
-          ci4_found <- TRUE
-          break
-        }
+        if (!is_f_test_df) keep_rows <- c(keep_rows, ci4_row_idx)
       }
+      if (length(keep_rows) > 0L) {
+        k <- if (length(p_CI4_all) == nrow(m_CI4_all)) {
+          keep_rows[pick_ci_idx(p_CI4_all[keep_rows], es_anchor)]
+        } else {
+          keep_rows[1L]
+        }
+        ciL <- numify(m_CI4_all[k, 2])
+        ciU <- numify(m_CI4_all[k, 3])
+        ciL_reported_decimals <- count_decimal_places(m_CI4_all[k, 2])
+        ciU_reported_decimals <- count_decimal_places(m_CI4_all[k, 3])
 
-      if (ci4_found) {
         # Look for level stated separately
         if (!all(is.na(m_CI_level))) {
           ci_level <- numify(m_CI_level[2]) / 100
@@ -2012,6 +2099,48 @@ parse_text <- function(text, context_window_size = 2) {
       }
     }
     raw_out <- raw_out[keep, , drop = FALSE]
+  }
+
+  # v0.6.3 (E4): collapse correlation rows that report the same r with the
+  # same reported CI but a DIFFERENT df1. Identical r AND identical CI bounds
+  # imply identical n, so a differing df1 is a mis-bound (global-N) duplicate
+  # of one true correlation -- e.g. an abstract "(r=-.34[-.43, -.24])" that
+  # inherited a global df1=741 alongside the body "r(348)=-0.34, 95% CI
+  # [-0.43, -0.24]". The v0.5.14 key above keeps them apart because it keys on
+  # df1; this pass keys WITHOUT df1/N (the CI is the safe discriminator) and
+  # keeps the parenthesized/inline-df row (its df came from "r(df)"). Guarded
+  # on both CI bounds present so it never fires on a row lacking the
+  # discriminating CI.
+  if (nrow(raw_out) > 1L) {
+    is_r_row <- raw_out$test_type == "r"
+    rkey <- ifelse(
+      is_r_row & !is.na(raw_out$stat_value) &
+        !is.na(raw_out$ciL_reported) & !is.na(raw_out$ciU_reported),
+      paste(
+        round(raw_out$stat_value, 3L),
+        ifelse(is.na(raw_out$effect_reported), "NA",
+               as.character(round(raw_out$effect_reported, 4L))),
+        round(raw_out$ciL_reported, 3L),
+        round(raw_out$ciU_reported, 3L),
+        sep = "|"
+      ),
+      NA_character_
+    )
+    has_paren_r <- grepl("\\b[a-zA-Z]+\\s*\\(\\d", raw_out$raw_text, perl = TRUE)
+    keep_r <- rep(TRUE, nrow(raw_out))
+    for (k in unique(rkey[!is.na(rkey)])) {
+      idx <- which(rkey == k)
+      if (length(idx) > 1L) {
+        paren_idx <- idx[has_paren_r[idx]]
+        keep_r[idx] <- FALSE
+        if (length(paren_idx) > 0L) {
+          keep_r[paren_idx[1L]] <- TRUE
+        } else {
+          keep_r[idx[1L]] <- TRUE
+        }
+      }
+    }
+    raw_out <- raw_out[keep_r, , drop = FALSE]
   }
 
   raw_out
