@@ -1,3 +1,74 @@
+# effectcheck 0.6.3
+
+Three fixes from the 2026-06-16 escicheck-iterate canary audit
+(`docs/TRIAGE_iterate_2026-06-16.md`):
+
+- **Clinical-trial N now sums the per-arm totals (E1).** For
+  `test_type %in% {RR, rdpct}`, when both per-arm totals are parsed, `N` is
+  their sum (`N_source = "arm_totals_sum"`) instead of a single arm picked up
+  from `global_text`/`extended_context` — e.g. an RR with arms 106 + 101 now
+  reports `N = 207`, not 106. `parse.R`'s `pat_two_props_slash` was also
+  relaxed to allow a short alphabetic descriptor between the slash-count and
+  the percent (`86/98 women (87.8%)`), so the PROSECCO primary-outcome
+  risk-difference row binds its per-arm cells. Verified against the real
+  PROSECCO PDF (`10.1371/journal.pmed.1004323`): all RR/rdpct N match the AI
+  stats gold (205/207/207/145; rdpct 187). Tests in
+  `tests/testthat/test-v063-e1-clinical-trial-N.R`.
+
+- **Welch (non-integer df) no longer mis-tagged paired (E2).** A paired
+  t-test has integer df (= n - 1), so a non-integer `df1` is a definitive
+  Welch / independent-samples signal. `design_inferred` is reclassified
+  `paired -> independent` whenever `df1` is fractional, with an explanatory
+  `uncertainty_reasons` note. Tests in
+  `tests/testthat/test-v063-e2-welch-design.R`.
+
+- **Cochran Q accepts the flattened `QT [df]` form (E5).** PDF text
+  extraction flattens the `Q_T` subscript to a glued `QT`, so `pat_cochran_q`
+  now treats the subscript underscore as optional (`Q`, `QT`, `Q_T` all
+  match). Tests in `tests/testthat/test-v063-e5-cochran-q-qt.R`.
+
+- **CI binding is now position-aware; no more neighbour/table CI bleed (E3 +
+  E4).** `parse.R` previously bound the *first* bracketed CI in a sub-chunk by
+  pattern priority. When a docpluck-flattened table is interleaved between body
+  sentences (E3) or an adjacent effect clause precedes the statistic (E4), the
+  first bracket is a *foreign* CI and the row silently adopted it. The CI is
+  now chosen by proximity to the row's effect-size value (`es_anchor`; for a
+  correlation, the r-statistic position), preferring the bracket at/after the
+  anchor — a single-CI sub-chunk is unchanged. The labeled patterns
+  (`pat_CI1`/`pat_CI2`) also accept a `:`/`=` separator (`95% CI: [..]`,
+  `95% CI = [..]`), which the colon form previously lost to the bare-bracket
+  fallback.
+  - **E3** (`10.1525/collabra.77859`): `t(133) = 4.44, dz = 0.38, 95%CI: [.21,
+    .56]` no longer binds the interleaved Table-4 cell `[.50, 1.02]` (which had
+    produced a spurious `INCONSISTENT`); it binds `[.21, .56]` (MATCH).
+  - **E4** (`10.1525/collabra.57785`): the subsample correlation `r = -0.34`
+    now binds its own CI `[-0.43, -0.24]` (not the adjacent `d = 0.39` clause's
+    `[0.25, 0.54]`), and a new r-row dedup pass collapses correlation rows that
+    report the same `r` with the same reported CI but a different `df1`
+    (identical r + identical CI imply identical n, so a differing df is a
+    global-N mis-bind), keeping the inline-df (`r(348)`) row. Result: exactly
+    one `r = -0.34` row, `df = 348`, MATCH.
+  - Both verified against the AI stats gold on the real PDFs (independent
+    Sonnet audit, no NEW defects). Tests in
+    `tests/testthat/test-v063-e3-ci-neighbour-bleed.R` and
+    `tests/testthat/test-v063-e4-subsample-r-dedup.R`.
+
+- **New `sign_ci_violation` column — dropped-minus sign-error detector, flag
+  only (R-0007).** A reported point estimate must lie within its reported CI.
+  When PDF extraction drops a leading minus glyph (e.g. `r = .74` reported with
+  `95% CI [-0.92, -0.30]`, true value -.74), the estimate parses positive and
+  lands outside its own CI while the sign-flip lands inside — a dropped-minus
+  signature, and a sign error inverts the statistical conclusion. `check_text()`
+  now flags this with a logical `sign_ci_violation` column and an
+  `uncertainty_reasons` note. **Flag only:** the parsed value is never mutated
+  (matching proceeds on the value as reported) — a deliberate conservative
+  choice. Fires only for sign-bearing families (`d, g, dz, dav, drm, r, beta,
+  partial_r, semi_partial_r`), only when exactly `-x` is inside the CI and `x`
+  is outside (both-in / both-out is a different defect, left alone), with a
+  rounding-aware epsilon. Lesson-transfer from docpluck's `W0g` recovery; logic
+  independently Sonnet-audited. Tests in
+  `tests/testthat/test-v063-ci-token-recovery.R`.
+
 # effectcheck 0.6.2
 
 Exact binomial test reported with Cohen's h. New `test_type = "binomial"`
