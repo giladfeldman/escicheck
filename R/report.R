@@ -627,7 +627,7 @@ render_report <- function(res, out) {
   warn_count <- if ("WARN" %in% names(status_counts)) status_counts["WARN"] else 0
   error_count <- if ("ERROR" %in% names(status_counts)) status_counts["ERROR"] else 0
   skip_count <- if ("SKIP" %in% names(status_counts)) status_counts["SKIP"] else 0
-  insufficient_count <- if (any(res$insufficient_data, na.rm = TRUE)) sum(res$insufficient_data, na.rm = TRUE) else 0
+  insufficient_count <- if ("insufficient_data" %in% names(res) && any(res$insufficient_data, na.rm = TRUE)) sum(res$insufficient_data, na.rm = TRUE) else 0
 
   # Get all column names dynamically
   all_cols <- names(res)
@@ -804,13 +804,13 @@ paste(sprintf("<th>%s</th>", key_cols), collapse = ""),
       if ("context_window" %in% names(res) && !is.na(row$context_window)) {
         paste0("<strong>Context:</strong> ", htmlEscape(def(row$context_window)), "<br>")
       } else "",
-      if (!is.null(row$variants_tested) && !is.na(row$variants_tested) && nchar(row$variants_tested) > 0) {
+      if ("variants_tested" %in% names(row) && !is.null(row$variants_tested) && !is.na(row$variants_tested) && nchar(row$variants_tested) > 0) {
         paste0("<strong>Variants Tested:</strong> ", htmlEscape(def(row$variants_tested)), "<br>")
       } else "",
-      if (!is.null(row$uncertainty_reasons) && !is.na(row$uncertainty_reasons) && nchar(row$uncertainty_reasons) > 0) {
+      if ("uncertainty_reasons" %in% names(row) && !is.null(row$uncertainty_reasons) && !is.na(row$uncertainty_reasons) && nchar(row$uncertainty_reasons) > 0) {
         paste0("<strong>Uncertainty Reasons:</strong> ", htmlEscape(def(row$uncertainty_reasons)), "<br>")
       } else "",
-      if (!is.null(row$assumptions_used) && !is.na(row$assumptions_used) && nchar(row$assumptions_used) > 0) {
+      if ("assumptions_used" %in% names(row) && !is.null(row$assumptions_used) && !is.na(row$assumptions_used) && nchar(row$assumptions_used) > 0) {
         paste0("<strong>Assumptions:</strong> ", htmlEscape(def(row$assumptions_used)), "<br>")
       } else "",
       "</td></tr>"
