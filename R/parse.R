@@ -2145,3 +2145,154 @@ parse_text <- function(text, context_window_size = 2) {
 
   raw_out
 }
+
+#' Map docpluck structured table rows to parsed-statistic rows
+#'
+#' v0.6.4: consumes docpluck's `?structured=true` `flattened_rows[]` (typed
+#' `fields`, REQUEST_11 / docpluck v2.4.95) and emits rows in the same shape
+#' `parse_text()` returns, so the existing `compute_and_compare_one()` pipeline
+#' verifies / routes them with no sentence re-parsing. Only rows whose `fields`
+#' carry a recognised statistic are mapped; everything else is skipped (the same
+#' safe no-op as an empty `fields`).
+#'
+#' Mapping (typed keys only -- an effect family is never inferred from an
+#' untyped `est`):
+#'   - `t`   -> test_type "t" (df from `df`; Cohen's `d` bound when present)
+#'   - `F`   -> test_type "F" (df1/df2 when present; the partial-eta^2 `est` is
+#'              left unbound -- docpluck emits it untyped, so p is verified but
+#'              the effect is not, pending docpluck's deferred `effect_type`)
+#'   - `r`   -> test_type "r" (N from `n`)
+#'   - `est` (no test statistic) -> test_type "table_estimate", an
+#'              extraction-only NOTE that surfaces est + CI + p (cannot be
+#'              independently recomputed from an estimate alone)
+#'
+#' Reported CI bounds map to `ciL_reported` / `ciU_reported`; `p_op` to
+#' `p_symbol`. Each row is tagged `from_table = TRUE` (so check.R sets
+#' `result_context = "table"`) and carries `source_table` / `table_group`
+#' (the docpluck arm tag: ITT/PP, Separate/Joint, Target article/Replication).
+#'
+#' @param table_rows A list of docpluck flattened-row records, each a list with
+#'   `label`, `row_label`, `row_idx`, and a `fields` list. NULL or empty returns
+#'   NULL.
+#' @return A tibble of parsed-statistic rows (or NULL), bindable to the
+#'   `parse_text()` output via `dplyr::bind_rows()`.
+#' @keywords internal
+flattened_rows_to_parsed <- function(table_rows) {
+  if (is.null(table_rows) || length(table_rows) == 0L) {
+    return(NULL)
+  }
+  num1 <- function(v) {
+    if (is.null(v) || length(v) == 0L) {
+      return(NA_real_)
+    }
+    suppressWarnings(as.numeric(v[[1]]))
+  }
+  has <- function(f, k) {
+    !is.null(f[[k]]) && length(f[[k]]) > 0L && !is.na(num1(f[[k]]))
+  }
+  rows <- lapply(seq_along(table_rows), function(i) {
+    rec <- table_rows[[i]]
+    f <- rec$fields
+    if (is.null(f) || length(f) == 0L) {
+      return(NULL)
+    }
+    grp <- if (!is.null(f$group) && length(f$group) > 0L) {
+      as.character(f$group[[1]])
+    } else {
+      NA_character_
+    }
+    label <- if (!is.null(rec$label) && length(rec$label) > 0L) {
+      as.character(rec$label[[1]])
+    } else {
+      ""
+    }
+    rlab <- if (!is.null(rec$row_label) && length(rec$row_label) > 0L) {
+      as.character(rec$row_label[[1]])
+    } else {
+      ""
+    }
+    # Human-readable provenance string used as raw_text so the row is
+    # identifiable in output and audit (there is no source sentence).
+    prov <- trimws(paste0(
+      label,
+      if (nzchar(label) && nzchar(rlab)) ": " else "",
+      rlab,
+      if (!is.na(grp)) paste0(" (", grp, ")") else ""
+    ))
+
+    tt <- NA_character_
+    stat <- NA_real_
+    d1 <- NA_real_
+    d2 <- NA_real_
+    ern <- NA_character_
+    er <- NA_real_
+    nn <- NA_real_
+    if (has(f, "t")) {
+      tt <- "t"
+      stat <- num1(f$t)
+      if (has(f, "df")) d1 <- num1(f$df)
+      if (has(f, "d")) {
+        ern <- "d"
+        er <- num1(f$d)
+      }
+    } else if (has(f, "F")) {
+      tt <- "F"
+      stat <- num1(f[["F"]])
+      if (has(f, "df1")) d1 <- num1(f$df1)
+      if (has(f, "df2")) d2 <- num1(f$df2)
+      # partial-eta^2 (`est`) intentionally left unbound: docpluck emits it
+      # untyped; verifying p from F + df is safe, binding an untyped effect is
+      # not (pending docpluck effect_type).
+    } else if (has(f, "r")) {
+      tt <- "r"
+      stat <- num1(f$r)
+      if (has(f, "n")) nn <- num1(f$n)
+    } else if (has(f, "est")) {
+      tt <- "table_estimate"
+      ern <- "estimate"
+      er <- num1(f$est)
+    } else {
+      return(NULL)
+    }
+
+    p_val <- if (has(f, "p")) num1(f$p) else NA_real_
+    p_sym <- if (!is.null(f$p_op) && length(f$p_op) > 0L) {
+      as.character(f$p_op[[1]])
+    } else if (!is.na(p_val)) {
+      "="
+    } else {
+      NA_character_
+    }
+    ciL <- if (has(f, "CI_lower")) num1(f$CI_lower) else NA_real_
+    ciU <- if (has(f, "CI_upper")) num1(f$CI_upper) else NA_real_
+
+    tibble::tibble(
+      location = i,
+      raw_text = prov,
+      context_window = label,
+      test_type = tt,
+      df1 = d1,
+      df2 = d2,
+      stat_value = stat,
+      p_reported = p_val,
+      p_symbol = p_sym,
+      p_valid = !is.na(p_val),
+      p_out_of_range = FALSE,
+      N = nn,
+      effect_reported_name = ern,
+      effect_reported = er,
+      ci_level = 0.95,
+      ci_level_source = "assumed_95",
+      ciL_reported = ciL,
+      ciU_reported = ciU,
+      from_table = TRUE,
+      source_table = label,
+      table_group = grp
+    )
+  })
+  rows <- rows[!vapply(rows, is.null, logical(1))]
+  if (length(rows) == 0L) {
+    return(NULL)
+  }
+  dplyr::bind_rows(rows)
+}

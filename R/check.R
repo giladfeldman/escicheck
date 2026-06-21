@@ -342,6 +342,147 @@ VARIANT_METADATA <- list(
   )
 )
 
+#' Build an extraction-only NOTE output row (no recomputation)
+#'
+#' v0.6.4: used for docpluck table rows that carry only a point estimate plus a
+#' CI (and maybe p) with no test statistic (`test_type = "table_estimate"`).
+#' Such a row cannot be independently recomputed, so it is surfaced as an honest
+#' NOTE that reports the estimate / CI / p exactly as extracted. Column set
+#' mirrors the `df_arity_mismatch` short-circuit row so it binds uniformly with
+#' the main `compute_and_compare_one()` output.
+#'
+#' @param row A single parsed row (from `flattened_rows_to_parsed()`).
+#' @param message Uncertainty message explaining why the row is not verified.
+#' @return A one-row tibble with status "NOTE", check_scope "extraction_only".
+#' @keywords internal
+.note_only_row <- function(row, message) {
+  g1 <- function(col, default) {
+    if (col %in% names(row) && length(row[[col]]) > 0L) row[[col]][1] else default
+  }
+  from_table <- isTRUE(g1("from_table", FALSE))
+  tibble::tibble(
+    location = g1("location", NA_integer_),
+    raw_text = g1("raw_text", ""),
+    context_window = g1("context_window", ""),
+    test_type = g1("test_type", "table_estimate"),
+    df1 = as.numeric(g1("df1", NA_real_)),
+    df2 = as.numeric(g1("df2", NA_real_)),
+    stat_value = as.numeric(g1("stat_value", NA_real_)),
+    N = as.numeric(g1("N", NA_real_)),
+    n1 = NA_real_, n2 = NA_real_, table_r = NA_real_, table_c = NA_real_,
+    reported_type = NA_character_,
+    effect_reported_name = as.character(g1("effect_reported_name", NA_character_)),
+    effect_reported = as.numeric(g1("effect_reported", NA_real_)),
+    matched_variant = NA_character_,
+    matched_value = NA_real_,
+    delta_effect = NA_real_,
+    ambiguity_level = "clear",
+    ambiguity_reason = "",
+    all_variants = "{}",
+    status = "NOTE",
+    check_type = "extraction_only",
+    check_scope = "extraction_only",
+    extraction_suspect = FALSE,
+    decimal_recovered = FALSE,
+    result_context = if (from_table) "table" else "study",
+    confidence = 1L,
+    design_inferred = "unclear",
+    variants_tested = "",
+    uncertainty_level = "high",
+    uncertainty_reasons = message,
+    assumptions_used = "",
+    insufficient_data = TRUE,
+    software_notes = NA_character_,
+    alternative_formulas = NA_character_,
+    best_practice_notes = NA_character_,
+    unknown_groups_downgraded = FALSE,
+    r2_cross_pairing_detected = FALSE,
+    decision_error_downgraded = FALSE,
+    decision_error = FALSE,
+    decision_error_reason = NA_character_,
+    p_reported = as.numeric(g1("p_reported", NA_real_)),
+    ciL_reported = as.numeric(g1("ciL_reported", NA_real_)),
+    ciU_reported = as.numeric(g1("ciU_reported", NA_real_)),
+    p_computed = NA_real_,
+    d_ind = NA_real_, d_ind_equalN = NA_real_, d_ind_min = NA_real_, d_ind_max = NA_real_,
+    g_ind = NA_real_, dz = NA_real_, d_av_median = NA_real_, d_av_min = NA_real_,
+    d_av_max = NA_real_, drm = NA_real_, r_from_t_or_reported = NA_real_,
+    r_ciL = NA_real_, r_ciU = NA_real_, phi = NA_real_, phi_ciL = NA_real_,
+    phi_ciU = NA_real_, V = NA_real_, eta2 = NA_real_, partial_eta2 = NA_real_,
+    generalized_eta2 = NA_real_, omega2 = NA_real_, cohens_f = NA_real_,
+    standardized_beta = NA_real_, partial_r = NA_real_, semi_partial_r = NA_real_,
+    cohens_f2 = NA_real_, R2 = NA_real_,
+    rank_biserial_r = NA_real_, cliffs_delta = NA_real_,
+    epsilon_squared = NA_real_, kendalls_W = NA_real_, z_auxiliary = NA_real_,
+    b_coeff = NA_real_, SE_coeff = NA_real_, adj_R2 = NA_real_,
+    closest_method = NA_character_,
+    delta_effect_abs = NA_real_, ci_match = as.logical(NA),
+    ci_delta_lower = NA_real_, ci_delta_upper = NA_real_,
+    ci_check_status = NA_character_, ci_method_match = NA_character_,
+    ci_width_ratio = NA_real_, ci_symmetry = NA_character_,
+    ci_level_mismatch   = NA_character_,
+    ci_clipped_to_bound = NA_character_,
+    ci_symmetry_class   = NA_character_,
+    sign_ci_violation   = NA,
+    effect_reported_decimals = NA_integer_,
+    ciL_reported_decimals    = NA_integer_,
+    ciU_reported_decimals    = NA_integer_,
+    stat_value_decimals      = NA_integer_,
+    ci_expected              = FALSE,
+    ci_reported              = !is.na(as.numeric(g1("ciL_reported", NA_real_))),
+    df_arity_mismatch        = FALSE,
+    arm1_events = NA_real_,
+    arm1_total  = NA_real_,
+    arm2_events = NA_real_,
+    arm2_total  = NA_real_
+  )
+}
+
+#' Drop docpluck table rows that duplicate a text-parsed (prose) row
+#'
+#' v0.6.4: a table cell often restates a result already reported inline in the
+#' body (e.g. a 90203 Table 9 F that also appears in the H5 paragraph, or a
+#' PROSECCO Table 2 risk difference also stated in the abstract). Keeping both
+#' double-counts and lets the table-derived NOTE drag the summary. This collapses
+#' a `from_table` row when a prose row shares the same reported numeric signature.
+#'
+#' The signature is the sorted, rounded set of the row's reported numbers
+#' (`stat_value`, `effect_reported`, `ciL_reported`, `ciU_reported`) -- robust to
+#' the same value landing in different columns across representations (a prose
+#' `rdpct` puts the estimate in `stat_value`; a table estimate puts it in
+#' `effect_reported`). A CI bound must be present for a row to participate, so a
+#' bare statistic never collapses on a coincidental value match.
+#'
+#' @param parsed A parsed-row tibble after table rows have been bound in.
+#' @return `parsed` with duplicate table rows removed (prose row kept).
+#' @keywords internal
+.dedup_table_vs_prose <- function(parsed) {
+  if (is.null(parsed) || nrow(parsed) < 2L || !("from_table" %in% names(parsed))) {
+    return(parsed)
+  }
+  is_table <- vapply(parsed$from_table, isTRUE, logical(1))
+  if (!any(is_table) || all(is_table)) {
+    return(parsed)
+  }
+  col <- function(nm) if (nm %in% names(parsed)) parsed[[nm]] else rep(NA_real_, nrow(parsed))
+  sv <- as.numeric(col("stat_value"))
+  er <- as.numeric(col("effect_reported"))
+  cl <- as.numeric(col("ciL_reported"))
+  cu <- as.numeric(col("ciU_reported"))
+  sig <- vapply(seq_len(nrow(parsed)), function(i) {
+    has_ci <- !is.na(cl[i]) || !is.na(cu[i])
+    vals <- c(sv[i], er[i], cl[i], cu[i])
+    vals <- vals[!is.na(vals)]
+    if (length(vals) < 2L || !has_ci) {
+      return(NA_character_)
+    }
+    paste(sort(round(vals, 3L)), collapse = "|")
+  }, character(1))
+  prose_sigs <- unique(sig[!is_table & !is.na(sig)])
+  drop <- is_table & !is.na(sig) & sig %in% prose_sigs
+  parsed[!drop, , drop = FALSE]
+}
+
 #' Compute effects and compare to reported values for one parsed row
 #'
 #' This function implements type-matched comparison: it compares reported effect
@@ -5532,6 +5673,14 @@ compute_and_compare_one <- function(row,
 #' @param design_ambiguous_action Action when design-ambiguous t-test (or F(1,df)) effect size ERROR occurs ("WARN", "NOTE", or "ERROR"; default "WARN")
 #' @param unknown_groups_action Action when d/g ERROR occurs with unknown group sizes n1/n2 ("WARN", "NOTE", or "ERROR"; default "WARN")
 #' @param min_confidence Minimum confidence score (0-10) for results to be included in output (default 0)
+#' @param table_rows Optional list of docpluck structured table rows
+#'   (`?structured=true` `flattened_rows[]`, docpluck v2.4.95+). Each element is
+#'   a list with `label`, `row_label`, `row_idx`, and a `fields` list of typed
+#'   statistics. Rows whose `fields` carry a recognised statistic are mapped via
+#'   \code{flattened_rows_to_parsed()} and run through the same verification
+#'   pipeline as text-parsed rows, tagged \code{result_context = "table"} and
+#'   deduplicated against any identical prose row. Default NULL (text-only;
+#'   output is byte-identical to prior versions).
 #' @return An effectcheck S3 object whose `results` tibble carries the
 #'   parsed and recomputed statistics. Notable output columns:
 #'   \describe{
@@ -5607,7 +5756,8 @@ check_text <- function(text,
                        method_context_action = "NOTE",
                        design_ambiguous_action = "WARN",
                        unknown_groups_action = "WARN",
-                       min_confidence = 0L) {
+                       min_confidence = 0L,
+                       table_rows = NULL) {
   # Resource Limit Check: Text Length
   if (sum(nchar(text)) > max_text_length) {
     stop("Text too long. Maximum total length: ", max_text_length, " characters")
@@ -5635,7 +5785,8 @@ check_text <- function(text,
     method_context_action = method_context_action,
     design_ambiguous_action = design_ambiguous_action,
     unknown_groups_action = unknown_groups_action,
-    min_confidence = min_confidence
+    min_confidence = min_confidence,
+    n_table_rows = if (is.null(table_rows)) 0L else length(table_rows)
   )
 
   parsed <- parse_text(text)
@@ -5649,16 +5800,25 @@ check_text <- function(text,
     parsed <- parsed[1:max_stats_per_text, ]
   }
 
-  if (nrow(parsed) == 0) {
-    return(new_effectcheck(tibble::tibble(), call = match.call(), settings = settings))
+  # Filter prose-parsed rows by requested test types (table rows below bypass
+  # this filter -- they are explicitly supplied by the caller and carry types
+  # such as "table_estimate" that are not in the default `stats` whitelist).
+  if (nrow(parsed) > 0 && !is.null(stats) && "test_type" %in% names(parsed)) {
+    parsed <- parsed[parsed$test_type %in% stats, ]
   }
 
-  # Filter by requested test types
-  if (!is.null(stats) && "test_type" %in% names(parsed)) {
-    parsed <- parsed[parsed$test_type %in% stats, ]
-    if (nrow(parsed) == 0) {
-      return(new_effectcheck(tibble::tibble(), call = match.call(), settings = settings))
-    }
+  # v0.6.4: map docpluck structured table rows and append them. Bound AFTER the
+  # whitelist filter so a "table_estimate" row is never dropped, then
+  # deduplicated against any identical prose row (a table cell that restates a
+  # body-text result, e.g. a 90203 Table 9 F that also appears inline).
+  table_parsed <- flattened_rows_to_parsed(table_rows)
+  if (!is.null(table_parsed) && nrow(table_parsed) > 0) {
+    parsed <- dplyr::bind_rows(parsed, table_parsed)
+    parsed <- .dedup_table_vs_prose(parsed)
+  }
+
+  if (nrow(parsed) == 0) {
+    return(new_effectcheck(tibble::tibble(), call = match.call(), settings = settings))
   }
 
   rows <- split(parsed, seq_len(nrow(parsed)))
@@ -5672,23 +5832,54 @@ check_text <- function(text,
 
     tryCatch(
       {
-        compute_and_compare_one(rw,
-          ci_level = ci_lvl,
-          alpha = alpha,
-          one_tailed = one_tailed,
-          paired_r_grid = paired_r_grid,
-          assume_equal_ns_when_missing = assume_equal_ns_when_missing,
-          tol_effect = tol_effect,
-          tol_ci = tol_ci,
-          tol_p = tol_p,
-          cross_type_action = cross_type_action,
-          ci_affects_status = ci_affects_status,
-          plausibility_filter = plausibility_filter,
-          sign_sensitive = sign_sensitive,
-          method_context_action = method_context_action,
-          design_ambiguous_action = design_ambiguous_action,
-          unknown_groups_action = unknown_groups_action
-        )
+        # v0.6.4: a docpluck table row carrying only a point estimate + CI
+        # (no test statistic) cannot be recomputed -> honest extraction-only
+        # NOTE that surfaces est / CI / p as extracted.
+        if (!is.null(rw$test_type) && length(rw$test_type) > 0 &&
+            identical(as.character(rw$test_type[1]), "table_estimate")) {
+          ci_msg <- if (!is.null(rw$ciL_reported) && length(rw$ciL_reported) > 0 &&
+                        !is.na(rw$ciL_reported[1])) {
+            sprintf(" 95%% CI [%s, %s]", rw$ciL_reported[1], rw$ciU_reported[1])
+          } else {
+            ""
+          }
+          out_row <- .note_only_row(
+            rw,
+            paste0(
+              "Table estimate extracted from a structured table cell ",
+              "(docpluck flattened row); reported as a point estimate",
+              ci_msg,
+              " with no test statistic, so it cannot be independently ",
+              "recomputed -- reported value surfaced as-is."
+            )
+          )
+        } else {
+          out_row <- compute_and_compare_one(rw,
+            ci_level = ci_lvl,
+            alpha = alpha,
+            one_tailed = one_tailed,
+            paired_r_grid = paired_r_grid,
+            assume_equal_ns_when_missing = assume_equal_ns_when_missing,
+            tol_effect = tol_effect,
+            tol_ci = tol_ci,
+            tol_p = tol_p,
+            cross_type_action = cross_type_action,
+            ci_affects_status = ci_affects_status,
+            plausibility_filter = plausibility_filter,
+            sign_sensitive = sign_sensitive,
+            method_context_action = method_context_action,
+            design_ambiguous_action = design_ambiguous_action,
+            unknown_groups_action = unknown_groups_action
+          )
+        }
+        # v0.6.4: tag table-derived provenance. result_context is the existing
+        # column for result origin (study / method); "table" extends it. This
+        # leaves check_scope (what was checked) semantically intact.
+        if ("from_table" %in% names(rw) && isTRUE(rw$from_table[1]) &&
+            "result_context" %in% names(out_row)) {
+          out_row$result_context <- "table"
+        }
+        out_row
       },
       error = function(e) {
         error_msg <- conditionMessage(e)
