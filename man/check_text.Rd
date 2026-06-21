@@ -28,7 +28,8 @@ check_text(
   method_context_action = "NOTE",
   design_ambiguous_action = "WARN",
   unknown_groups_action = "WARN",
-  min_confidence = 0L
+  min_confidence = 0L,
+  table_rows = NULL
 )
 }
 \arguments{
@@ -77,6 +78,15 @@ check_text(
 \item{unknown_groups_action}{Action when d/g ERROR occurs with unknown group sizes n1/n2 ("WARN", "NOTE", or "ERROR"; default "WARN")}
 
 \item{min_confidence}{Minimum confidence score (0-10) for results to be included in output (default 0)}
+
+\item{table_rows}{Optional list of docpluck structured table rows
+(\code{?structured=true} \code{flattened_rows[]}, docpluck v2.4.95+). Each element is
+a list with \code{label}, \code{row_label}, \code{row_idx}, and a \code{fields} list of typed
+statistics. Rows whose \code{fields} carry a recognised statistic are mapped via
+\code{flattened_rows_to_parsed()} and run through the same verification
+pipeline as text-parsed rows, tagged \code{result_context = "table"} and
+deduplicated against any identical prose row. Default NULL (text-only;
+output is byte-identical to prior versions).}
 }
 \value{
 An effectcheck S3 object whose \code{results} tibble carries the

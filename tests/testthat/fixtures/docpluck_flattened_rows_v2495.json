@@ -1,0 +1,485 @@
+{
+  "prosecco": [
+    {
+      "table_id": "camelot_t10",
+      "label": "Table 2",
+      "row_label": "Resection complete*",
+      "row_idx": 0,
+      "fields": {
+        "group": "ITT",
+        "est": -1.01,
+        "p": 0.09,
+        "p_op": "=",
+        "CI_lower": -10.36,
+        "CI_upper": 8.34
+      }
+    },
+    {
+      "table_id": "camelot_t10",
+      "label": "Table 2",
+      "row_label": "Resection complete*",
+      "row_idx": 0,
+      "fields": {
+        "group": "PP",
+        "est": 0.06,
+        "p": 0.06,
+        "p_op": "=",
+        "CI_lower": -9.53,
+        "CI_upper": 9.65
+      }
+    },
+    {
+      "table_id": "camelot_t10",
+      "label": "Table 2",
+      "row_label": "adjusted for stratification factors",
+      "row_idx": 1,
+      "fields": {
+        "group": "ITT",
+        "est": -1.83,
+        "CI_lower": -11.2,
+        "CI_upper": 7.5
+      }
+    },
+    {
+      "table_id": "camelot_t10",
+      "label": "Table 2",
+      "row_label": "adjusted for stratification factors",
+      "row_idx": 1,
+      "fields": {
+        "group": "PP",
+        "est": 0.82,
+        "CI_lower": -8.63,
+        "CI_upper": 10.28
+      }
+    },
+    {
+      "table_id": "camelot_t10",
+      "label": "Table 2",
+      "row_label": "When incomplete; max. size of intracavitary remnant (mean SD)†",
+      "row_idx": 2,
+      "fields": {
+        "group": "ITT",
+        "est": 7.7,
+        "p": 0.15,
+        "p_op": "=",
+        "CI_lower": -3.2,
+        "CI_upper": 18.5
+      }
+    },
+    {
+      "table_id": "camelot_t10",
+      "label": "Table 2",
+      "row_label": "When incomplete; max. size of intracavitary remnant (mean SD)†",
+      "row_idx": 2,
+      "fields": {
+        "group": "PP",
+        "est": 8.4,
+        "p": 0.14,
+        "p_op": "=",
+        "CI_lower": -3.1,
+        "CI_upper": 19.9
+      }
+    }
+  ],
+  "c77859": [
+    {
+      "table_id": "camelot_t10",
+      "label": "Table 3",
+      "row_label": "Attractive",
+      "row_idx": 0,
+      "fields": {
+        "group": "Separate",
+        "t": 0.6,
+        "d": 0.07,
+        "CI_lower": -0.17,
+        "CI_upper": 0.31
+      }
+    },
+    {
+      "table_id": "camelot_t10",
+      "label": "Table 3",
+      "row_label": "Attractive",
+      "row_idx": 0,
+      "fields": {
+        "group": "Joint",
+        "t": 0.95,
+        "d": 0.08,
+        "CI_lower": -0.09,
+        "CI_upper": 0.25
+      }
+    },
+    {
+      "table_id": "camelot_t10",
+      "label": "Table 3",
+      "row_label": "Affect",
+      "row_idx": 1,
+      "fields": {
+        "group": "Separate",
+        "t": 1.31,
+        "d": 0.16,
+        "CI_lower": -0.08,
+        "CI_upper": 0.4
+      }
+    },
+    {
+      "table_id": "camelot_t10",
+      "label": "Table 3",
+      "row_label": "Affect",
+      "row_idx": 1,
+      "fields": {
+        "group": "Joint",
+        "t": 1.27,
+        "d": 0.11,
+        "CI_lower": -0.06,
+        "CI_upper": 0.28
+      }
+    },
+    {
+      "table_id": "camelot_t13",
+      "label": "Table 5",
+      "row_label": "Separate",
+      "row_idx": 0,
+      "fields": {
+        "t": 6.23,
+        "d": 0.76,
+        "df": 257,
+        "p": 0.001,
+        "p_op": "<",
+        "CI_lower": 0.5,
+        "CI_upper": 1.02
+      }
+    },
+    {
+      "table_id": "camelot_t13",
+      "label": "Table 5",
+      "row_label": "Joint",
+      "row_idx": 2,
+      "fields": {
+        "t": 1.26,
+        "d": 0.11,
+        "df": 133,
+        "p": 0.21,
+        "p_op": "=",
+        "CI_lower": -0.06,
+        "CI_upper": 0.28
+      }
+    }
+  ],
+  "c90203": [
+    {
+      "table_id": "camelot_t20",
+      "label": "Table 8",
+      "row_label": "Target article",
+      "row_idx": 2,
+      "fields": {
+        "F": 6.75,
+        "est": 0.06,
+        "p": 0.05,
+        "p_op": "<",
+        "CI_lower": 0.0,
+        "CI_upper": 0.15
+      }
+    },
+    {
+      "table_id": "camelot_t20",
+      "label": "Table 8",
+      "row_label": "Replication",
+      "row_idx": 3,
+      "fields": {
+        "F": 0.01,
+        "est": 0.0,
+        "BF01": 11.57,
+        "p": 0.923,
+        "p_op": "=",
+        "CI_lower": 0.0,
+        "CI_upper": 0.003
+      }
+    },
+    {
+      "table_id": "camelot_t20",
+      "label": "Table 8",
+      "row_label": "Replication",
+      "row_idx": 5,
+      "fields": {
+        "est": 0.01,
+        "BF01": 1.77,
+        "p": 0.02,
+        "p_op": "=",
+        "CI_lower": 0.0,
+        "CI_upper": 0.021
+      }
+    },
+    {
+      "table_id": "camelot_t20",
+      "label": "Table 8",
+      "row_label": "Target article",
+      "row_idx": 7,
+      "fields": {
+        "F": 5.32,
+        "est": 0.04,
+        "p": 0.05,
+        "p_op": "<",
+        "CI_lower": 0.0,
+        "CI_upper": 0.14
+      }
+    },
+    {
+      "table_id": "camelot_t20",
+      "label": "Table 8",
+      "row_label": "Replication",
+      "row_idx": 8,
+      "fields": {
+        "F": 0.654,
+        "est": 0.001,
+        "BF01": 6.3,
+        "p": 0.419,
+        "p_op": "=",
+        "CI_lower": 0.0,
+        "CI_upper": 0.011
+      }
+    },
+    {
+      "table_id": "camelot_t20",
+      "label": "Table 8",
+      "row_label": "Replication",
+      "row_idx": 10,
+      "fields": {
+        "F": 1.48,
+        "est": 0.003,
+        "BF01": 12.74,
+        "p": 0.228,
+        "p_op": "=",
+        "CI_lower": 0.0,
+        "CI_upper": 0.012
+      }
+    },
+    {
+      "table_id": "camelot_t20",
+      "label": "Table 8",
+      "row_label": "Target article",
+      "row_idx": 13,
+      "fields": {
+        "F": 4.15,
+        "est": 0.03,
+        "p": 0.05,
+        "p_op": "<",
+        "CI_lower": 0.0,
+        "CI_upper": 0.12
+      }
+    },
+    {
+      "table_id": "camelot_t20",
+      "label": "Table 8",
+      "row_label": "Replication",
+      "row_idx": 14,
+      "fields": {
+        "F": 0.89,
+        "est": 0.0,
+        "BF01": 7.51,
+        "p": 0.346,
+        "p_op": "=",
+        "CI_lower": 0.0,
+        "CI_upper": 0.012
+      }
+    },
+    {
+      "table_id": "camelot_t20",
+      "label": "Table 8",
+      "row_label": "Replication",
+      "row_idx": 16,
+      "fields": {
+        "F": 0.005,
+        "est": 0.0,
+        "BF01": 14.15,
+        "p": 0.943,
+        "p_op": "=",
+        "CI_lower": 0.0,
+        "CI_upper": 0.002
+      }
+    },
+    {
+      "table_id": "camelot_t22",
+      "label": "Table 9",
+      "row_label": "Target article",
+      "row_idx": 1,
+      "fields": {
+        "F": 1.8,
+        "est": 0.02,
+        "df1": 1,
+        "df2": 114,
+        "p": 0.18,
+        "p_op": "=",
+        "CI_lower": 0.0,
+        "CI_upper": 0.09
+      }
+    },
+    {
+      "table_id": "camelot_t22",
+      "label": "Table 9",
+      "row_label": "Replication",
+      "row_idx": 2,
+      "fields": {
+        "F": 0.09,
+        "est": 0.0,
+        "BF01": 11.08,
+        "p": 0.764,
+        "p_op": "=",
+        "CI_lower": 0.0,
+        "CI_upper": 0.01
+      }
+    },
+    {
+      "table_id": "camelot_t22",
+      "label": "Table 9",
+      "row_label": "Target article",
+      "row_idx": 3,
+      "fields": {
+        "F": 0.24,
+        "est": 0.0,
+        "df1": 1,
+        "df2": 114,
+        "p": 0.63,
+        "p_op": "=",
+        "CI_lower": 0.0,
+        "CI_upper": 0.05
+      }
+    },
+    {
+      "table_id": "camelot_t22",
+      "label": "Table 9",
+      "row_label": "Replication",
+      "row_idx": 4,
+      "fields": {
+        "F": 0.01,
+        "est": 0.0,
+        "BF01": 11.56,
+        "df1": 1,
+        "df2": 114,
+        "p": 0.94,
+        "p_op": "=",
+        "CI_lower": 0.0,
+        "CI_upper": 0.002
+      }
+    },
+    {
+      "table_id": "camelot_t22",
+      "label": "Table 9",
+      "row_label": "Target article",
+      "row_idx": 6,
+      "fields": {
+        "F": 2.0,
+        "est": 0.02,
+        "df1": 1,
+        "df2": 114,
+        "p": 0.16,
+        "p_op": "=",
+        "CI_lower": 0.0,
+        "CI_upper": 0.09
+      }
+    },
+    {
+      "table_id": "camelot_t22",
+      "label": "Table 9",
+      "row_label": "Replication",
+      "row_idx": 7,
+      "fields": {
+        "F": 0.04,
+        "est": 0.0,
+        "BF01": 8.13,
+        "df1": 1,
+        "df2": 114,
+        "p": 0.842,
+        "p_op": "=",
+        "CI_lower": 0.0,
+        "CI_upper": 0.01
+      }
+    },
+    {
+      "table_id": "camelot_t22",
+      "label": "Table 9",
+      "row_label": "Replication",
+      "row_idx": 9,
+      "fields": {
+        "F": 0.792,
+        "est": 0.002,
+        "BF01": 44.85,
+        "df1": 2,
+        "df2": 998,
+        "p": 0.453,
+        "p_op": "=",
+        "CI_lower": 0.0,
+        "CI_upper": 0.009
+      }
+    },
+    {
+      "table_id": "camelot_t24",
+      "label": "Table 10",
+      "row_label": "Identifiable/ No explicit learning",
+      "row_idx": 0,
+      "fields": {
+        "r": 0.58,
+        "n": 165,
+        "p": 0.001,
+        "p_op": "<",
+        "CI_lower": 0.47,
+        "CI_upper": 0.67
+      }
+    },
+    {
+      "table_id": "camelot_t24",
+      "label": "Table 10",
+      "row_label": "Statistical/ Explicit learning",
+      "row_idx": 1,
+      "fields": {
+        "r": 0.64,
+        "n": 159,
+        "p": 0.001,
+        "p_op": "<",
+        "CI_lower": 0.54,
+        "CI_upper": 0.73
+      }
+    },
+    {
+      "table_id": "camelot_t24",
+      "label": "Table 10",
+      "row_label": "Statistical/ No explicit learning",
+      "row_idx": 2,
+      "fields": {
+        "r": 0.56,
+        "n": 176,
+        "p": 0.001,
+        "p_op": "<",
+        "CI_lower": 0.45,
+        "CI_upper": 0.65
+      }
+    },
+    {
+      "table_id": "camelot_t24",
+      "label": "Table 10",
+      "row_label": "Joint/ Explicit learning",
+      "row_idx": 3,
+      "fields": {
+        "r": 0.63,
+        "n": 173,
+        "p": 0.001,
+        "p_op": "<",
+        "CI_lower": 0.53,
+        "CI_upper": 0.71
+      }
+    },
+    {
+      "table_id": "camelot_t24",
+      "label": "Table 10",
+      "row_label": "Joint/ No explicit learning",
+      "row_idx": 4,
+      "fields": {
+        "r": 0.59,
+        "n": 161,
+        "p": 0.001,
+        "p_op": "<",
+        "CI_lower": 0.58,
+        "CI_upper": 0.8
+      }
+    }
+  ]
+}

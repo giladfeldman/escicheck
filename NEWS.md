@@ -1,3 +1,40 @@
+# effectcheck 0.6.4
+
+**Mode B docpluck table-row consumer (REQUEST_11 / docpluck v2.4.95).** `check_text()`
+gains an optional `table_rows` argument that ingests docpluck's structured
+`flattened_rows[]` (from `POST /api/extract?structured=true`, docpluck v2.4.95+) —
+the typed table-cell statistics that have no inline APA form in the prose. This
+captures the table-only results the 2026-06-16 canary audit flagged as PARSE-MISS
+(deferred in v0.6.3 because the hosted API previously column-shredded tables).
+
+- **Typed-key mapping, no sentence re-parsing.** A new internal
+  `flattened_rows_to_parsed()` maps each row's `fields` to a parsed row by typed
+  key only — `t` → t-test (with `df`, and Cohen's `d` when present), `F` →
+  F-test (`df1`/`df2`), `r` → correlation (`N` from `n`). An effect family is
+  never inferred from an untyped `est`. Rows are fed through the existing
+  `compute_and_compare_one()` pipeline, so a verifiable row (e.g. an `r` with
+  `n` + CI, or a `t` with `df` + `d`) is checked normally; a non-verifiable row
+  is routed conservatively to NOTE.
+- **`test_type = "table_estimate"`** — a row carrying only a point estimate + CI
+  (and maybe p) with no test statistic cannot be recomputed, so it is surfaced as
+  an honest extraction-only NOTE that reports the estimate / CI / p as extracted.
+- **Provenance + dedup.** Table-derived rows are tagged `result_context = "table"`
+  and deduplicated against any prose row that restates the same result (matched on
+  the row's reported numeric signature), so a table cell echoing a body-text
+  finding does not double-count.
+- **Worker.** `worker/docpluck_client.R` now requests
+  `?structured=true&sections=true` (default on; surfaces `flattened_rows` +
+  `sections`), and `worker/plumber.R` passes `flattened_rows` to `check_text()`
+  on `/process` and `/report`. The default no-flag call remains byte-identical.
+- **Source-data caveats (docpluck v2.4.95 reply, not effectcheck defects):**
+  `collabra.90203` Table 10 "Joint/No explicit" `r = .59` is a PDF text-layer
+  mismatch (gold `.63`); the Table 3-vs-2 number attribution differs but values
+  are correct. docpluck deferred the optional `fields.effect_type` to keep
+  PROSECCO byte-identical, so partial-eta^2 estimates arrive untyped and are not
+  bound as an effect (p is still verified from F + df).
+
+Regression tests in `tests/testthat/test-v064-docpluck-table-rows.R`.
+
 # effectcheck 0.6.3
 
 Three fixes from the 2026-06-16 escicheck-iterate canary audit
