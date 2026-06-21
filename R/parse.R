@@ -591,6 +591,31 @@ parse_text <- function(text, context_window_size = 2) {
     positions <- positions[keep]
     if (length(positions) <= 1) return(chunk)
 
+    # v0.6.5: keep a standardized-coefficient clause that IMMEDIATELY PRECEDES a
+    # test statistic together with that statistic. In regression reporting
+    # "(beta = 0.74, t(260) = 11.32, p < .001)" the beta belongs to the t that
+    # FOLLOWS it; splitting at the t strands the beta at the end of the previous
+    # sub-chunk, so the t adopts the NEXT clause's beta (cog_emo: t(260) = 11.32
+    # wrongly took beta = 0.91 instead of 0.74). For each split start (after the
+    # first) whose preceding text ends in a "(beta|standardized beta = <num>, "
+    # clause, back the split up to the start of that clause so the beta stays with
+    # its t. Scoped to beta / standardized-beta (the pat_beta vocabulary): a beta
+    # PRECEDES its t, whereas Cohen's d FOLLOWS its r, so the r-d adoption path
+    # (test-v030f-parser-fixes) is unaffected.
+    # Match the WORD "beta" (the pat_beta vocabulary's common form); the rare
+    # Greek-symbol "B = X, t(...)" keep-together edge is left to existing
+    # behaviour to keep this source pure ASCII (R CMD check non-ASCII rule).
+    precede_beta_pat <- "\\(?\\s*(?:standardized\\s*)?beta\\s*=\\s*[-+]?\\d*\\.?\\d+\\s*,\\s*$"
+    for (j in seq_along(positions)) {
+      if (j == 1L) next
+      prev_span <- substr(chunk, positions[j - 1L], positions[j] - 1L)
+      mbeta <- regexpr(precede_beta_pat, prev_span, perl = TRUE)
+      if (mbeta[1] > 0) {
+        new_start <- positions[j - 1L] + mbeta[1] - 1L
+        if (new_start > positions[j - 1L]) positions[j] <- new_start
+      }
+    }
+
     # Split at positions of 2nd, 3rd, ... stats
     sub_chunks <- character(length(positions))
     for (j in seq_along(positions)) {
@@ -745,6 +770,17 @@ parse_text <- function(text, context_window_size = 2) {
     "([01]?\\.\\d+|[01])",
     "[^.]{0,80}?",
     "Cohen'?s?\\s*h\\s*=\\s*([-+]?\\d*\\.?\\d+)"
+  )
+  # v0.6.5: bare binomial test reported WITHOUT Cohen's h, e.g.
+  #   "...preferred the scarf (63%) to the coat (37%; binomial: p = .002)"
+  #   "...most participants (59%) ... binomial test: p = .047"
+  # Anchor: "binomial[ test][:] p [op] X". Used ONLY when pat_binom_h did not
+  # match (no Cohen's h). Neither an effect size nor in-sentence counts are
+  # available, so the row routes to an extraction-only NOTE -- closes a
+  # PARSE-MISS without fabricating a verification (collabra.77859 Study 1 & 4).
+  pat_binom_bare <- paste0(
+    "\\bbinomial(?:\\s+test)?\\s*:?\\s*p\\s*([<=>]{1,2})\\s*",
+    "([01]?\\.\\d+|[01])"
   )
   # Helper for the binomial branch: "<n> out of <N> (participants|cases|...)"
   # form, used to recover n_total when present in the same sentence.
@@ -977,6 +1013,7 @@ parse_text <- function(text, context_window_size = 2) {
     m_H <- stringr::str_match(s, pat_H)
     m_cochran_q <- stringr::str_match(s, pat_cochran_q)
     m_binom_h   <- stringr::str_match(s, pat_binom_h)
+    m_binom_bare <- stringr::str_match(s, pat_binom_bare)
     m_n_outN    <- stringr::str_match(s, pat_n_out_of_N)
     m_RR_ci_p <- stringr::str_match(s, pat_RR_ci_p)
     m_two_props <- stringr::str_match(s, pat_two_props_slash)
@@ -1312,6 +1349,24 @@ parse_text <- function(text, context_window_size = 2) {
       if (all(is.na(m_p)) && !is.na(m_binom_h[3])) {
         p_op_b  <- if (!is.na(m_binom_h[2]) && nchar(m_binom_h[2]) > 0) m_binom_h[2] else "="
         p_val_b <- m_binom_h[3]
+        m_p <- matrix(c(paste0("p", p_op_b, p_val_b), p_op_b, p_val_b), nrow = 1)
+      }
+    } else if (!all(is.na(m_binom_bare)) && all(is.na(m_h))) {
+      # v0.6.5: bare binomial ("binomial[ test]: p [op] X") with no Cohen's h
+      # and no in-sentence counts. Surfaces the p-value but nothing is
+      # independently recomputable -> extraction-only NOTE (check.R's binomial
+      # branch handles the no-h case). collabra.77859 Study 1 gift-preference
+      # (p = .002) and Study 4 willingness-to-pay-more (p = .047). Reached only
+      # when no t/F/r/chi/z/binomial-with-h matched (dispatched after pat_binom_h).
+      # Guard `all(is.na(m_h))`: if a Cohen's h co-occurs in the chunk but
+      # pat_binom_h did not bind it (wrong order / >80 chars apart), the case is
+      # ambiguous -- do NOT extract a bare binomial that would let the generic
+      # h-adoption bind an unrelated h (preserves the v0.6.2 80-char-lookahead).
+      test_type <- "binomial"
+      # No test statistic and no Cohen's h for a bare binomial; both stay NA.
+      if (all(is.na(m_p)) && !is.na(m_binom_bare[3])) {
+        p_op_b  <- if (!is.na(m_binom_bare[2]) && nchar(m_binom_bare[2]) > 0) m_binom_bare[2] else "="
+        p_val_b <- m_binom_bare[3]
         m_p <- matrix(c(paste0("p", p_op_b, p_val_b), p_op_b, p_val_b), nrow = 1)
       }
     } else if (!all(is.na(m_H))) {
@@ -2069,6 +2124,19 @@ parse_text <- function(text, context_window_size = 2) {
     ciU <- raw_out$ciU_reported
     er  <- raw_out$effect_reported
     ern <- raw_out$effect_reported_name
+    # v0.6.5: a "thin" row with no test statistic (stat_value NA) carries no
+    # stat/df/N/CI/effect to distinguish it from another thin row of the same
+    # test_type -- two bare binomials ("binomial: p = .002" and "binomial test:
+    # p = .047") both key as "binomial|NA|NA|..." and wrongly collapse to one.
+    # Add the reported p to the key ONLY for such thin rows; rows WITH a
+    # stat_value keep the original key, so the r-row / table-fragment dedup
+    # (which intentionally ignores p) is unaffected. (collabra.77859: Study 1
+    # gift-preference p=.002 and Study 4 willingness-to-pay-more p=.047.)
+    thin_pkey <- ifelse(
+      is.na(raw_out$stat_value) & !is.na(raw_out$p_reported),
+      as.character(round(raw_out$p_reported, 6L)),
+      ""
+    )
     keys <- paste(
       raw_out$test_type,
       round(raw_out$stat_value, 3L),
@@ -2079,6 +2147,7 @@ parse_text <- function(text, context_window_size = 2) {
       ifelse(is.na(ciU), "NA", as.character(round(ciU, 3L))),
       ifelse(is.na(er),  "NA", as.character(round(er,  4L))),
       ifelse(is.na(ern), "NA", as.character(ern)),
+      thin_pkey,
       sep = "|"
     )
     keep <- rep(TRUE, nrow(raw_out))

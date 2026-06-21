@@ -1,3 +1,52 @@
+# effectcheck 0.6.5
+
+**Five parser/classification fixes from the 2026-06-21 escicheck-iterate canary audit
+(7-paper Collabra/RR/PLOS-Med set, independent Sonnet verification of the docpluck
+v2.4.95 production path).** All verified against the AI stats gold; full suite 2117
+pass / 0 fail.
+
+- **Chi-square sub-type: a goodness-of-fit / contingency chi-square that reports a
+  Cramér's V is no longer mislabeled `chisq_subtype = "mcnemar"`** when a *separate*
+  "We also conducted a McNemar test, ... OR = ..." clause shares its sentence. A McNemar
+  test yields an odds ratio from discordant pairs, never a Cramér's V, so a chi-square
+  carrying a reported V is contingency/gof regardless of co-occurring "mcnemar" text.
+  The reported V is now computed and verified instead of routed to a "not recoverable"
+  NOTE (collabra.37122: 4 reversal tests). The sub-type classifier was further
+  hardened to distinguish goodness-of-fit (one variable vs a 50-50 / chance
+  baseline) from a test of independence (two categorical variables): it reads the
+  chi-square's OWN sentence (`raw_text`) first — where "test of independence" /
+  "goodness of fit" sit — and falls back to the wider context only for the
+  unambiguous gof signal, never a bled independence keyword. This resolves the
+  context-window keyword bleed that had reversal tests tagged contingency and
+  "test of independence" rows tagged gof (collabra.37122: all 20 body chi-square
+  rows now match gold). gof and contingency compute an identical Cramér's V for a
+  1-df table, so the reported-V verification is unaffected — only the label.
+  (`check.R`)
+- **Design inference: an explicitly independent Welch / independent-samples / two-sample
+  t-test is no longer mislabeled `design_inferred = "paired"`** when the multi-sentence
+  context window also mentions within-subjects analyses. "Welch's t-test" is by
+  definition unequal-variance independent-samples; that signal now wins over a stray
+  "paired"/"within" keyword. The v0.6.3 E2 fix only caught fractional Welch df; this
+  catches the integer-df case (collabra.57785: t(741) rows). (`check.R`)
+- **Standardized-coefficient binding: a `beta = X` that PRECEDES its t in a
+  "(beta = X, t(df) = Y, p)" clause now binds to THAT t**, not the next clause's beta.
+  The sub-chunk splitter previously stranded the preceding beta in the prior sub-chunk
+  (cog_emo: t(260) = 11.32 took beta = 0.91 instead of 0.74). (`parse.R`)
+- **Bare binomial: a "binomial[ test]: p [op] X" with no Cohen's h** is now extracted as
+  an extraction-only NOTE rather than dropped (guarded to fire only when no Cohen's h
+  co-occurs). The prose dedup key also now includes the reported p for "thin" rows with
+  no test statistic, so two distinct bare binomials no longer collapse to one
+  (collabra.77859: Study 1 p = .002, Study 4 p = .047). (`parse.R`)
+- **`render_report()` no longer warns "Unknown or uninitialised column"** on a minimal
+  result tibble — four column accesses (`insufficient_data`, `variants_tested`,
+  `uncertainty_reasons`, `assumptions_used`) are now membership-guarded. (`report.R`)
+
+Regression tests: `test-v065-mcnemar-subtype-guard.R`, `test-v065-welch-not-paired.R`,
+`test-v065-beta-precedes-t-binding.R`, `test-v065-bare-binomial.R`,
+`test-v065-chi-subtype-gof-vs-independence.R`. The canary-audit
+harness `scripts/render_for_audit.R` was also fixed to pass `table_rows` (mirroring the
+production `/process` path) so the audit exercises the v0.6.4 Mode B consumer.
+
 # effectcheck 0.6.4
 
 **Mode B docpluck table-row consumer (REQUEST_11 / docpluck v2.4.95).** `check_text()`

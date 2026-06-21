@@ -35,6 +35,10 @@ test_that("v0.6.2: 80-char-lookahead rejects far-apart binomial-p and Cohen-h", 
     "binomial p = .020 is at the start"
   )
   r <- check_text(v)
+  # The binomial-p and the (wrong-order, >80-char-distant) Cohen's h must not be
+  # bound together. v0.6.5 added a bare-binomial path, but it is guarded to fire
+  # ONLY when no Cohen's h co-occurs in the chunk -- so this ambiguous case still
+  # extracts nothing (a stray h must never be associated to a far-away binomial).
   expect_equal(nrow(r), 0L)
 })
 

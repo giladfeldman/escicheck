@@ -543,18 +543,75 @@ compute_and_compare_one <- function(row,
   # Friedman / goodness-of-fit are not silently routed to the phi/V path.
   chisq_subtype <- NA_character_
   if (!is.na(tt) && tt == "chisq") {
-    cs_ctx <- tolower(paste(
-      c(if ("context_window" %in% names(row)) as.character(row$context_window[1]) else "",
-        if ("raw_text" %in% names(row)) as.character(row$raw_text[1]) else ""),
-      collapse = " "))
-    chisq_subtype <- if (isTRUE(grepl("mcnemar", cs_ctx, fixed = TRUE))) {
+    cw_ctx <- tolower(if ("context_window" %in% names(row) &&
+                          length(row$context_window) > 0) {
+      as.character(row$context_window[1])
+    } else "")
+    rt_ctx <- tolower(if ("raw_text" %in% names(row) &&
+                          length(row$raw_text) > 0) {
+      as.character(row$raw_text[1])
+    } else "")
+    cs_ctx <- paste(cw_ctx, rt_ctx)
+    # A McNemar test is reported via an odds ratio from discordant pairs; it
+    # never yields a Cramer's V. A chi-square that carries a reported V is
+    # therefore a contingency / goodness-of-fit test even when the SAME context
+    # window also mentions a separate "We also conducted a McNemar test, ...
+    # OR = ..." clause (a distinct, OR-based test). Without this guard, mere
+    # co-occurrence of the word "mcnemar" mislabels the gof chi-square as
+    # McNemar and suppresses its verifiable V (collabra.37122: four reversal
+    # goodness-of-fit chi-squares, each followed in-sentence by a separate
+    # McNemar-OR clause, were all mis-tagged mcnemar).
+    ern_ctx <- if ("effect_reported_name" %in% names(row) &&
+                   length(row$effect_reported_name) > 0) {
+      as.character(row$effect_reported_name[1])
+    } else {
+      NA_character_
+    }
+    er_ctx <- if ("effect_reported" %in% names(row) &&
+                  length(row$effect_reported) > 0) {
+      suppressWarnings(as.numeric(row$effect_reported[1]))
+    } else {
+      NA_real_
+    }
+    chi_reports_V <- identical(ern_ctx, "V") && !is.na(er_ctx)
+    # gof vs contingency/independence: a goodness-of-fit / one-sample proportion
+    # test compares ONE variable's split to a baseline (50-50 / chance); a test
+    # of independence compares TWO categorical variables. The context window
+    # bleeds keywords across adjacent tests, so classify from the chi-square's
+    # OWN sentence (raw_text) first -- that is where an explicit "test of
+    # independence" / "goodness of fit" sits -- and fall back to the wider
+    # context only for bare-stat rows whose type phrasing is in the preceding
+    # sentence. From the bled context, trust ONLY the unambiguous gof signal
+    # (never an independence keyword, which routinely bleeds from a neighbour);
+    # default to contingency. gof and contingency compute an identical V for a
+    # 1-df table, so the verification is unaffected -- only the sub-type label.
+    # (collabra.37122: reversal "deviation from 50-50" tests were tagged
+    # contingency; "chi-square test of independence" rows were tagged gof.)
+    .gof_signal <- function(txt) {
+      isTRUE(grepl("goodness", txt, fixed = TRUE)) ||
+        isTRUE(grepl(paste0("deviation from 50|50-50|50/50|against chance|",
+                            "from chance|compared to chance|than chance|",
+                            "versus chance|vs\\.? chance"),
+                     txt, perl = TRUE))
+    }
+    .own_subtype <- function(txt) {
+      if (!nzchar(txt)) return(NA_character_)
+      if (isTRUE(grepl("test of independence", txt, fixed = TRUE))) return("contingency")
+      if (.gof_signal(txt)) return("gof")
+      if (isTRUE(grepl("association between", txt, fixed = TRUE)) ||
+          isTRUE(grepl("\\bindependence\\b", txt, perl = TRUE))) return("contingency")
+      NA_character_
+    }
+    chisq_subtype <- if (isTRUE(grepl("mcnemar", cs_ctx, fixed = TRUE)) &&
+                         !chi_reports_V) {
       "mcnemar"
     } else if (isTRUE(grepl("friedman", cs_ctx, fixed = TRUE))) {
       "friedman"
-    } else if (isTRUE(grepl("goodness", cs_ctx, fixed = TRUE))) {
-      "gof"
     } else {
-      "contingency"
+      .sub <- .own_subtype(rt_ctx)
+      if (is.na(.sub) && .gof_signal(cw_ctx)) .sub <- "gof"
+      if (is.na(.sub)) .sub <- "contingency"
+      .sub
     }
   }
   df1 <- if (length(row$df1) > 0) as.numeric(row$df1[1]) else NA_real_
@@ -3118,11 +3175,20 @@ compute_and_compare_one <- function(row,
                 "binomial p recomputed from n out of N; verification deferred",
                 "(missing p_reported or computation error)."))
       }
-    } else {
+    } else if (!is.na(effect_reported)) {
       uncertainty <- c(uncertainty,
         paste("Exact binomial test with Cohen's h reported - n / N not",
               "recoverable from the same verbatim, so the binomial p cannot",
               "be independently recomputed. Cohen's h is accepted as reported."))
+    } else {
+      # v0.6.5: bare binomial ("binomial[ test]: p [op] X") with no Cohen's h
+      # and no recoverable n / N -> the p-value is surfaced but nothing is
+      # independently recomputable (collabra.77859 Study 1 gift-preference,
+      # Study 4 willingness-to-pay-more).
+      uncertainty <- c(uncertainty,
+        paste("Binomial test p-value extracted, but no Cohen's h and no",
+              "n / N counts in the same sentence, so the result cannot be",
+              "independently recomputed (extraction-only)."))
     }
   } else if (tt == "dscf") {
     # ------ DSCF (Dwass-Steel-Critchlow-Fligner) POST-HOC W ------
@@ -4184,8 +4250,24 @@ compute_and_compare_one <- function(row,
         "between-groups", "different groups", "two-sample"
       )
 
+      # A Welch's t-test is, by definition, an UNEQUAL-VARIANCE INDEPENDENT-SAMPLES
+      # test -- there is no "paired Welch" test. Likewise "independent-samples t" /
+      # "two-sample t" explicitly name THIS test as independent. Either is a
+      # definitive independent signal that must win over a stray "paired"/"within"
+      # keyword elsewhere in the (often multi-sentence) context window. Without
+      # this, collabra.57785's "We ran an independent Welch's t-test ... t(741) =
+      # 5.36" was mislabeled "paired" because the window also discussed
+      # within-subjects analyses and paired_patterns is checked first. (The v0.6.3
+      # E2 fix only catches FRACTIONAL Welch df; here df = 741 is an integer.)
+      definitive_independent_t <-
+        grepl("welch", context_lower, fixed = TRUE) ||
+        grepl("independent[- ]samples?\\s+t", context_lower) ||
+        grepl("two[- ]sample\\s+t", context_lower)
+
       if (any(sapply(one_sample_patterns, function(p) grepl(p, context_lower)))) {
         design_inferred <- "one-sample"
+      } else if (definitive_independent_t) {
+        design_inferred <- "independent"
       } else if (any(sapply(paired_patterns, function(p) grepl(p, context_lower)))) {
         design_inferred <- "paired"
       } else if (any(sapply(independent_patterns, function(p) grepl(p, context_lower)))) {
