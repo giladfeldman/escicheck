@@ -1,3 +1,85 @@
+# effectcheck 0.6.6
+
+**Six parser/classification fixes from the 2026-06-25 escicheck-iterate canary audit
+(double independent Sonnet audit over the 5-paper canary set, after reconciling the
+2026-06-23 Dropbox ai_gold conflict and regenerating the collabra.90203 + cog_emo
+stats golds).** Verified against the AI stats gold; full suite 868 test_that blocks /
+0 fail, `R CMD check --as-cran` 0E/0W.
+
+- **A `robust_bayesian_meta_analysis` / Bayesian model-averaged effect reported as
+  `r = value` is no longer flattened to a plain Pearson correlation marked PASS.** A RoBMA
+  model-averaged estimate (e.g. collabra.90203 "model-averaged mean effect size estimate of
+  r = 0.002, 95% CI [0, 0.004]" with `BF01 = 14.93`) is a posterior estimate accompanied by
+  a Bayes factor — not a frequentist r recomputable from df. `check.R` now detects the
+  model-averaging phrase in the r's OWN clause (not the wider context — same near-cue
+  discipline as the Pearson/Spearman fix) and routes the row to NOTE with
+  `effect_reported_name = "r_model_averaged"` and an explicit Bayesian-nature note, instead
+  of letting the r-adopts-itself block mark it a verified PASS. Regression tests in
+  `tests/testthat/test-v066-robma-model-averaged-r.R`.
+
+- **The Mode B docpluck table-row consumer no longer extracts a "Target article" /
+  "Original study" comparison-column row as one of the audited paper's own results, and
+  deduplicates a `table_estimate` row that restates a body result by its CI.** A
+  replication/extension paper often prints the original study's statistics in a comparison
+  column beside its own "Replication" column; docpluck flattens both, and the consumer
+  ingested the original values as the paper's findings (collabra.90203 surfaced Small et al.
+  2007's Table-8 `F = 6.75 / 5.32` and the Table-10 Target-article correlations as spurious
+  own-result rows). `flattened_rows_to_parsed()` now drops a row whose `row_label`/`group`
+  marks it as the comparison/original column (10 spurious rows removed; all 12 Replication
+  rows kept). Separately, `.dedup_table_vs_prose()` now also collapses a `table_estimate`
+  row whose exact reported CI pair matches a prose row's — catching a restatement the full
+  numeric-signature dedup missed because the body row's effect size was stripped by docpluck
+  (collabra.90203 η²p = .01, CI [0, .021] restating body `F(2,998) = 3.91`). Regression tests
+  in `tests/testthat/test-v066-table-comparison-column-and-dedup.R`.
+
+- **A bare correlation `r(df) = value, 95% CI [..]` with NO co-located p-value now adopts
+  the r as its own reported effect and verifies via the CI, instead of dropping to SKIP.**
+  The r-adopts-itself-as-effect block in `check.R` (a correlation's r IS its effect size)
+  only fired when `check_type == "p_value"` (a p was present). A CI-only row had
+  `check_type == "extraction_only"`, so the adoption was skipped, `effect_reported` stayed
+  NA, and the row went to SKIP — even though the r is the effect and the reported CI gives
+  a verification path (the v0.5.10 bare-r-with-CI form). collabra.57785's Discussion summary
+  `r(741) = -0.43, 95% CI [-0.49, -0.37]` / `r(741) = -0.44, 95% CI [-0.50, -0.38]` (no
+  co-located p) are now verified. The adoption requires a CI when no p is present, so a truly
+  unverifiable bare `r(df)` (no p, no CI) still routes to extraction-only. Regression tests
+  in `tests/testthat/test-v066-bare-r-ci-no-p-effect-adoption.R`.
+
+- **A body-text Pearson `r(df)` is no longer mislabeled `spearman` because a DISTANT table
+  note mentions "Spearman's rho".** The Stage-1/P2 reclassification cue (a plain `r(df)` in a
+  Spearman/Kendall context routes to the rank path) was computed over `paste(s, context)` —
+  the wide context window — so cog_emo's (Chan & Feldman 2024) body Pearson
+  `r(261) = -0.43, 95% CI [-0.52, -0.33]` was tagged `spearman` purely because a far table
+  note read "Format: Pearson's correlations [CI] (Spearman's rho)". The reclassification cue
+  now reads only `s` (the immediate sub-chunk containing the r), matching the documented
+  "cue near the statistic" intent — an explicit near-statistic cue ("A Spearman correlation
+  was computed, r(20) = 0.50") still reclassifies; the Gap-4 Spearman-CI offer still consults
+  the wider context separately. Regression tests in
+  `tests/testthat/test-v066-pearson-not-spearman-context-bleed.R`.
+
+- **ANOVA design classification no longer mislabels a within-subjects / repeated-measures
+  ANOVA as `between`.** (Details below — this was the cycle-1 fix.)
+
+- **ANOVA design classification no longer mislabels a within-subjects / repeated-measures
+  ANOVA as `between`.** The `tt == "F"` block in `check.R` keyed `design_inferred` on the
+  bare word "between" *first* (first-keyword-wins), so a within-subjects ANOVA discussed in
+  a multi-sentence context window that *also* mentioned a between-subjects comparison was
+  mislabeled `between` — collabra.57785's "2 (purchase type) x 2 (feeling time)
+  within-subjects two-way ANOVA" rows `F(1,742) = 101.10 / 54.70 / 5.54` (gold: repeated-
+  measures 2x2) were all tagged `between`. The classifier now (1) recognizes a **definitive**
+  signal — the design keyword directly modifying "ANOVA" ("within-subjects two-way ANOVA",
+  "repeated-measures ANOVA", "between-subjects ANOVA"), which wins over a stray opposite
+  keyword elsewhere in the window (mirrors the v0.6.5 t-test `definitive_independent_t`
+  rule); and (2) in the fallback, gives a `within-subjects`/`repeated measures` **design
+  phrase** precedence over the bare preposition "between" (which appears in non-design
+  English like "interaction between purchase type and feeling type"), while still labeling
+  `between` from a bare "between" when no within design phrase is present — preserving
+  collabra.90203's genuine 2x3 between-subjects ANOVAs whose delivered text dropped the
+  contiguous "between-subjects" token. (NB: the runner's default TRE regex engine does not
+  honour `\b` word boundaries, so "ANOVA" is bounded with an explicit non-letter group.)
+  Whole-corpus re-verification confirmed the three collabra.57785 rows flip `between`->`within`
+  with zero design-label regressions on collabra.90203 / collabra.77859. Regression tests in
+  `tests/testthat/test-v066-within-anova-design.R`.
+
 # effectcheck 0.6.5
 
 **Five parser/classification fixes from the 2026-06-21 escicheck-iterate canary audit
