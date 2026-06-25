@@ -480,6 +480,30 @@ VARIANT_METADATA <- list(
   }, character(1))
   prose_sigs <- unique(sig[!is_table & !is.na(sig)])
   drop <- is_table & !is.na(sig) & sig %in% prose_sigs
+
+  # v0.6.6 (E-D2): a `table_estimate` row (effect/CI only, no test statistic --
+  # docpluck delivered a typed `est` cell) often restates a body result whose
+  # full signature differs because the body row carries the test statistic and
+  # the table cell does not (e.g. collabra.90203 Table-8 estimate eta^2p = .01,
+  # CI [0, .021] restates the body H1b F(2,998) = 3.91, CI [.000, .021] -- the
+  # body row's eta^2p was stripped by docpluck so it has only the CI, and the
+  # table cell rounds .008 -> .01). The full-signature match above cannot catch
+  # this. Collapse a table_estimate row when its EXACT reported CI pair
+  # (ciL, ciU) matches that of a prose (non-table) row -- the CI identifies the
+  # same test. Scoped to table_estimate (a test-statistic-bearing table row is
+  # independently verifiable and must not be merged on CI alone).
+  tt_col <- if ("test_type" %in% names(parsed)) as.character(parsed[["test_type"]]) else rep(NA_character_, nrow(parsed))
+  prose_ci <- unique(stats::na.omit(
+    vapply(which(!is_table & !is.na(cl) & !is.na(cu)),
+           function(i) paste(round(cl[i], 3L), round(cu[i], 3L), sep = "|"),
+           character(1))
+  ))
+  ci_dup <- vapply(seq_len(nrow(parsed)), function(i) {
+    is_table[i] && !is.na(tt_col[i]) && identical(tt_col[i], "table_estimate") &&
+      !is.na(cl[i]) && !is.na(cu[i]) &&
+      (paste(round(cl[i], 3L), round(cu[i], 3L), sep = "|") %in% prose_ci)
+  }, logical(1))
+  drop <- drop | ci_dup
   parsed[!drop, , drop = FALSE]
 }
 
@@ -3933,11 +3957,60 @@ compute_and_compare_one <- function(row,
     "extraction_only"
   }
 
+  # v0.6.6 (E-C1): a Bayesian MODEL-AVERAGED effect (RoBMA / Bayesian
+  # model-averaging / PMA) reported as `r = 0.002` is NOT a frequentist Pearson
+  # correlation — it is a posterior model-averaged estimate that comes with a
+  # Bayes factor (BF01), not a p-value or a recomputable r. effectcheck must not
+  # flatten it to a plain `r` and (worse, via the r-adopts-itself block below)
+  # mark it a verified PASS. Detect the model-averaging context from the row's
+  # OWN text and route the row to an honest NOTE that records its Bayesian
+  # nature, so the BF01 / RoBMA provenance is surfaced rather than silently
+  # dropped. collabra.90203: "When applying RoBMA ... (BF01 = 14.93), with a
+  # model-averaged mean effect size estimate of r = 0.002 (95% CI [0, 0.004])".
+  # The model-averaging signal is read from the r's OWN clause (raw_text) only,
+  # NOT the wider context window -- a bare "BF01" elsewhere in a Bayes-using
+  # paper must not reclassify an ordinary frequentist r (the E-C2 context-bleed
+  # lesson). The r is treated as model-averaged only when its own sentence names
+  # the model-averaging method or explicitly calls the estimate "model-averaged".
+  bayes_avg_ctx <- {
+    .bt <- tolower(if ("raw_text" %in% names(row) && length(row$raw_text) > 0) row$raw_text[1] else "")
+    grepl("\\b(?:robma|bayesian\\s+model[- ]?averag|model[- ]?averaged|posterior\\s+model\\s+average)\\b",
+          .bt, perl = TRUE)
+  }
+  is_bayes_model_avg_r <- tt %in% c("r", "rho") && isTRUE(bayes_avg_ctx)
+  if (is_bayes_model_avg_r) {
+    check_type <- "extraction_only"
+    reported_type <- "r"
+    effect_reported <- stat
+    effect_reported_name <- "r_model_averaged"
+    has_effect_reported <- FALSE
+    matched_value <- NA_real_
+    matched_variant <- NA_character_
+    delta_effect_abs <- NA_real_
+    if (status %in% c("ERROR", "WARN", "PASS")) status <- "NOTE"
+    uncertainty <- c(uncertainty,
+      paste0("Bayesian model-averaged effect (RoBMA / Bayesian model-averaging): the ",
+             "reported r is a posterior model-averaged estimate accompanied by a Bayes ",
+             "factor, not a frequentist correlation -- extracted as reported, not ",
+             "independently verifiable against a recomputed r or p-value"))
+  }
+
   # v0.3.0l: r-test upgrade — r IS both the statistic and the effect size.
   # When r is reported as the test stat (e.g., r(48) = .42), it serves as its own
   # effect size. If df is available for p-value verification, this is a fully
   # verified result — not "p_value_only".
-  if (tt == "r" && check_type == "p_value" && !is.na(stat)) {
+  #
+  # v0.6.6 (E-B): the same adoption must fire when the r is reported with a CI
+  # but NO p-value — the v0.5.10 bare-r-with-CI form. Such a row previously had
+  # check_type == "extraction_only" (no p_reported), so this block was skipped,
+  # `effect_reported` stayed NA, and the row went to SKIP even though the r IS
+  # the effect and the reported CI gives a verification path. collabra.57785's
+  # Discussion summary "r(741) = -0.43, 95% CI [-0.49, -0.37]" (no co-located p)
+  # was dropped to SKIP for exactly this reason. Adopt r as its own effect when
+  # there is EITHER a p (check_type "p_value") OR a reported CI.
+  r_has_ci <- !is.na(ciL_rep) && !is.na(ciU_rep)
+  if (tt == "r" && !is.na(stat) && !isTRUE(is_bayes_model_avg_r) &&
+      (check_type == "p_value" || (check_type == "extraction_only" && r_has_ci))) {
     effect_reported <- stat
     reported_type <- "r"
     effect_reported_name <- "r"
@@ -4312,10 +4385,67 @@ compute_and_compare_one <- function(row,
 
     if (nchar(context_text) > 0) {
       context_lower <- tolower(context_text)
-      if (grepl("between|between-subjects", context_lower)) {
-        design_inferred <- "between"
-      } else if (grepl("within|within-subjects|repeated measures", context_lower)) {
+      # A DEFINITIVE design signal is one where the word directly names the
+      # ANOVA's own design -- "within-subjects ANOVA" / "repeated-measures
+      # ANOVA" / "between-subjects ANOVA" / "mixed ANOVA" (allowing the
+      # factorial size, e.g. "within-subjects two-way ANOVA", between the
+      # keyword and "ANOVA"). A definitive signal must win over a stray
+      # opposite keyword elsewhere in the (often multi-sentence) context
+      # window -- mirrors the t-test `definitive_independent_t` rule.
+      #
+      # Without this, collabra.57785's "2 (purchase type) x 2 (feeling time)
+      # within-subjects two-way ANOVA" was mislabeled "between" because the
+      # window ALSO contained the design-comparison sentence "both a
+      # between-subjects design and within-subjects design were performed"
+      # and the bare `between` test was checked first (first-keyword-wins).
+      # The gold confirms these F(1,742) rows are repeated-measures 2x2.
+      anova_design_re <- function(kw) {
+        # kw directly modifies "anova", optionally through a factorial-size
+        # phrase ("two-way", "2 x 2", "2x2", "factorial") -- but NOT across a
+        # sentence boundary (no period between the keyword and ANOVA). NB: the
+        # runner's default (TRE) regex engine does NOT honour `\b` word
+        # boundaries (`grepl("\\banova\\b", "an anova ")` is FALSE here), so
+        # "anova" is bounded explicitly with a non-letter / start / end group.
+        anova_tok <- "(^|[^a-z])anova([^a-z]|$)"
+        grepl(paste0(kw, "[^.]{0,40}", anova_tok), context_lower) ||
+          grepl(paste0("anova([^a-z]|$)[^.]{0,40}", kw), context_lower)
+      }
+      definitive_within <- anova_design_re("within[- ]subjects?") ||
+        anova_design_re("repeated[- ]measures")
+      definitive_between <- anova_design_re("between[- ]subjects?") ||
+        anova_design_re("between[- ]groups?")
+      definitive_mixed <- anova_design_re("mixed") || anova_design_re("split[- ]plot")
+
+      # Fallback precedence (no definitive ANOVA attachment), designed so all
+      # three observed cases land correctly:
+      #   * A "within-subjects" / "repeated measures" DESIGN PHRASE outranks a
+      #     bare "between". This is the discriminator for collabra.57785's
+      #     F(1,742)=5.54 interaction row: its window has the within-subjects
+      #     design phrase plus only the PREPOSITION "between" ("interaction
+      #     between purchase type and feeling type"), and the gold says it is
+      #     within-subjects. Bare "between" must not win there.
+      #   * A bare "between"/"between-subjects" still labels between when NO
+      #     within phrase is present. This preserves collabra.90203's genuine
+      #     2x3 between-subjects ANOVAs, whose delivered windows carry the bare
+      #     "between" but where docpluck dropped the contiguous "between-
+      #     subjects" token (rendered "...twoway ANOVA"). The gold confirms
+      #     between-subjects for those rows.
+      # `within_design` is the design phrase (not the bare preposition "within",
+      # which appears in "within the range"); `between_kw` accepts the bare
+      # preposition because 90203 depends on it and a stray "between" rarely
+      # mislabels once a within design phrase has been given precedence.
+      within_design <- grepl("within[- ]subjects?|repeated[- ]measures", context_lower)
+      between_kw <- grepl("between", context_lower)
+      if (definitive_mixed) {
+        design_inferred <- "mixed"
+      } else if (definitive_within && !definitive_between) {
         design_inferred <- "within"
+      } else if (definitive_between && !definitive_within) {
+        design_inferred <- "between"
+      } else if (within_design) {
+        design_inferred <- "within"
+      } else if (between_kw) {
+        design_inferred <- "between"
       } else if (grepl("mixed|split-plot", context_lower)) {
         design_inferred <- "mixed"
       }

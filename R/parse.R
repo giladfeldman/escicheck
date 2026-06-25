@@ -1176,8 +1176,17 @@ parse_text <- function(text, context_window_size = 2) {
 
     # Rank-correlation context (Stage 1 / P2): an r(df) reported in a Spearman
     # or Kendall context must be routed to the rank path, not the Pearson path.
-    rank_ctx <- tolower(paste(c(s, if (exists("context")) context else ""),
-                              collapse = " "))
+    # The reclassification cue must be NEAR THE STATISTIC -- the immediate
+    # sub-chunk `s` -- NOT the wider context window. A bare r(df) defaults to
+    # Pearson; only an "A Spearman correlation was computed, r(20) = 0.50"-style
+    # cue in the same clause flips it. Using the wide context window here caused
+    # a body-text Pearson r(261) in cog_emo (Chan & Feldman 2024) to be
+    # mislabeled "spearman" purely because a DISTANT table note read "Format:
+    # Pearson's correlations [CI] (Spearman's rho)" -- the note describes a
+    # parenthetical alternative column, not this r. (The Gap-4 Spearman-CI
+    # offer still consults the wider context separately; only the test_type
+    # RELABEL is restricted to the near cue.)
+    rank_ctx <- tolower(s)
     is_kendall_ctx <- isTRUE(grepl("kendall", rank_ctx, fixed = TRUE))
     is_spearman_ctx <- isTRUE(grepl("spearman", rank_ctx, fixed = TRUE)) ||
       isTRUE(grepl("rank[ -]order correlation|rank correlation", rank_ctx))
@@ -2279,6 +2288,26 @@ flattened_rows_to_parsed <- function(table_rows) {
       as.character(rec$row_label[[1]])
     } else {
       ""
+    }
+    # v0.6.6 (E-D1): a replication/extension paper's summary table often prints
+    # the ORIGINAL study's statistics in a "Target article" / "Original study"
+    # column next to the paper's own "Replication" column (e.g. collabra.90203
+    # Tables 8-10 reproduce Small et al. 2007's F / r values for comparison).
+    # docpluck flattens both columns into rows; a row whose row_label OR group
+    # marks it as the comparison/original column is NOT one of THIS paper's
+    # results and must not be emitted (it would be checked + counted as the
+    # audited paper's finding -- e.g. F = 6.75 / 5.32 from the Target-article
+    # column surfaced as spurious own-result rows). The paper's own rows
+    # (row_label/group = "Replication", or a substantive condition label) pass.
+    comparison_col_re <- paste0(
+      "(?i)\\b(target\\s+article|original\\s+(article|study|paper)|",
+      "source\\s+article|prior\\s+(study|work))\\b"
+    )
+    is_comparison_row <-
+      grepl(comparison_col_re, rlab, perl = TRUE) ||
+      (!is.na(grp) && grepl(comparison_col_re, grp, perl = TRUE))
+    if (is_comparison_row) {
+      return(NULL)
     }
     # Human-readable provenance string used as raw_text so the row is
     # identifiable in output and audit (there is no source sentence).
