@@ -1,3 +1,47 @@
+# effectcheck 0.6.7
+
+**Consumes the two newly-typed docpluck v2.4.98 table fields (`fields.eta2` /
+`fields.r`), the reply to ESCImate's 2026-06-25 docpluck handoff (DP-3 / DP-5).**
+docpluck v2.4.98 now types the partial-η² column on a structurally-identified
+ANOVA table (`fields.eta2`) and types correlation-matrix cells (`fields.r` with
+rejoined CIs). Verified by re-extracting collabra.90203 + cog_emo from **live
+docpluck v2.4.98** (`/api/version` → `library.version 2.4.98`) and checking against
+the AI stats gold. Full suite 877 test_that blocks / 0 fail, `R CMD check --as-cran`
+0E/0W. Regression tests in `tests/testthat/test-v067-docpluck-v2498-eta2-r.R`.
+
+- **A typed `fields.eta2` on a docpluck table F-row is now bound as the reported
+  partial-η² (`etap2`) instead of being discarded.** Previously the consumer left the
+  partial-η² unbound because docpluck emitted it untyped; v2.4.98 types it (DP-3), so
+  `flattened_rows_to_parsed()` binds it as `etap2` — the same canonical reported name the
+  prose parser produces — and the row flows through the existing partial-η² verification
+  path. When the table row carries `df1`+`df2` the value is **recomputed from F and
+  verified** (collabra.90203 Table 9 H5d `F(2,998)=0.792, η²p=.002 [.000,.009]` → PASS);
+  when df is absent it routes to an honest NOTE that surfaces the η²p + CI. This is the
+  **only** recoverable source of η²p for this paper — the body-text glyph has no ToUnicode
+  CMap and is stripped to a bare `( = .000, …)` (docpluck OCR-tier won't-fix, confirmed).
+  An effect-only ANOVA cell (typed `eta2` + CI, blank F) becomes a `table_estimate` row
+  named `etap2`. An UNtyped `est` is still left unbound (no regression).
+
+- **A typed `fields.r` correlation cell reported with a CI but no df/N now surfaces as a
+  NOTE (r + CI shown, estimate-in-CI invariant checked) instead of collapsing to a bare
+  SKIP.** docpluck's typed Table-10-style r-cells (DP-5) arrive with their CI but no usable
+  N — docpluck mis-binds the per-row `n` to the comparison column (filed back to docpluck in
+  `docs/REPLY_TO_DOCPLUCK_2026-06-26.md`). Such a row adopts the r as its own effect and its
+  reported CI is consistency-checked (a dropped-minus / r-outside-CI is flagged via
+  `sign_ci_violation`), so SKIP ("nothing was checked") understated it; it now stays NOTE.
+  An r-cell with neither a CI nor df/N is unchanged (conservative no-CI route).
+
+- **The prose↔table dedup now also collapses a test-statistic-bearing table row (F/t/r)
+  that restates a glyph-stripped prose row, matched on the (statistic + CI) signature.**
+  Because docpluck strips the prose effect-size glyph, a body F-row ends up with only
+  `{F, CI}` while the now-typed table row carries `{F, η²p, CI}`; the signatures differ by
+  the η²p term alone, so neither the full-signature nor the `table_estimate` CI-only dedup
+  collapsed them and the same H-test surfaced twice (collabra.90203 H5b/H5c). A table F/t/r
+  row is now dropped when BOTH its statistic value AND its reported CI pair match a prose
+  row's — a stronger same-test signature than CI alone (df is intentionally excluded from
+  the key, since docpluck's table df can disagree with the body's while the F + CI still
+  pin the identical finding).
+
 # effectcheck 0.6.6
 
 **Six parser/classification fixes from the 2026-06-25 escicheck-iterate canary audit

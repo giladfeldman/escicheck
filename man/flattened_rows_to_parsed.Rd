@@ -28,10 +28,17 @@ Mapping (typed keys only -- an effect family is never inferred from an
 untyped \code{est}):
 \itemize{
 \item \code{t}   -> test_type "t" (df from \code{df}; Cohen's \code{d} bound when present)
-\item \code{F}   -> test_type "F" (df1/df2 when present; the partial-eta^2 \code{est} is
-left unbound -- docpluck emits it untyped, so p is verified but
-the effect is not, pending docpluck's deferred \code{effect_type})
-\item \code{r}   -> test_type "r" (N from \code{n})
+\item \code{F}   -> test_type "F" (df1/df2 when present; a typed partial-eta^2
+\code{eta2} is bound as \code{etap2} -- docpluck v2.4.98 types it on
+structurally-identified ANOVA tables, DP-3 -- so the effect is
+recomputed + verified when df1+df2 are present, else surfaced in
+an honest NOTE. An UNtyped \code{est} is still left unbound.)
+\item \code{r}   -> test_type "r" (N from \code{n}; reported CI carried so a row with no
+df/N still adopts the r as its own effect and is checked against
+its CI rather than dropped)
+\item \code{eta2} with no usable F/t/r -> test_type "table_estimate" naming the
+effect \code{etap2} (an effect-only ANOVA cell: partial-eta^2 + CI,
+surfaced as an extraction-only NOTE, DP-3)
 \item \code{est} (no test statistic) -> test_type "table_estimate", an
 extraction-only NOTE that surfaces est + CI + p (cannot be
 independently recomputed from an estimate alone)
