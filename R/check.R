@@ -503,7 +503,36 @@ VARIANT_METADATA <- list(
       !is.na(cl[i]) && !is.na(cu[i]) &&
       (paste(round(cl[i], 3L), round(cu[i], 3L), sep = "|") %in% prose_ci)
   }, logical(1))
-  drop <- drop | ci_dup
+
+  # v0.6.7 (DP-3 follow-on): a test-statistic-bearing table row (F/t/r) can
+  # ALSO restate a prose row that the full-signature pass missed -- because
+  # docpluck strips the prose effect-size glyph (etap2/eta^2), the prose row
+  # ends up with only {stat_value, CI} while the table row now carries
+  # {stat_value, etap2, CI} (DP-3 typed the table eta2). The signatures differ
+  # by the eta2 term alone, so neither the full-signature match nor the
+  # table_estimate CI-only match collapses them, and the same H-test surfaces
+  # twice (e.g. collabra.90203 H5b/H5c: prose F(1,666)=0.04, CI [0,.01] vs
+  # Table-9 F=0.04, CI [0,.01]). Collapse a table F/t/r row when BOTH its
+  # statistic value AND its reported CI pair match a prose row's -- a far
+  # stronger same-test signature than CI alone, so a test-bearing row is not
+  # merged on a coincidental CI. (df is NOT part of the key: docpluck's table
+  # df can disagree with the body's, e.g. df2=114 vs 666, while the F + CI
+  # still pin the identical finding.)
+  prose_stat_ci <- unique(stats::na.omit(
+    vapply(which(!is_table & !is.na(sv) & !is.na(cl) & !is.na(cu)),
+           function(i) paste(round(sv[i], 3L), round(cl[i], 3L),
+                             round(cu[i], 3L), sep = "|"),
+           character(1))
+  ))
+  stat_ci_dup <- vapply(seq_len(nrow(parsed)), function(i) {
+    is_table[i] && !is.na(tt_col[i]) &&
+      tt_col[i] %in% c("F", "t", "r") &&
+      !is.na(sv[i]) && !is.na(cl[i]) && !is.na(cu[i]) &&
+      (paste(round(sv[i], 3L), round(cl[i], 3L), round(cu[i], 3L), sep = "|")
+       %in% prose_stat_ci)
+  }, logical(1))
+
+  drop <- drop | ci_dup | stat_ci_dup
   parsed[!drop, , drop = FALSE]
 }
 
@@ -4029,14 +4058,32 @@ compute_and_compare_one <- function(row,
   # the reported effect. Without df (for p-value) or N (for CI), this is a
   # self-referential match with no independent verification. Route to extraction_only.
   # Also keep a generic guard for any other test type where stat is truly NA.
+  #
+  # v0.6.7 (DP-5, docpluck v2.4.98): a docpluck Table-10-style correlation cell
+  # now arrives typed as `r` with its reported CI but no df and no N (docpluck
+  # mis-binds the per-row n to the comparison column -- filed back to docpluck).
+  # Such a row STILL had its estimate-in-CI invariant evaluated above
+  # (`sign_ci_violation` -- a dropped-minus / r-outside-CI is surfaced), so it is
+  # NOT "nothing was checked". Flag it so the extraction-only SKIP downgrade
+  # (Phase 9) keeps it at NOTE: the reported r + CI are surfaced and a real
+  # consistency check ran, which SKIP would hide.
+  r_ci_surfaced <- FALSE
   if (tt == "r" && is.na(df1) && is.na(df2) && is.na(N) && check_type == "effect_size") {
     check_type <- "extraction_only"
     matched_value <- NA_real_
     matched_variant <- NA_character_
     delta_effect_abs <- NA_real_
     if (status %in% c("ERROR", "WARN", "PASS")) status <- "NOTE"
-    uncertainty <- c(uncertainty,
-      "Correlation without df or N \u2014 cannot independently verify effect size")
+    if (isTRUE(r_has_ci)) {
+      r_ci_surfaced <- TRUE
+      uncertainty <- c(uncertainty,
+        paste0("Correlation reported with a CI but no df or N \u2014 the reported ",
+               "r and CI are surfaced and the estimate-in-CI invariant was ",
+               "checked, but the effect size cannot be independently recomputed."))
+    } else {
+      uncertainty <- c(uncertainty,
+        "Correlation without df or N \u2014 cannot independently verify effect size")
+    }
   } else if (is.na(stat) && is.na(df1) && is.na(df2) && check_type == "effect_size") {
     check_type <- "extraction_only"
     matched_value <- NA_real_
@@ -5268,8 +5315,11 @@ compute_and_compare_one <- function(row,
   }
 
   # Extraction-only results: nothing was checked -> SKIP (not analyzed)
-  # Exclude p_ns cases: "ns"/"n.s." IS a form of p-value reporting that was verified
-  if (check_type == "extraction_only" && !decision_error && !p_ns) {
+  # Exclude p_ns cases: "ns"/"n.s." IS a form of p-value reporting that was verified.
+  # v0.6.7 (DP-5): also exclude an r-with-CI table cell -- its estimate-in-CI
+  # invariant WAS checked, so it stays at the NOTE set by the correlation guard
+  # (surfacing the reported r + CI) rather than collapsing to a "nothing checked" SKIP.
+  if (check_type == "extraction_only" && !decision_error && !p_ns && !r_ci_surfaced) {
     status <- "SKIP"
   }
 

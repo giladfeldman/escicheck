@@ -2236,10 +2236,17 @@ parse_text <- function(text, context_window_size = 2) {
 #' Mapping (typed keys only -- an effect family is never inferred from an
 #' untyped `est`):
 #'   - `t`   -> test_type "t" (df from `df`; Cohen's `d` bound when present)
-#'   - `F`   -> test_type "F" (df1/df2 when present; the partial-eta^2 `est` is
-#'              left unbound -- docpluck emits it untyped, so p is verified but
-#'              the effect is not, pending docpluck's deferred `effect_type`)
-#'   - `r`   -> test_type "r" (N from `n`)
+#'   - `F`   -> test_type "F" (df1/df2 when present; a typed partial-eta^2
+#'              `eta2` is bound as `etap2` -- docpluck v2.4.98 types it on
+#'              structurally-identified ANOVA tables, DP-3 -- so the effect is
+#'              recomputed + verified when df1+df2 are present, else surfaced in
+#'              an honest NOTE. An UNtyped `est` is still left unbound.)
+#'   - `r`   -> test_type "r" (N from `n`; reported CI carried so a row with no
+#'              df/N still adopts the r as its own effect and is checked against
+#'              its CI rather than dropped)
+#'   - `eta2` with no usable F/t/r -> test_type "table_estimate" naming the
+#'              effect `etap2` (an effect-only ANOVA cell: partial-eta^2 + CI,
+#'              surfaced as an extraction-only NOTE, DP-3)
 #'   - `est` (no test statistic) -> test_type "table_estimate", an
 #'              extraction-only NOTE that surfaces est + CI + p (cannot be
 #'              independently recomputed from an estimate alone)
@@ -2338,13 +2345,35 @@ flattened_rows_to_parsed <- function(table_rows) {
       stat <- num1(f[["F"]])
       if (has(f, "df1")) d1 <- num1(f$df1)
       if (has(f, "df2")) d2 <- num1(f$df2)
-      # partial-eta^2 (`est`) intentionally left unbound: docpluck emits it
-      # untyped; verifying p from F + df is safe, binding an untyped effect is
-      # not (pending docpluck effect_type).
+      # v0.6.7 (DP-3, docpluck v2.4.98): docpluck now TYPES the partial-eta^2
+      # column as `fields.eta2` on a structurally-identified F-test/ANOVA table
+      # (an F column + BF01/CI, no competing d/dz/r/OR), so the effect is no
+      # longer nameless. Bind it as `etap2` -- the same canonical reported name
+      # the prose parser emits for partial eta-squared (parse.R `pat_etap2` ->
+      # `effect_name <- "etap2"`) -- so the row flows through the identical
+      # partial_eta2 verification path: with df1+df2 it is recomputed from F and
+      # compared; without df it routes to an honest NOTE that still surfaces the
+      # reported eta2 + CI. (Previously left unbound: docpluck emitted it
+      # untyped, so the value was discarded. The body-text glyph stays stripped
+      # -- WON'T-FIX, no ToUnicode CMap -- so the table is the ONLY source.)
+      if (has(f, "eta2")) {
+        ern <- "etap2"
+        er <- num1(f$eta2)
+      }
     } else if (has(f, "r")) {
       tt <- "r"
       stat <- num1(f$r)
       if (has(f, "n")) nn <- num1(f$n)
+    } else if (has(f, "eta2")) {
+      # v0.6.7 (DP-3): an effect-only table cell -- a typed partial-eta^2 with
+      # its CI but NO usable F/t/r in the row (e.g. collabra.90203 Table 8 rows
+      # where docpluck delivers eta2 + CI but the F cell is blank). Surface it as
+      # an extraction-only NOTE that names the effect (etap2) and carries its CI,
+      # rather than dropping the row. Not independently recomputable without F+df,
+      # but the named value + CI are now visible instead of lost.
+      tt <- "table_estimate"
+      ern <- "etap2"
+      er <- num1(f$eta2)
     } else if (has(f, "est")) {
       tt <- "table_estimate"
       ern <- "estimate"
