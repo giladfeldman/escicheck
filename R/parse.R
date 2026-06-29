@@ -785,6 +785,21 @@ parse_text <- function(text, context_window_size = 2) {
   # Helper for the binomial branch: "<n> out of <N> (participants|cases|...)"
   # form, used to recover n_total when present in the same sentence.
   pat_n_out_of_N <- "\\b(\\d+)\\s+out\\s+of\\s+(\\d+)\\b"
+  # v0.6.8 (E-interaction-p): a bare "p-value for interaction <op>? <pval>" report
+  # -- a subgroup / moderation interaction test reported with ONLY a p and no F /
+  # test statistic and no effect size. The interaction F lives in a supplementary
+  # table not in the main PDF, so nothing is independently recomputable; the p is
+  # surfaced as an extraction-only NOTE. Accepts the operator-less form common in
+  # medical reporting ("p-value for interaction 0.029") and the "p_interaction" /
+  # "interaction p[-value]" variants. PLOS Medicine 10.1371/journal.pmed.1004323
+  # PROSECCO trial: "significant subgroup effects ... for parity (p-value for
+  # interaction 0.029; Table B in S1 Text)".
+  pat_interaction_p <- paste0(
+    "(?:p[- ]?value\\s+for\\s+interaction|",
+    "p[- ]?interaction|",
+    "interaction\\s+p(?:[- ]?value)?)\\s*",
+    "([<=>]{0,2})\\s*([01]?\\.\\d+|[01])"
+  )
   # v0.5.16: clinical-trial risk ratio with two-proportion slash counts.
   # Form: "<n1>/<N1> (<pct1>%) versus|and|vs <n2>/<N2> (<pct2>%) ... RR <val>;
   # 95% CI <lo> to <hi>; p[-]?(value)? = <pval>". The two-proportion clause
@@ -986,9 +1001,108 @@ parse_text <- function(text, context_window_size = 2) {
     NA_real_
   }
 
+  # v0.6.8 (E-A1): section-scoped one-sample carry-forward map.
+  # A "one-sample t-test against {the midpoint|scale midpoint|chance|N}"
+  # declaration scopes ALL of the t-tests that follow it within its study/section
+  # -- but those tests can sit many sentences later, past an interleaved table the
+  # PDF flattened between body paragraphs, so the per-row +-2-sentence context
+  # window does NOT reach the declaration (collabra.57785 Study 3C: the
+  # declaration is ~12 chunks before its t(742) stats, separated by a foreign
+  # Study-3A-1/5 design table). The v0.6.5 detector only caught Study 3A-2 because
+  # ITS declaration was in its own window.
+  #
+  # We precompute, per chunk index, whether a one-sample declaration is "in scope"
+  # there: scan BACKWARD up to a bounded number of chunks for the nearest one-
+  # sample declaration, and STOP (do not carry) if a PROSE contradicting design
+  # declaration ("we ran/conducted/performed a[n] paired / independent / Welch /
+  # two-sample / between- / within-subjects t-test") intervenes first. A
+  # bracketed "[Analysis: ...]" table annotation or a table-structure line is NOT
+  # a prose declaration and does NOT block the carry -- those are table metadata
+  # for OTHER conditions, interleaved by docpluck, not the analysis statement for
+  # the tests in flow. The carry only ADDS a one-sample hint; check.R still
+  # requires the row to be a t-test, and an explicit Welch/independent signal in
+  # the row's OWN clause or a paired effect family still wins downstream.
+  pat_one_sample_decl <- paste0(
+    "one[- ]?sample\\s+t[- ]?test.{0,60}?",
+    "(?:against|than|from|compared\\s+to|relative\\s+to|vs\\.?|versus)\\s+",
+    "(?:the\\s+)?(?:scale\\s+)?(?:mid[- ]?point|chance|midpoint)"
+  )
+  # A declaration that EXPLICITLY scopes MULTIPLE following tests ("... for each
+  # of the sub-questions / items / conditions / measures ..."). Only such a
+  # declaration may carry FAR (past an interleaved table); a plain one-sample
+  # declaration carries only to the few tests immediately after it. This is the
+  # discriminator that keeps the carry from bleeding onto a DIFFERENT analysis
+  # reported many sentences later (collabra.57785 Study 3C "for each of the
+  # sub-questions in Study 3C" carries far and is correct; rsos.250908's plain
+  # "manipulation check (one-sample t-test against midpoint 0)" must NOT reach the
+  # paired condition-comparison t-tests 15 chunks away that the gold marks
+  # dependent/paired).
+  pat_one_sample_multiscope <- paste0(
+    "for\\s+each\\s+(?:of\\s+the\\s+)?",
+    "(?:sub.?question|item|condition|measure|vignette|scenario|",
+    "dependent\\s+variable|dv|outcome|sub.?scale|domain)"
+  )
+  # A PROSE analysis declaration naming a NON-one-sample t-test design. Anchored
+  # on "we (ran|conducted|...) a[n] <design> t-test" so a bare keyword inside a
+  # table annotation or an unrelated sentence does not block the carry.
+  pat_prose_design_block <- paste0(
+    "\\bwe\\s+(?:(?:also|then|next|further|subsequently|additionally|first|",
+    "therefore|thus|again)\\s+){0,2}",
+    "(?:ran|conducted|performed|used|computed|carried\\s+out)\\b",
+    "[^.]{0,80}?\\b(?:paired|independent|two[- ]sample|between[- ]subjects?|",
+    "within[- ]subjects?|welch)\\b[^.]{0,30}?t[- ]?test"
+  )
+  # Two-tier carry distance: a plain one-sample declaration reaches only the next
+  # few chunks (handles a declaration immediately followed by its test, e.g.
+  # collabra.57785 Study 3B, decl->stat 4 chunks); a multi-scope ("for each ...")
+  # declaration reaches far (handles Study 3C across the interleaved Study-3A
+  # design table, decl->stat 12 chunks).
+  one_sample_short_window <- 4L
+  one_sample_long_window <- 18L
+  onesample_in_scope <- logical(length(chunks))
+  if (length(chunks) > 0) {
+    decl_chunk <- grepl(pat_one_sample_decl, chunks, ignore.case = TRUE, perl = TRUE)
+    multiscope_chunk <- decl_chunk &
+      grepl(pat_one_sample_multiscope, chunks, ignore.case = TRUE, perl = TRUE)
+    block_chunk <- grepl(pat_prose_design_block, chunks, ignore.case = TRUE, perl = TRUE)
+    for (ci in seq_along(chunks)) {
+      lo <- max(1L, ci - one_sample_long_window)
+      # Walk backward from ci-1 to lo; the first declaration found wins, a prose
+      # block encountered first cancels the carry. A plain declaration counts only
+      # within the SHORT window; a multi-scope declaration counts out to the LONG
+      # window.
+      j <- ci
+      hit <- FALSE
+      while (j > lo) {
+        j <- j - 1L
+        if (isTRUE(block_chunk[j])) break
+        if (isTRUE(decl_chunk[j])) {
+          dist <- ci - j
+          if (isTRUE(multiscope_chunk[j]) || dist <= one_sample_short_window) {
+            hit <- TRUE
+          }
+          # Either way the nearest declaration is the deciding one -- stop here so
+          # a far PLAIN declaration does not get overruled by an even-farther
+          # multi-scope one (and vice versa); the nearest wins.
+          break
+        }
+      }
+      # A chunk that is itself a declaration is trivially in scope.
+      onesample_in_scope[ci] <- hit || isTRUE(decl_chunk[ci])
+    }
+  }
+
   out <- lapply(seq_along(chunks), function(i) {
     s <- chunks[[i]]
     context <- extract_context(chunks, i, context_window_size)
+    # v0.6.8 (E-A1): if a one-sample declaration is in scope for this chunk but the
+    # +-2-sentence context window did not capture it, append an explicit
+    # one-sample hint so the check.R t-test design detector classifies it
+    # one-sample. (No-op for non-t rows; check.R reads it only for t-tests.)
+    if (isTRUE(onesample_in_scope[i]) &&
+        !grepl("one[- ]?sample\\s+t", context, ignore.case = TRUE, perl = TRUE)) {
+      context <- paste0(context, " [Analysis: one-sample t-test against the scale midpoint.]")
+    }
 
     # Detect and strip [decimal_corrected] marker (v0.2.5)
     # This marker was inserted by normalize_text() when a dropped decimal in
@@ -1014,6 +1128,7 @@ parse_text <- function(text, context_window_size = 2) {
     m_cochran_q <- stringr::str_match(s, pat_cochran_q)
     m_binom_h   <- stringr::str_match(s, pat_binom_h)
     m_binom_bare <- stringr::str_match(s, pat_binom_bare)
+    m_interaction_p <- stringr::str_match(s, pat_interaction_p)
     m_n_outN    <- stringr::str_match(s, pat_n_out_of_N)
     m_RR_ci_p <- stringr::str_match(s, pat_RR_ci_p)
     m_two_props <- stringr::str_match(s, pat_two_props_slash)
@@ -1377,6 +1492,22 @@ parse_text <- function(text, context_window_size = 2) {
         p_op_b  <- if (!is.na(m_binom_bare[2]) && nchar(m_binom_bare[2]) > 0) m_binom_bare[2] else "="
         p_val_b <- m_binom_bare[3]
         m_p <- matrix(c(paste0("p", p_op_b, p_val_b), p_op_b, p_val_b), nrow = 1)
+      }
+    } else if (!all(is.na(m_interaction_p))) {
+      # v0.6.8 (E-interaction-p): a bare "p-value for interaction <op>? <pval>"
+      # subgroup / moderation interaction test reported with ONLY a p -- no F, no
+      # effect size (the interaction F is in a supplement, not the main PDF).
+      # Reached only when no t/F/r/chi/z/binomial matched, so an interaction whose
+      # F IS reported ("F(2,998)=1.48 ... interaction") binds the F instead. The
+      # p is surfaced; nothing is independently recomputable -> extraction-only
+      # NOTE (check.R routes test_type "interaction_p" to NOTE). PLOS Medicine
+      # PROSECCO trial: "(p-value for interaction 0.029; Table B in S1 Text)".
+      test_type <- "interaction_p"
+      # No test statistic, no df, no effect size for a bare interaction p.
+      if (all(is.na(m_p)) && !is.na(m_interaction_p[3])) {
+        p_op_i  <- if (!is.na(m_interaction_p[2]) && nchar(m_interaction_p[2]) > 0) m_interaction_p[2] else "="
+        p_val_i <- m_interaction_p[3]
+        m_p <- matrix(c(paste0("p", p_op_i, p_val_i), p_op_i, p_val_i), nrow = 1)
       }
     } else if (!all(is.na(m_H))) {
       # Kruskal-Wallis H(df) = value
@@ -2325,6 +2456,33 @@ flattened_rows_to_parsed <- function(table_rows) {
       if (!is.na(grp)) paste0(" (", grp, ")") else ""
     ))
 
+    # v0.6.8 (E-A3): a flattened table row's design lives in the table NOTE
+    # ("Paired-samples t for joint"), which docpluck does NOT carry onto the row
+    # -- the row only carries its column label (group / row_label). So a
+    # joint-evaluation t-test row arrived with no design signal in its
+    # context_window (which is just the bare table label) and check.R defaulted
+    # it to "independent" (collabra.77859 / collabra.57785 Table-3 joint rows
+    # t(131) tagged independent though the gold says within-subjects / paired).
+    # Map a recognised within-design column label (joint evaluation / within /
+    # paired / repeated) or a between-design label (separate evaluation /
+    # between / independent) to an explicit design phrase and inject it into the
+    # row's context_window, so check.R's EXISTING t-test design detector fires
+    # uniformly. Scoped to the structured column label only (a bounded surface);
+    # "joint" / "separate" are the within/between markers of the joint-vs-separate
+    # evaluation paradigm (Hsee 1998), where joint = same participant rates both
+    # (within) and separate = different participants (between). The label must
+    # match as a whole word so "disjoint"/"separately-and-jointly" prose cannot
+    # trip it.
+    design_hint <- ""
+    label_for_design <- tolower(paste(rlab, if (!is.na(grp)) grp else ""))
+    if (grepl("\\b(joint|within|paired|repeated[- ]measures|within[- ]subjects?)\\b",
+              label_for_design, perl = TRUE)) {
+      design_hint <- " [Analysis: within-subjects paired-samples t-test (joint condition).]"
+    } else if (grepl("\\b(separate|between[- ]subjects?|independent[- ]samples?)\\b",
+                     label_for_design, perl = TRUE)) {
+      design_hint <- " [Analysis: between-subjects independent-samples t-test (separate condition).]"
+    }
+
     tt <- NA_character_
     stat <- NA_real_
     d1 <- NA_real_
@@ -2337,7 +2495,19 @@ flattened_rows_to_parsed <- function(table_rows) {
       stat <- num1(f$t)
       if (has(f, "df")) d1 <- num1(f$df)
       if (has(f, "d")) {
-        ern <- "d"
+        # v0.6.8 (E-A3 follow-on): docpluck types the joint/separate-evaluation
+        # effect column generically as `d`, but a within-subjects (joint /
+        # paired) row's standardized mean difference IS a dz (the table note
+        # reads "d_z for paired"). When this row's column label marks a within
+        # design (design_hint set to the paired phrase below), name the effect
+        # `dz` so the reported-effect metadata matches the design; the value is
+        # unchanged. A separate / between row keeps the plain `d`. (collabra.77859
+        # Table-3 Attractive/Affect Joint rows were labeled `d` though the table
+        # note + gold say d_z.)
+        is_within_label <- grepl(
+          "\\b(joint|within|paired|repeated[- ]measures|within[- ]subjects?)\\b",
+          tolower(paste(rlab, if (!is.na(grp)) grp else "")), perl = TRUE)
+        ern <- if (is_within_label) "dz" else "d"
         er <- num1(f$d)
       }
     } else if (has(f, "F")) {
@@ -2393,10 +2563,20 @@ flattened_rows_to_parsed <- function(table_rows) {
     ciL <- if (has(f, "CI_lower")) num1(f$CI_lower) else NA_real_
     ciU <- if (has(f, "CI_upper")) num1(f$CI_upper) else NA_real_
 
+    # Inject the design hint into context_window for t-test rows only (the
+    # t-test design detector in check.R reads context_window; F-tests have their
+    # own within/between detector that should not be steered by a paired/joint
+    # column label, and r/table_estimate rows have no design dimension).
+    ctx_win <- if (identical(tt, "t") && nzchar(design_hint)) {
+      paste0(label, design_hint)
+    } else {
+      label
+    }
+
     tibble::tibble(
       location = i,
       raw_text = prov,
-      context_window = label,
+      context_window = ctx_win,
       test_type = tt,
       df1 = d1,
       df2 = d2,
