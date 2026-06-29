@@ -1,3 +1,76 @@
+# effectcheck 0.6.8
+
+**Six parser/classification fixes from the 2026-06-29 escicheck-iterate canary audit
+(independent Sonnet-watches-Opus over the Collabra / PCI-RR / PLOS-Med canary set).**
+
+- **RoBMA model-averaged `r` now routes to NOTE, not SKIP** (E-C1-regress). The v0.6.6
+  block set `effect_reported_name = "r_model_averaged"` and intended an honest NOTE,
+  but its status guard omitted `"SKIP"` AND the Phase-9 extraction-only SKIP downgrade
+  re-overrode the NOTE (a model-averaged `r` carries no p and no adopted effect, so it
+  reached both rules at status `SKIP`). Added `"SKIP"` to the guard and a
+  `bayes_model_avg_surfaced` exclusion to the Phase-9 downgrade (mirroring
+  `r_ci_surfaced`). collabra.90203 `r = 0.002, BF01 = 14.93` now NOTE.
+
+- **A docpluck Mode B joint-evaluation table row is classified `paired`/`within`, not
+  `independent`** (E-A3). The design lives in the table NOTE ("Paired-samples t for
+  joint"), which docpluck does not carry onto the flattened row — the row carries only
+  its `group`/`row_label` column label. `flattened_rows_to_parsed()` now injects a
+  within/paired (joint) or between/independent (separate) design phrase derived from
+  the column label into the row's `context_window`, and renames a within-row's
+  docpluck-generic `d` effect to `dz` (table note: "d_z for paired"). collabra.77859 /
+  collabra.57785 Table-3 joint `t(131)` rows independent→paired.
+
+- **A prose t-test reporting a paired effect family (`dz`/`dav`/`drm`) in its own clause
+  is no longer forced `independent` by a Welch / independent signal that BLED from a
+  neighboring sentence's test** (E-A3 prose). collabra.77859 Study 2 joint
+  `t(131) = 6.92 (dz = 0.60)` independent→paired; collabra.57785 `t(741) = 5.36` (a plain
+  `d` with a same-clause Welch) correctly stays `independent`.
+
+- **The table-vs-prose dedup no longer collapses two distinct findings that share an `F`
+  and a rounded CI but differ in their reported p** (E-D-dedup). The
+  `.dedup_table_vs_prose()` test-statistic key now includes the reported p. collabra.90203
+  H2b (donations interaction `F(2,998) = 1.48, p = .228, η²p = .003`) is recovered instead
+  of being merged into H6 (`F(2,998) = 1.48, p = .229`); the intended glyph-stripped
+  H5b/H5c collapse (whose p's agree) is preserved.
+
+- **A bare "p-value for interaction <op>? <pval>" report is extracted as an
+  extraction-only NOTE** (E-interaction-p) under the new `test_type = "interaction_p"`
+  (`pat_interaction_p`). A subgroup / moderation interaction carrying only a p, with no F
+  / df / effect size (the F lives in a supplement), surfaces the p rather than being
+  dropped. PLOS Medicine PROSECCO trial `p-value for interaction 0.029`.
+
+- **A one-sample t-test mislabeled `independent` because its "one-sample t-test against
+  the {scale midpoint|chance|N}" declaration sits outside the per-row ±2-sentence context
+  window is now classified `one-sample`** (E-A1). `parse.R` builds a section-scoped
+  one-sample carry-forward map (two-tier: a plain declaration reaches the next ≤4 chunks;
+  a multi-scope "for each of the sub-questions/items/…" declaration reaches ≤18 chunks,
+  past an interleaved table the PDF flattened between body paragraphs), cancelled by an
+  intervening prose "we ran a paired / independent / Welch t-test" declaration.
+  collabra.57785 Study 3B/3C 4 one-sample `t(742)` rows independent→one-sample. Two
+  long-standing one-sample false positives were fixed in the same change: a one-sample
+  signal living ONLY in a trailing "Table N." caption, or ONLY in a FOLLOWING sentence
+  describing other tests, no longer relabels a preceding paired test (rsos.250908
+  `t(801) = 8.73`, collabra.23443 `t(798) = 23.7` → paired, gold-correct), while a
+  one-sample signal in the row's OWN clause (collabra.23443 `t(604) = 19.9` against
+  `mu = 0`) is always honored.
+
+- **A t-test reported as a bare CONTINUATION of the previous test's sentence now inherits the
+  preceding sibling's design** (E-A1 continuation). "…t(798) = 23.7 … for the Prolific sample
+  and t(798) = 24.3 … for the MTurk sample" splits the second test into its own sub-chunk with
+  no design signal, so it defaulted to `independent`; `check_text()` now propagates a determined
+  paired / within / one-sample design from the immediately-preceding prose t-row when they share
+  `df1` and the reported effect-size name and the continuation row carries no design keyword of
+  its own. collabra.23443 `t(798) = 24.3` independent→paired (gold: within-subjects), and the
+  `t(1599) = 12.49 / 33.89` continuations of one-sample tests independent→one-sample — all
+  gold-correct, zero canary changes.
+
+Full suite 901 test_that blocks / 0 fail; `R CMD check --as-cran` 0E/0W. Regression tests
+in `tests/testthat/test-v068-*.R` (6 files). One residual item filed (non-canary): collabra.23443
+Table-5's 4 one-sample-vs-mu=0 rows arrive as docpluck flattened rows whose one-sample design
+lives only in surrounding body prose (not on the row) — routed to `docs/DOCPLUCK_HANDOFF_2026-06-29.md`
+(docpluck enhancement: carry the table's introducing design onto the flattened row), alongside the
+docpluck table-shred / untyped-est handoffs.
+
 # effectcheck 0.6.7
 
 **Consumes the two newly-typed docpluck v2.4.98 table fields (`fields.eta2` /

@@ -30,8 +30,12 @@ is_flagged <- function(row) {
 test_that("t-tier5-d1-0-s0: section-marker impostor — d=0.27 with no test stat", {
   input <- "Section 95.6 discusses Cohen's d = 0.27 more carefully."
   res <- check_text(input)
-  # 95.6 must NOT appear as stat_value on any row
-  expect_false(95.6 %in% res$stat_value)
+  # 95.6 must NOT appear as stat_value on any row. Guard the column access: when
+  # the input yields no extracted row, `res` has no `stat_value` column, so a bare
+  # `res$stat_value` would warn "Unknown or uninitialised column". An absent column
+  # trivially cannot contain 95.6.
+  stat_vals <- if ("stat_value" %in% names(res)) res$stat_value else numeric(0)
+  expect_false(95.6 %in% stat_vals)
   # The d=0.27 extraction (if emitted) must be flagged: insufficient_data fires
   # because no test statistic accompanies the effect size.
   if (nrow(res) > 0) {

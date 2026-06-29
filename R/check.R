@@ -512,23 +512,38 @@ VARIANT_METADATA <- list(
   # by the eta2 term alone, so neither the full-signature match nor the
   # table_estimate CI-only match collapses them, and the same H-test surfaces
   # twice (e.g. collabra.90203 H5b/H5c: prose F(1,666)=0.04, CI [0,.01] vs
-  # Table-9 F=0.04, CI [0,.01]). Collapse a table F/t/r row when BOTH its
-  # statistic value AND its reported CI pair match a prose row's -- a far
-  # stronger same-test signature than CI alone, so a test-bearing row is not
-  # merged on a coincidental CI. (df is NOT part of the key: docpluck's table
-  # df can disagree with the body's, e.g. df2=114 vs 666, while the F + CI
-  # still pin the identical finding.)
+  # Table-9 F=0.04, CI [0,.01]). Collapse a table F/t/r row when its statistic
+  # value, its reported CI pair, AND its reported p (when both rows report one)
+  # match a prose row's -- a far stronger same-test signature than CI alone, so
+  # a test-bearing row is not merged on a coincidental CI.
+  #
+  # (df is NOT part of the key: docpluck's table df can disagree with the body's,
+  # e.g. df2=114 vs 666, while the F + CI still pin the identical finding.)
+  #
+  # v0.6.8 (E-D-dedup): the reported p IS part of the key. Two genuinely-distinct
+  # findings can share an F and a rounded CI but differ in p -- collabra.90203 H2b
+  # (donations interaction F(2,998)=1.48, p=.228, CI[0,.012]) vs H6 (perceived-impact
+  # interaction F(2,998)=1.48, p=.229, CI[0,.012]). The v0.6.7 (stat+CI)-only key
+  # collapsed them, dropping H2b. Including p splits them while preserving the
+  # intended H5b/H5c collapse (whose prose and table p's agree, e.g. both .842).
+  # The p slot is "" when a row reports no p, so a prose row and its typed table
+  # restatement that BOTH lack a p still collapse (the original DP-3 case); the p
+  # only DISCRIMINATES when the two rows carry DIFFERENT reported p's. This is the
+  # conservative direction: when in doubt (one row has a p, the other does not),
+  # the keys differ and the rows are KEPT, never silently merged.
+  p_col <- as.numeric(col("p_reported"))
+  pkey <- function(i) if (is.na(p_col[i])) "" else as.character(round(p_col[i], 3L))
   prose_stat_ci <- unique(stats::na.omit(
     vapply(which(!is_table & !is.na(sv) & !is.na(cl) & !is.na(cu)),
            function(i) paste(round(sv[i], 3L), round(cl[i], 3L),
-                             round(cu[i], 3L), sep = "|"),
+                             round(cu[i], 3L), pkey(i), sep = "|"),
            character(1))
   ))
   stat_ci_dup <- vapply(seq_len(nrow(parsed)), function(i) {
     is_table[i] && !is.na(tt_col[i]) &&
       tt_col[i] %in% c("F", "t", "r") &&
       !is.na(sv[i]) && !is.na(cl[i]) && !is.na(cu[i]) &&
-      (paste(round(sv[i], 3L), round(cl[i], 3L), round(cu[i], 3L), sep = "|")
+      (paste(round(sv[i], 3L), round(cl[i], 3L), round(cu[i], 3L), pkey(i), sep = "|")
        %in% prose_stat_ci)
   }, logical(1))
 
@@ -3243,6 +3258,28 @@ compute_and_compare_one <- function(row,
               "n / N counts in the same sentence, so the result cannot be",
               "independently recomputed (extraction-only)."))
     }
+  } else if (tt == "interaction_p") {
+    # ------ BARE INTERACTION P-VALUE (subgroup / moderation) ------
+    # v0.6.8 (E-interaction-p): a "p-value for interaction <op>? <pval>" report
+    # carrying ONLY a p -- no F, no df, no effect size (the interaction F is in a
+    # supplement not the main PDF). Nothing is independently recomputable; the p
+    # is surfaced as an extraction-only NOTE. PLOS Medicine PROSECCO trial:
+    # "significant subgroup effects ... for parity (p-value for interaction
+    # 0.029; Table B in S1 Text)".
+    check_type <- "extraction_only"
+    # A bare interaction p has NO sample-size semantics. Clear any N that the
+    # generic Phase-2C local/global extraction inherited from the surrounding
+    # context (e.g. a "PSA N = 98" arm-count in an adjacent Table-2 header) -- it
+    # is not this test's N and nothing uses it, so a non-NA value is only
+    # misleading. prosecco: the interaction_p row had bled N = 98 from the table
+    # header in its context window; the gold reports no N for this test.
+    N <- NA_real_
+    N_source <- NA_character_
+    uncertainty <- c(uncertainty,
+      paste("Interaction (subgroup / moderation) p-value extracted, but no F",
+            "statistic, df, or effect size accompany it (the interaction test",
+            "statistic is typically reported only in a supplementary table), so",
+            "the result cannot be independently recomputed (extraction-only)."))
   } else if (tt == "dscf") {
     # ------ DSCF (Dwass-Steel-Critchlow-Fligner) POST-HOC W ------
     # The DSCF W is the studentized-range statistic of a Kruskal-Wallis
@@ -4007,6 +4044,11 @@ compute_and_compare_one <- function(row,
           .bt, perl = TRUE)
   }
   is_bayes_model_avg_r <- tt %in% c("r", "rho") && isTRUE(bayes_avg_ctx)
+  # v0.6.8 (E-C1-regress): flag a model-averaged r so the Phase-9 extraction-only
+  # SKIP downgrade keeps it at NOTE (mirrors r_ci_surfaced below). Without this, the
+  # NOTE set in this block is silently re-downgraded to SKIP at the Phase-9 rule
+  # (check_type == "extraction_only" -> SKIP), defeating the v0.6.6 intent.
+  bayes_model_avg_surfaced <- FALSE
   if (is_bayes_model_avg_r) {
     check_type <- "extraction_only"
     reported_type <- "r"
@@ -4016,7 +4058,13 @@ compute_and_compare_one <- function(row,
     matched_value <- NA_real_
     matched_variant <- NA_character_
     delta_effect_abs <- NA_real_
-    if (status %in% c("ERROR", "WARN", "PASS")) status <- "NOTE"
+    bayes_model_avg_surfaced <- TRUE
+    # A model-averaged r carries no p and no adopted effect, so its status here is
+    # already SKIP, not ERROR/WARN/PASS. Include SKIP in the guard AND the Phase-9
+    # exclusion below so the RoBMA / BF01 provenance ships as a NOTE rather than a
+    # "nothing was checked" SKIP. collabra.90203 "model-averaged mean effect size
+    # estimate of r = 0.002 (95% CI [0, 0.004])" reached this line with status SKIP.
+    if (status %in% c("ERROR", "WARN", "PASS", "SKIP")) status <- "NOTE"
     uncertainty <- c(uncertainty,
       paste0("Bayesian model-averaged effect (RoBMA / Bayesian model-averaging): the ",
              "reported r is a posterior model-averaged estimate accompanied by a Bayes ",
@@ -4338,9 +4386,82 @@ compute_and_compare_one <- function(row,
     if ("context_window" %in% names(row) && !is.na(row$context_window)) {
       context_text <- row$context_window
     }
+    # v0.6.8 (E-A3 prose): the row's OWN clause, for cues that must not bleed from
+    # an adjacent test's sentence (the Welch / independent-samples / two-sample
+    # "definitive independent" signal). A "Welch's t" named in a NEIGHBORING
+    # sentence in the context window must not mark THIS row independent.
+    own_clause_lower <- tolower(if ("raw_text" %in% names(row) &&
+                                    length(row$raw_text) > 0 &&
+                                    !is.na(row$raw_text[1])) {
+      as.character(row$raw_text[1])
+    } else {
+      context_text
+    })
 
     if (nchar(context_text) > 0) {
       context_lower <- tolower(context_text)
+      # v0.6.8 (E-A1 pre-existing FP): a one-sample signal that lives ONLY inside a
+      # trailing "Table N ... (one-sample t-test against midpoint ...)" CAPTION must
+      # not relabel a body-text test that PRECEDES the table. A table caption
+      # describes the TABLE's analysis, not the body sentence the caption happens to
+      # follow. rsos.250908: the paired condition-comparison "..., t(801) = 8.73,
+      # p < .001). Table 14. Study 1: morality valence manipulation check
+      # (one-sample t-test against midpoint 0)" was mislabeled one-sample because
+      # the caption sits in its +-2-sentence window though the gold marks it a
+      # dependent (paired) t-test. Strip a trailing table caption (from the LAST
+      # "table <n>" onward) before the one-sample check, UNLESS the one-sample
+      # signal also appears BEFORE that caption (a genuine in-flow declaration).
+      onesample_context_lower <- context_lower
+      # The row's OWN clause: a one-sample signal here is authoritative and must
+      # never be removed by the strips below (collabra.23443 "The one-sample
+      # t-test against mu = 0 for overestimation ... t(604) = 19.9" is one-sample
+      # even though the same context mentions "see Table 7 and Figure 4").
+      own_has_onesample <- grepl(
+        "one[- ]?sample\\s+t|against\\s+(?:the\\s+)?(?:scale\\s+)?(?:mid[- ]?point|chance|mu\\s*=)",
+        own_clause_lower, perl = TRUE)
+      # The deterministic sentinel parse.R's E-A1 carry appends (a deliberate
+      # in-scope one-sample hint, NOT a table caption) is always preserved.
+      ea1_hint <- "[analysis: one-sample t-test against the scale midpoint.]"
+      has_ea1_hint <- grepl(ea1_hint, context_lower, fixed = TRUE)
+
+      # v0.6.8 (E-A1 pre-existing FP, following-sentence bleed): a one-sample signal
+      # that appears ONLY in a sentence AFTER the row's own clause must not relabel
+      # this row -- that signal describes the NEXT analysis, not this one.
+      # collabra.23443: the paired estimate-comparison "..., t(798) = 23.7, ..." is
+      # followed by "Participants underestimated donation rates ... based on
+      # one-sample t-tests: ... t(798) = 11.84 ...", and the trailing "one-sample"
+      # bled onto the 23.7/24.3 rows (gold: within-subjects paired). Truncate the
+      # context at the END of the row's own stat occurrence before the one-sample
+      # check, UNLESS the row's own clause already carries a one-sample signal or an
+      # E-A1 carry sentinel is present (preserve the deliberate far-carry).
+      if (!own_has_onesample && !has_ea1_hint && !is.na(stat)) {
+        # Locate this row's stat value in the (lowercased) context and cut after it.
+        stat_str <- format(stat, trim = TRUE, scientific = FALSE)
+        pos <- regexpr(stat_str, context_lower, fixed = TRUE)
+        if (pos > 0) {
+          end_after_stat <- min(nchar(context_lower), pos + nchar(stat_str) + 40L)
+          onesample_context_lower <- substr(context_lower, 1L, end_after_stat)
+        }
+      }
+      # Strip a TRAILING table caption only -- a "Table N." / "Table N:" that BEGINS
+      # a caption at a sentence boundary, NOT an inline cross-reference ("see Table
+      # N", "in Table N"). A one-sample signal living ONLY inside such a trailing
+      # caption must not relabel a body test that precedes the table.
+      if (!own_has_onesample && !has_ea1_hint) {
+        cap_pos <- gregexpr("(?:^|[.;)]\\s+)table\\s+\\d+\\s*[.:]",
+                            onesample_context_lower, perl = TRUE)[[1]]
+        if (cap_pos[1] > 0) {
+          last_cap <- cap_pos[length(cap_pos)]
+          before_cap <- substr(onesample_context_lower, 1L, last_cap - 1L)
+          # Only strip if the one-sample wording does not already appear before the
+          # caption (so an in-flow "one-sample t-test ... Table N." still counts).
+          if (!grepl(paste0("one[- ]?sample\\s+t|against\\s+(?:the\\s+)?",
+                            "(?:scale\\s+)?(?:mid[- ]?point|chance|mu\\s*=)"),
+                     before_cap, perl = TRUE)) {
+            onesample_context_lower <- before_cap
+          }
+        }
+      }
       # One-sample patterns checked first: an explicit one-sample t-test must
       # not be reclassified as paired/independent by a later pattern.
       one_sample_patterns <- c(
@@ -4374,17 +4495,36 @@ compute_and_compare_one <- function(row,
       # test -- there is no "paired Welch" test. Likewise "independent-samples t" /
       # "two-sample t" explicitly name THIS test as independent. Either is a
       # definitive independent signal that must win over a stray "paired"/"within"
-      # keyword elsewhere in the (often multi-sentence) context window. Without
-      # this, collabra.57785's "We ran an independent Welch's t-test ... t(741) =
-      # 5.36" was mislabeled "paired" because the window also discussed
-      # within-subjects analyses and paired_patterns is checked first. (The v0.6.3
-      # E2 fix only catches FRACTIONAL Welch df; here df = 741 is an integer.)
+      # keyword in the (often multi-sentence) context window. Without this,
+      # collabra.57785's "We ran an independent Welch's t-test ... t(741) = 5.36"
+      # was mislabeled "paired" because the window also discussed within-subjects
+      # analyses. (The v0.6.3 E2 fix only catches FRACTIONAL Welch df; here df =
+      # 741 is an integer.) The signal is read from the whole context window, NOT
+      # just the row's own clause, because the sub-chunk splitter routinely splits
+      # the "Welch's t-test" declaration into a prior sub-chunk from the
+      # "..., t(741) = 5.36" clause that carries the statistic (collabra.57785).
       definitive_independent_t <-
         grepl("welch", context_lower, fixed = TRUE) ||
         grepl("independent[- ]samples?\\s+t", context_lower) ||
         grepl("two[- ]sample\\s+t", context_lower)
 
-      if (any(sapply(one_sample_patterns, function(p) grepl(p, context_lower)))) {
+      # v0.6.8 (E-A3 prose): but a definitive-independent signal that BLED from a
+      # neighboring test's sentence must NOT override a row that reports a PAIRED
+      # effect family (dz / dav / drm) in its OWN clause -- a dz is, by definition,
+      # a within-subjects standardized mean difference, so the row is paired
+      # regardless of a Welch test discussed nearby. collabra.77859 Study 2 joint
+      # row "t(131) = 6.92 ... (dz = 0.60 ...)" bled "Welch's t(198.52)" from the
+      # preceding separate-evaluation sentence; its own dz makes it paired. The
+      # 57785 t(741)=5.36 case is unaffected: it reports a plain d (independent
+      # family), so this guard does not fire and the Welch signal still wins.
+      own_reports_paired_es <-
+        grepl(paste0("\\b(?:d[_ ]?z|dz|d[_ ]?av|dav|d[_ ]?rm|drm)\\b\\s*[=:]"),
+              own_clause_lower, perl = TRUE)
+      if (own_reports_paired_es) {
+        definitive_independent_t <- FALSE
+      }
+
+      if (any(sapply(one_sample_patterns, function(p) grepl(p, onesample_context_lower, fixed = TRUE)))) {
         design_inferred <- "one-sample"
       } else if (definitive_independent_t) {
         design_inferred <- "independent"
@@ -5319,7 +5459,12 @@ compute_and_compare_one <- function(row,
   # v0.6.7 (DP-5): also exclude an r-with-CI table cell -- its estimate-in-CI
   # invariant WAS checked, so it stays at the NOTE set by the correlation guard
   # (surfacing the reported r + CI) rather than collapsing to a "nothing checked" SKIP.
-  if (check_type == "extraction_only" && !decision_error && !p_ns && !r_ci_surfaced) {
+  # v0.6.8 (E-C1-regress): also exclude a Bayesian model-averaged r (RoBMA). The
+  # v0.6.6 block routes it to NOTE to surface its BF01 / model-averaging provenance;
+  # without this exclusion the extraction-only SKIP downgrade silently overrode that
+  # NOTE back to SKIP (collabra.90203 r = 0.002, BF01 = 14.93).
+  if (check_type == "extraction_only" && !decision_error && !p_ns &&
+      !r_ci_surfaced && !bayes_model_avg_surfaced) {
     status <- "SKIP"
   }
 
@@ -5793,10 +5938,30 @@ compute_and_compare_one <- function(row,
 
       # Effect size code
       es_code <- if (tt == "t") {
-        c(
-          "d_ind <- 2 * stat / sqrt(df1) # Cohens d (approx)",
-          if (!is.na(N)) sprintf("d_exact <- stat * sqrt(1/%.1f + 1/%.1f) # Assuming equal n", N / 2, N / 2) else NULL
-        )
+        # v0.6.8: emit the formula matching the inferred design so the reproduced
+        # code computes the SAME effect the PASS verdict is based on. A one-sample
+        # / paired t has d = t / sqrt(N) (= d_onesample / dz), N = df + 1; an
+        # independent t has d ~ 2t / sqrt(df). Previously a one-sample row emitted
+        # the independent formula, so a user running it computed d ~ 2x the correct
+        # value (collabra.57785 Study 3B/3C one-sample t(742) rows).
+        os_design <- exists("design_inferred") &&
+          design_inferred %in% c("one-sample", "paired")
+        if (os_design) {
+          n_os <- if (!is.na(N)) N else if (!is.na(df1)) df1 + 1 else NA_real_
+          es_label <- if (design_inferred == "one-sample") "d_onesample" else "dz"
+          c(
+            if (!is.na(n_os)) sprintf("N <- %s # = df + 1 for a %s t-test",
+                                      format(n_os, trim = TRUE), design_inferred) else NULL,
+            if (!is.na(n_os)) sprintf("%s <- stat / sqrt(N) # Cohen's d for a %s test",
+                                      es_label, design_inferred)
+            else sprintf("# %s <- stat / sqrt(N) (N unknown)", es_label)
+          )
+        } else {
+          c(
+            "d_ind <- 2 * stat / sqrt(df1) # Cohens d (approx)",
+            if (!is.na(N)) sprintf("d_exact <- stat * sqrt(1/%.1f + 1/%.1f) # Assuming equal n", N / 2, N / 2) else NULL
+          )
+        }
       } else if (tt == "F") {
         c(
           "eta2 <- (stat * df1) / (stat * df1 + df2)",
@@ -5824,7 +5989,18 @@ compute_and_compare_one <- function(row,
       )
 
       if (tt == "t") {
-        if ("d_ind" %in% names(computed_variants)) {
+        os_design_out <- exists("design_inferred") &&
+          design_inferred %in% c("one-sample", "paired")
+        if (os_design_out) {
+          # Display the one-sample / paired d = t / sqrt(N) that the verdict uses.
+          es_label_out <- if (design_inferred == "one-sample") "d_onesample" else "dz"
+          n_os_out <- if (!is.na(N)) N else if (!is.na(df1)) df1 + 1 else NA_real_
+          val_os <- if (!is.na(matched_value)) matched_value
+                    else if (!is.na(n_os_out)) stat / sqrt(n_os_out) else NA_real_
+          if (!is.na(val_os)) {
+            out <- c(out, sprintf("> %s", es_label_out), sprintf("[1] %.4f", val_os))
+          }
+        } else if ("d_ind" %in% names(computed_variants)) {
           out <- c(out, "> d_ind", sprintf("[1] %.4f", computed_variants$d_ind$value))
         } else if ("d_ind" %in% names(alternatives)) { # Fallback code is calculating d_ind as primary
           out <- c(out, "> d_ind", sprintf("[1] %.4f", alternatives$d_ind$value))
@@ -5997,7 +6173,7 @@ check_text <- function(text,
                        stats = c("t", "F", "r", "chisq", "z", "U", "W", "H",
                                  "regression", "spearman", "kendall", "kendall_w",
                                  "dscf", "cochran_q", "RR", "rdpct", "md_hl",
-                                 "binomial"),
+                                 "binomial", "interaction_p"),
                        ci_level = 0.95,
                        alpha = 0.05,
                        one_tailed = FALSE,
@@ -6236,6 +6412,64 @@ check_text <- function(text,
       }
     )
   })
+
+  # v0.6.8 (E-A1 continuation): a t-test reported as a bare CONTINUATION of the
+  # previous test's sentence -- "...t(798) = 23.7 ... for the Prolific sample and
+  # t(798) = 24.3 ... for the MTurk sample" -- is split into its own sub-chunk, so
+  # its clause carries NO design signal and it defaults to "independent" via the
+  # effect-type fallback, even though it is the SAME comparison (same design) as
+  # the preceding sibling. Propagate a determined paired / within / one-sample
+  # design from the IMMEDIATELY-PRECEDING prose t-row to such a continuation row
+  # when they share df1 and the reported effect-size name, the current row carries
+  # NO design keyword of its own, and the current design is the bare-fallback
+  # "independent". collabra.23443: t(798) = 24.3 (MTurk continuation of the paired
+  # t(798) = 23.7) inherits "paired" (gold: within-subjects). Scoped tightly:
+  # prose rows only, identical df + effect family, no own design signal -- so it
+  # never flips a row that genuinely states its own (independent) design.
+  if (nrow(res) >= 2 && "design_inferred" %in% names(res) &&
+      "test_type" %in% names(res) && "df1" %in% names(res) &&
+      "raw_text" %in% names(res)) {
+    own_design_kw <- paste0(
+      "\\b(paired|within[- ]subjects?|repeated[- ]measures|one[- ]sample|",
+      "independent|between[- ]subjects?|two[- ]sample|welch|separate|",
+      "different\\s+groups|dependent\\s+samples)\\b|against\\s+(?:the\\s+)?",
+      "(?:scale\\s+)?(?:mid[- ]?point|chance|mu\\s*=)"
+    )
+    is_table_row <- if ("from_table" %in% names(res)) {
+      vapply(res$from_table, isTRUE, logical(1))
+    } else rep(FALSE, nrow(res))
+    inheritable <- c("paired", "within", "one-sample")
+    ern <- if ("effect_reported_name" %in% names(res)) as.character(res$effect_reported_name) else rep(NA_character_, nrow(res))
+    for (i in seq_len(nrow(res))[-1]) {
+      if (is_table_row[i]) next
+      tt_i <- as.character(res$test_type[i])
+      if (is.na(tt_i) || tt_i != "t") next
+      di_i <- as.character(res$design_inferred[i])
+      if (is.na(di_i) || di_i != "independent") next
+      rt_i <- tolower(if (!is.na(res$raw_text[i])) as.character(res$raw_text[i]) else "")
+      # The current row must carry NO design signal of its own.
+      if (grepl(own_design_kw, rt_i, perl = TRUE)) next
+      j <- i - 1L
+      if (is_table_row[j]) next
+      tt_j <- as.character(res$test_type[j])
+      di_j <- as.character(res$design_inferred[j])
+      if (is.na(tt_j) || tt_j != "t" || is.na(di_j) || !(di_j %in% inheritable)) next
+      # Same statistical shape: identical df1 and identical reported effect name.
+      same_df <- !is.na(res$df1[i]) && !is.na(res$df1[j]) &&
+        abs(as.numeric(res$df1[i]) - as.numeric(res$df1[j])) < 1e-9
+      same_ern <- !is.na(ern[i]) && !is.na(ern[j]) && ern[i] == ern[j]
+      if (same_df && same_ern) {
+        res$design_inferred[i] <- di_j
+        if ("uncertainty_reasons" %in% names(res)) {
+          prev <- if (!is.na(res$uncertainty_reasons[i])) res$uncertainty_reasons[i] else ""
+          note <- sprintf(paste0("Design inherited as '%s' from the preceding ",
+            "same-sentence t-test (same df and reported effect size); this row is ",
+            "a bare continuation clause with no design signal of its own."), di_j)
+          res$uncertainty_reasons[i] <- if (nzchar(prev)) paste0(prev, " ", note) else note
+        }
+      }
+    }
+  }
 
   # Mark insufficient_data
   res$insufficient_data <- with(
