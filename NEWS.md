@@ -1,3 +1,27 @@
+# effectcheck 0.6.9
+
+**A `=`-as-U+00BC glyph-corruption normalization, from the 2026-06-29 escicheck-iterate
+new-corpus pass (SPPS "Inaction Inertia" replications, 10.1177/1948550619900570).**
+
+Some PDFs encode the `=` glyph such that the text layer emits **U+00BC ("¼", the fraction
+one-quarter)**. A whole paper can come through with EVERY equals sign as U+00BC and no real
+`=` at all (this SPPS paper: 120 U+00BC, zero `=`), so `t ¼ -7.81`, `F (3, 1791) ¼ 200.12`,
+`d ¼ 0.57`, `M ¼ 20.20` all parsed to nothing — the entire body-prose statistics surface was
+invisible. `normalize_text()` now folds U+00BC → `=` ONLY in a statistical-operator position
+(flanked by whitespace and adjacent to a value / sign / bracket / a stat-word like
+"confidence"), so a genuine one-quarter fraction in prose ("¼ cup of sugar", "¼ of
+participants") is NOT rewritten. This is the same class of character-level normalization as
+the existing U+2212-minus and U+FFFD-eta-squared recovery. +11 results recovered on the SPPS
+paper; ZERO change on the canary + sweep corpus (they contain no U+00BC). Regression tests in
+`tests/testthat/test-v068-equals-glyph-u00bc.R`. The corruption is also filed to docpluck
+(`docs/DOCPLUCK_HANDOFF_2026-06-29.md` §5) as the preferred upstream fix so all consumers
+benefit. Full suite 904 test_that blocks / 0 fail; `R CMD check --as-cran` 0E/0W.
+
+The same SPPS new-corpus audit filed four docpluck table-extraction defects (sign-stripped
+negative table-cell t-values, a `camelot_t11` t→F + d→p mis-typing of pairwise tests, an
+undelivered df column on Table-4 ANOVAs, and figure-embedded forest-plot estimates) — none of
+which are effectcheck defects; see the handoff §5.
+
 # effectcheck 0.6.8
 
 **Six parser/classification fixes from the 2026-06-29 escicheck-iterate canary audit

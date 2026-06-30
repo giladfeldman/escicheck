@@ -42,6 +42,21 @@ normalize_text <- function(x) {
   x <- gsub("\uFF0D", "-", x)  # Fullwidth hyphen-minus (U+FF0D)
   x <- gsub("\u207B", "-", x)  # Superscript minus (U+207B)
 
+  # --- Equals-sign corruption (U+00BC fraction-one-quarter standing in for "=") ---
+  # v0.6.8: some PDFs encode the "=" glyph such that the text layer emits U+00BC
+  # ("\u00BC", the fraction one-quarter). Whole papers come through with EVERY
+  # equals sign as U+00BC and no real "=" at all (10.1177/1948550619900570: 120
+  # U+00BC, zero "="), so `t \u00BC -7.81`, `F (3, 1791) \u00BC 200.12`, `d \u00BC
+  # 0.57`, `M \u00BC 20.20` parse to nothing. Fold U+00BC to "=" ONLY in a
+  # statistical-operator position -- flanked by whitespace and adjacent to a value
+  # (a number / sign / bracket) or a stat-token-like word -- so a genuine
+  # one-quarter fraction in prose ("\u00BC cup of sugar") is NOT rewritten. This is
+  # the same class of character-level normalisation as the U+2212 minus and the
+  # U+FFFD eta-squared recovery above. (Also filed to docpluck to fold upstream.)
+  # U+00BC written as \u00BC to keep R *code* ASCII-only (R CMD check requirement).
+  x <- gsub("([A-Za-z0-9)%\\]])\\s*\u00BC\\s*([-+]?[.\\d\\[]|conf|not|extrem)",
+            "\\1 = \\2", x, perl = TRUE)
+
   # --- Whitespace variants (all to regular space or removed) ---
   x <- gsub("\u00A0", " ", x)  # Non-breaking space (U+00A0)
   x <- gsub("[\u2000-\u200A\u202F\u205F\u3000]", " ", x)  # Various typographic spaces
