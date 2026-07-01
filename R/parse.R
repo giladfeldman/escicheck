@@ -1244,7 +1244,7 @@ parse_text <- function(text, context_window_size = 2) {
     method_context_detected <- grepl(method_kw, paste(s, context), ignore.case = TRUE, perl = TRUE)
 
     # Enhanced N extraction with extended context and global fallback (Phase 2C)
-    # Priority: local context > extended context > global
+    # Priority: own sub-chunk > local context > extended context > global
     # Extract ALL N values from local context (not just first) for candidate selection
     m_N_all_local <- stringr::str_match_all(context, pat_N)[[1]]
     N_candidates <- if (nrow(m_N_all_local) > 0) {
@@ -1252,8 +1252,51 @@ parse_text <- function(text, context_window_size = 2) {
     } else {
       numeric(0)
     }
-    N_value <- if (length(N_candidates) > 0) N_candidates[1] else NA_real_
-    N_source <- if (!is.na(N_value)) "local_context" else NA_character_
+
+    # v0.6.12 (E-ownclause-N): prefer an N that appears in the row's OWN sub-chunk
+    # `s` over one that only appears in the wider +/-2-sentence context window.
+    # The generic scan above reads `context` and takes N_candidates[1] -- the FIRST
+    # N in the window -- which for a row whose context window opens on a PRECEDING
+    # sentence binds the neighbor's N, not the N stated in the row's own clause.
+    # collabra.57785 loc 170: the clause literally reads "(M = 4.90, SD = 1.42,
+    # N = 743) ... (M = 4.11, SD = 1.44, N = 743; t(742) = 12.24, ...)" -- N = 743
+    # twice -- yet the parser bound N = 350 from the previous sentence (loc 167
+    # "N = 350 ... N = 393"), check.R rejected it as implausibly small for df=742,
+    # fell back to the independent default N = df+2 = 744, and the wrong N produced
+    # a spurious ci_check_status = INCONSISTENT on a genuine finding. The
+    # own-sub-chunk N is authoritative for its own test; only fall back to the
+    # surrounding window when the clause carries none. Mirrors the v0.6.8
+    # "prefer the signal closest to / inside the row's own clause" discriminator.
+    m_N_own <- stringr::str_match_all(s, pat_N)[[1]]
+    N_own_candidates <- if (nrow(m_N_own) > 0) {
+      unique(na.omit(sapply(m_N_own[, 2], numify_int)))
+    } else {
+      numeric(0)
+    }
+    # Bind the own-clause N only for the neighbor-bleed case this fix targets: a
+    # t-test whose own sub-chunk carries an UNAMBIGUOUS N (exactly one distinct
+    # value) co-located with the `t(df) =` report. loc 170's clause states
+    # "N = 743" twice (unique -> 743) alongside "t(742) = 12.24", so binding it is
+    # safe and correct. The gate is deliberately narrow:
+    #   * `t(` in the own sub-chunk -- so this only fires for a t-test row, never
+    #     the r-test N-candidate path (which has its own best-N-by-p-value-fit
+    #     selection + "Multiple sample sizes" note that must keep running when the
+    #     sub-chunk splitter glues a preceding "N = ..." sentence to the r's chunk),
+    #     nor chi-square / z / F rows.
+    #   * exactly one distinct own-clause N -- a clause with two different N's is
+    #     genuinely ambiguous (e.g. a between-groups "N = 350 ... N = 393") and is
+    #     left to the existing n1/n2 + context flow.
+    own_is_ttest <- grepl("\\bt\\s*\\(", s, perl = TRUE)
+    if (own_is_ttest && length(N_own_candidates) == 1L) {
+      N_value <- N_own_candidates[1]
+      N_source <- "own_clause"
+      # Surface the own-clause value FIRST among candidates so any downstream
+      # "first candidate" consumer also sees the authoritative value.
+      N_candidates <- unique(c(N_own_candidates, N_candidates))
+    } else {
+      N_value <- if (length(N_candidates) > 0) N_candidates[1] else NA_real_
+      N_source <- if (!is.na(N_value)) "local_context" else NA_character_
+    }
 
     # Try extended context if local failed
     if (is.na(N_value)) {

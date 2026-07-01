@@ -547,7 +547,38 @@ VARIANT_METADATA <- list(
        %in% prose_stat_ci)
   }, logical(1))
 
-  drop <- drop | ci_dup | stat_ci_dup
+  # v0.6.12 (E-repcol-dedup): a test-statistic-bearing table row that carries NO
+  # CI of its own (docpluck delivered only the test statistic + df, no effect size,
+  # no CI) cannot be matched by any of the three CI-based passes above, so it leaks
+  # as a spurious duplicate of an identical prose finding. collabra.57785 Table 8
+  # (the "Replication" column of the replication-vs-original summary table) restates
+  # 8 body-prose t-tests -- e.g. the table cell `t(742) = 17.61` (N=744, no CI, no d)
+  # duplicates the prose row `t(742) = 17.61, d = 0.65, 95% CI [.57, .73]`. The
+  # v0.6.11 E-origcol fix dropped the "(Original)" comparison rows but left these
+  # kept "(Replication)" rows undeduplicated against their prose twins. Collapse a
+  # CI-less table F/t/r row when its (test_type + statistic value + df1) matches a
+  # prose row's -- for a CI-less row df1 is the discriminator the CI would otherwise
+  # provide, so the key is (type + stat + df), stronger than stat alone and safe
+  # against two distinct findings that merely share a statistic value. Scoped to
+  # table rows WITHOUT a reported CI (a CI-bearing table row is handled by the
+  # stat+CI+p pass, which is stricter). df1 must be present and equal on both.
+  df1_col <- as.numeric(col("df1"))
+  prose_stat_df <- unique(stats::na.omit(
+    vapply(which(!is_table & !is.na(sv) & !is.na(df1_col)),
+           function(i) paste(as.character(tt_col[i]), round(sv[i], 3L),
+                             round(df1_col[i], 3L), sep = "|"),
+           character(1))
+  ))
+  stat_df_dup <- vapply(seq_len(nrow(parsed)), function(i) {
+    is_table[i] && !is.na(tt_col[i]) &&
+      tt_col[i] %in% c("F", "t", "r") &&
+      !is.na(sv[i]) && !is.na(df1_col[i]) &&
+      is.na(cl[i]) && is.na(cu[i]) &&
+      (paste(as.character(tt_col[i]), round(sv[i], 3L), round(df1_col[i], 3L), sep = "|")
+       %in% prose_stat_df)
+  }, logical(1))
+
+  drop <- drop | ci_dup | stat_ci_dup | stat_df_dup
   parsed[!drop, , drop = FALSE]
 }
 
@@ -1050,6 +1081,15 @@ compute_and_compare_one <- function(row,
   # Alternative suggestions (different effect size types)
   alternatives <- list()
 
+  # v0.6.12 (E-pairedci-unverifiable): TRUE when a within-subjects t-test's CI could
+  # only be computed as an INDEPENDENT-samples approximation (the per-arm SDs and the
+  # within-pair correlation needed for the true paired/d_av CI are not recoverable from
+  # t + df alone). In that case the reported paired CI must NOT be escalated to
+  # INCONSISTENT -- the computed CI is a known over-wide approximation, not ground
+  # truth. Set in the "no explicit group sizes" branch below; read at the Phase-6 CI
+  # verdict to cap the status at UNVERIFIABLE. See collabra.57785 loc 170.
+  paired_ci_independent_approx_only <- FALSE
+
   # Note: uncertainty and assumptions already initialized at top of function (line 275-276)
   # Do NOT reset them here or earlier messages will be lost
 
@@ -1422,6 +1462,15 @@ compute_and_compare_one <- function(row,
         }
       }
       uncertainty <- c(uncertainty, "Independent-samples group sizes unknown; computed bounds")
+      # v0.6.12 (E-pairedci-unverifiable): the CI just computed for this row is an
+      # INDEPENDENT-samples approximation (no per-arm SDs / within-pair correlation
+      # available from t + df). Record that fact here; the CI verdict (Phase 6) then
+      # decides -- using the FINAL design_inferred, which for a prose "paired t-test"
+      # is not resolved until later -- whether to cap the status at UNVERIFIABLE
+      # instead of a hard INCONSISTENT. collabra.57785 loc 170: reported d = 0.55,
+      # CI [0.47, 0.62] on a paired t(742) = 12.24 whose design is set from the
+      # "within-subjects design" prose, after this point.
+      paired_ci_independent_approx_only <- TRUE
     }
 
     # ----- Compute PAIRED samples d variants -----
@@ -1696,6 +1745,31 @@ compute_and_compare_one <- function(row,
       assumptions <- c(assumptions,
         sprintf("df=%d inferred from N=%d (Pearson r: df = N - 2)",
                 as.integer(df1), as.integer(N)))
+    }
+
+    # v0.6.12 (E-corr-N-from-df): when a Pearson r carries an EXPLICIT df
+    # (`r(348) = -0.34`), that df is authoritative: N = df + 2. If the N bound from
+    # context disagrees (a bled global / subsample-mismatched value), the displayed
+    # N is internally inconsistent with the very df printed next to the r -- e.g.
+    # collabra.57785 loc 173/175 report r(348) but show N = 743 (the whole-study N),
+    # when df = 348 implies a 350-person subsample. The CI/p are already computed
+    # from df1 + 2 (line ~1760, so the verdict is unaffected), but the N FIELD must
+    # be reconciled to df + 2 so a reader is not misled about which sample the
+    # correlation is on. Pearson only (a Spearman/Kendall n has no fixed df = n - 2
+    # relation); requires a co-located df from an explicit `r(df)` (df1 present and
+    # NOT just inferred from N above -- guarded by the is.na(df1) entry condition of
+    # that block, so reaching here with df1 set means it came from the parsed r(df)).
+    if ((is.na(corr_method) || corr_method == "pearson") &&
+        !is.na(df1) && df1 > 0 && !is.na(N) && abs(N - (df1 + 2)) > 0.5) {
+      N_ctx_mismatch <- N
+      N <- df1 + 2
+      uncertainty <- c(uncertainty,
+        sprintf(paste0("Reported N=%d is inconsistent with the correlation's own df=%d ",
+                       "(Pearson r: N = df + 2 = %d); displayed N corrected to %d to match ",
+                       "the printed r(df). Verify this is the intended subsample."),
+                as.integer(N_ctx_mismatch), as.integer(df1),
+                as.integer(df1 + 2), as.integer(df1 + 2)))
+      N_source <- "corr_df_plus_2"
     }
 
     r_value <- stat # For r tests, the statistic IS the effect size
@@ -3792,6 +3866,32 @@ compute_and_compare_one <- function(row,
         ci_check_status <- "MATCH"
       } else if (best_delta <= 3 * tol_ci) {
         ci_check_status <- "PLAUSIBLE"
+      } else if (paired_ci_independent_approx_only && {
+                   # v0.6.12 (E-pairedci-unverifiable): is this a within-subjects
+                   # row? design_inferred is not finalized until ~800 lines below
+                   # (the prose "paired t-test" detection runs after this CI verdict),
+                   # so read the within/paired design signal directly here from the
+                   # row's own clause + context window, plus the within d families.
+                   .ci_ctx <- tolower(paste(
+                     if ("raw_text" %in% names(row) && length(row$raw_text) > 0) as.character(row$raw_text[1]) else "",
+                     if ("context_window" %in% names(row) && length(row$context_window) > 0) as.character(row$context_window[1]) else ""
+                   ))
+                   .within_kw <- grepl(
+                     "paired|repeated measures|within-subjects|within subjects|dependent samples|pre-post|before-after",
+                     .ci_ctx, perl = TRUE)
+                   .within_es <- !is.na(canonical_type) && canonical_type %in% c("dz", "dav", "drm")
+                   .within_kw || .within_es
+                 }) {
+        # The row is within-subjects (paired) and every computed CI candidate is an
+        # independent-samples approximation (no per-arm SDs / within-pair correlation
+        # available from t + df). That approximation is systematically wider than the
+        # true paired CI, so a large delta does NOT mean the reported CI is wrong --
+        # it means we cannot verify it. Report UNVERIFIABLE, never a hard
+        # INCONSISTENT (collabra.57785 loc 170: reported d = 0.55, CI [0.47, 0.62] on
+        # a paired t(742) = 12.24). A MATCH / PLAUSIBLE still stands when the
+        # approximation lands close (e.g. loc 151, delta ~0.03). The within-design
+        # guard keeps this off genuine independent-samples rows entirely.
+        ci_check_status <- "UNVERIFIABLE"
       } else {
         ci_check_status <- "INCONSISTENT"
       }
