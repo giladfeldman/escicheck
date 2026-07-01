@@ -8,7 +8,7 @@ check_text(
   text,
   stats = c("t", "F", "r", "chisq", "z", "U", "W", "H", "regression", "spearman",
     "kendall", "kendall_w", "dscf", "cochran_q", "RR", "rdpct", "md_hl", "binomial",
-    "interaction_p"),
+    "interaction_p", "mediation_indirect", "mcnemar_or"),
   ci_level = 0.95,
   alpha = 0.05,
   one_tailed = FALSE,
