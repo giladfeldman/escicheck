@@ -1,3 +1,59 @@
+# effectcheck 0.6.12
+
+**Three fixes from the 2026-07-02 escicheck-iterate cycle-1 canary re-audit (independent
+Sonnet-watches-Opus over the v0.6.11 canary set), all on collabra.57785 (Experiential-vs-Material
+Purchases replication+extension of Carter & Gilovich 2012).**
+
+- **E-ownclause-N** (collabra.57785 loc 170) — a t-test's N is now taken from the row's OWN
+  sub-chunk when its clause states one, instead of the first `N =` in the wider ±2-sentence
+  context window. The clause "(M = 4.90, SD = 1.42, N = 743) ... (M = 4.11, SD = 1.44, N = 743;
+  t(742) = 12.24, ...)" states `N = 743` twice, yet the parser bound `N = 350` from the PRECEDING
+  sentence (loc 167 "N = 350 ... N = 393"), `check.R` rejected 350 as implausibly small for
+  df=742, and fell back to the independent-samples default `N = df + 2 = 744` — a fabricated N.
+  `parse.R` now scans the row's own sub-chunk `s` for `N =` first and binds it
+  (`N_source = "own_clause"`) — but ONLY when that sub-chunk is a t-test (`t(` present) AND carries
+  exactly one distinct N value. The narrow gate keeps the fix off the r-test's multi-N-candidate
+  p-value-fit selection (its "Multiple sample sizes" path, where the sub-chunk splitter glues a
+  preceding "N = ..." sentence to the r's chunk) and off between-groups clauses that legitimately
+  carry two different N's. Mirrors the v0.6.8 "prefer the signal closest to / inside the row's own
+  clause" discriminator.
+- **E-repcol-dedup** (collabra.57785 Table 8 "Replication" column) — a test-statistic-bearing table
+  row that carries NO CI of its own (docpluck delivered only the statistic + df) is now
+  deduplicated against an identical prose finding. The v0.6.11 E-origcol fix dropped the
+  "(Original)" comparison column but left the kept "(Replication)" rows undeduplicated against
+  their body-prose twins, so 8 findings (t(742) = 17.61 / 24.00 / 30.74 / 31.08 / 53.32 / 12.24 /
+  3.15 + Welch 5.36 / 2.51) were emitted TWICE — once as the richer prose row (with d + CI, PASS)
+  and once as a bare table row (no ES, no CI). None of the three existing CI-based dedup passes
+  could match a CI-less table row. `.dedup_table_vs_prose()` now collapses a CI-less table F/t/r
+  row when its (test_type + statistic value + df1) matches a prose row's — for a CI-less row, df1
+  is the discriminator the CI would otherwise provide. The 2 genuinely table-only rows (t = 3.93
+  "Importance/Welch", t = 6.79 "Importance/Paired", no prose twin) are correctly kept
+  (collabra.57785 32 → 23 rows).
+- **E-pairedci-unverifiable** (collabra.57785 loc 170) — a within-subjects (paired) t reported with
+  a CI the authors computed from the raw paired data (e.g. `d = 0.55, 95% CI [0.47, 0.62]` on a
+  paired `t(742) = 12.24`) is no longer flagged `ci_check_status = "INCONSISTENT"`. effectcheck
+  cannot reproduce a paired / d_av CI from t + df alone (it lacks the per-arm SDs and the within-pair
+  correlation), so its computed CI is an independent-samples over-approximation; comparing the
+  reported paired CI to that approximation and declaring INCONSISTENT falsely implies the reported
+  values are wrong. `check.R` now records when a row's CI could only be computed as an independent
+  approximation, and — for a within-subjects row (paired/within design keyword in the row's own
+  clause/context, or a dz/dav/drm effect) — caps the CI verdict at `UNVERIFIABLE` instead of
+  escalating to INCONSISTENT. A MATCH / PLAUSIBLE still stands when the approximation lands close
+  (loc 151, delta ~0.03, stays PLAUSIBLE), and genuine independent-samples rows can still surface
+  INCONSISTENT (the within-design guard scopes the cap).
+
+Full suite **924 test_that blocks / 0 fail**; `R CMD check --as-cran` 0E/0W. Regression tests in
+`tests/testthat/test-v0612-ownclause-n-and-repcol-dedup.R`. Two docpluck text-extraction defects
+were filed (NOT effectcheck defects) to `docs/DOCPLUCK_HANDOFF_2026-07-02.md`: DP-1 (collabra.77859
+`camelot_t10` Study-1 Table-1 binds the wrong column as t/d/df/CI — delivered `t = 0.6` where the
+gold reads `t = 5.65`, so effectcheck faithfully rendered docpluck's wrong values), DP-2
+(collabra.77859 "Expensive" manipulation-check row `t = 15.57` not delivered as a flattened_row). A
+standalone-Bayes-factor gap on collabra.90203 (bare `BF01 = 0.11` / `1.24` not extracted) was
+surfaced for a product decision rather than fixed — the paper reports 13 `BF01 =` values of which
+the gold wants only 2 as standalone results, and no parse-pattern rule reliably separates the 2
+primary-analysis Bayes factors from the 11 supporting/companion ones (see
+`docs/TRIAGE_iterate_2026-07-02.md` F1).
+
 # effectcheck 0.6.11
 
 **Two fixes from the 2026-07-01 escicheck-iterate cycle-2 canary audit (independent
