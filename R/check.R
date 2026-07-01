@@ -3111,6 +3111,29 @@ compute_and_compare_one <- function(row,
     # usually symmetric when the per-arm distributions are symmetric, so
     # strong asymmetry flags a likely reporting/extraction error -- and
     # (b) p-CI consistency (p<.05 iff 0 outside the 95% CI).
+    # v0.6.10 (E-mdhl-N): a HL median difference has no recoverable N from a
+    # sentence (it needs per-arm rank data), and the per-arm n's are typically not
+    # in the result's own clause. The v0.6.3 fix that stopped RR/rdpct rows from
+    # inheriting an unrelated global N (via arm_totals_sum) was never extended to
+    # md_hl, so a md_hl row still attached a bled global_text/extended_context N
+    # (PROSECCO: an unrelated N=106 shown on two distinct median-difference outcomes
+    # the source never quantifies). Clear an N that came from a non-co-located
+    # source so the row does not display a fabricated-provenance sample size; an
+    # inline / arm-totals N (if the per-arm cells were actually present) is kept.
+    n_src_mdhl <- if ("N_source" %in% names(row) && length(row$N_source) > 0 &&
+                      !is.na(row$N_source[1])) row$N_source[1] else NA_character_
+    if (!is.na(n_src_mdhl) && n_src_mdhl %in% c("global_text", "extended_context")) {
+      N <- NA_real_
+      N_source <- NA_character_
+      # The output tibble reads N_source from row$N_source (mutated, like the RR /
+      # rdpct blocks), so clear the row column too -- otherwise N is NA but the
+      # provenance still misleadingly reads "global_text".
+      if ("N_source" %in% names(row)) row$N_source[1] <- NA_character_
+      uncertainty <- c(uncertainty,
+        paste("Per-arm n is not reported for this Hodges-Lehmann median difference;",
+              "a sample size found only in distant document context was not adopted",
+              "(it does not back this specific result)."))
+    }
     cl <- if ("ciL_reported" %in% names(row)) row$ciL_reported[1] else NA_real_
     cu <- if ("ciU_reported" %in% names(row)) row$ciU_reported[1] else NA_real_
     md_msg_parts <- character(0)
@@ -3280,6 +3303,55 @@ compute_and_compare_one <- function(row,
             "statistic, df, or effect size accompany it (the interaction test",
             "statistic is typically reported only in a supplementary table), so",
             "the result cannot be independently recomputed (extraction-only)."))
+  } else if (tt == "mediation_indirect") {
+    # ------ MEDIATION INDIRECT EFFECT (Sobel Z) ------
+    # v0.6.10 (E-mediation): a bootstrapped mediation indirect effect reported with
+    # a Sobel Z, e.g. "the indirect effect of X on Y was .05, 95% CI [-.04, .12],
+    # Sobel Z = 0.84, p = .40, ACME robust until rho = 0.7". parse.R bound the
+    # indirect-effect coefficient as the reported effect (effect_reported_name =
+    # "indirect_effect") and the Sobel Z as the test statistic. The indirect effect
+    # is NOT independently recomputable from the reported numbers (it needs the a/b
+    # path coefficients), so this is an extraction-only NOTE that surfaces the
+    # indirect effect + its bootstrapped CI + the Sobel Z. Critically, the row must
+    # NOT be treated as a plain z-test (which would grab the sensitivity-analysis
+    # rho as an effect and flag a spurious WARN -- the defect this fixes).
+    # collabra.126266 (Outcome Bias replication+extension): H2 + H5 mediation rows.
+    check_type <- "extraction_only"
+    reported_type <- "indirect_effect"
+    matched_value <- NA_real_
+    matched_variant <- NA_character_
+    delta_effect_abs <- NA_real_
+    # A mediation indirect effect has no sample-size semantics for verification (it
+    # is extraction-only). Clear any N the generic Phase-2C extraction bled from the
+    # surrounding context (e.g. the study's overall "N = 402" from global_text) --
+    # it is not this test's N, nothing recomputes with it, and a non-NA N defeats the
+    # Phase-7 "no variant + no N -> NOTE" rescue, leaving the row a spurious WARN.
+    # Mirrors the interaction_p handler above. collabra.126266 H2/H5 mediation rows.
+    N <- NA_real_
+    N_source <- NA_character_
+    uncertainty <- c(uncertainty,
+      paste("Bootstrapped mediation indirect effect reported with a Sobel Z: the",
+            "indirect effect and its bootstrapped CI are surfaced, but the indirect",
+            "effect is not independently recomputable from the reported statistics",
+            "(it depends on the a/b path coefficients), so this is extraction-only.",
+            "Any 'ACME robust until rho = ...' value is a sensitivity-analysis bound,",
+            "not the reported effect size."))
+  } else if (tt == "mcnemar_or") {
+    # ------ McNEMAR TEST REPORTED AS AN ODDS RATIO ------
+    # v0.6.11 (E-mcnemar-OR): a McNemar test reported only as a discordant-pairs odds
+    # ratio (no chi-square value) -- "We also conducted a McNemar test ... OR = 0.18,
+    # 95% CI [0.10, 0.29], p < .001". The OR is the reported effect; it is not
+    # independently recomputable from the sentence (it needs the b/c discordant-pair
+    # counts), so this is an extraction-only NOTE that surfaces the OR (+ its CI + p,
+    # bound by the OR/CI machinery). No df, no N. collabra.37122 (4 rows).
+    check_type <- "extraction_only"
+    N <- NA_real_
+    N_source <- NA_character_
+    uncertainty <- c(uncertainty,
+      paste("McNemar test reported as an odds ratio (from discordant pairs): the OR",
+            "and its CI/p are surfaced, but the OR is not independently recomputable",
+            "from the reported statistics (it needs the discordant-pair counts), so",
+            "this is extraction-only."))
   } else if (tt == "dscf") {
     # ------ DSCF (Dwass-Steel-Critchlow-Fligner) POST-HOC W ------
     # The DSCF W is the studentized-range statistic of a Kruskal-Wallis
@@ -3619,6 +3691,18 @@ compute_and_compare_one <- function(row,
   # 90% CI for eta-squared) and picks the best match. This catches papers
   # that used a different CI method than our primary computation.
   # ============================================================================
+
+  # v0.6.10 (E-mediation): a mediation indirect effect is extraction-only and has no
+  # paired/independent or cross-family design ambiguity -- but because it carries an
+  # effect (the indirect effect) with no computed variant family, the cross-family
+  # fallback above set ambiguity_level = "highly_ambiguous", which would surface a
+  # misleading design_ambiguous = TRUE on the output row. Reset it: there is nothing
+  # design-ambiguous about a Sobel-Z indirect effect. (Status is unaffected -- the
+  # row has delta_effect_abs = NA, so the Phase-7 ambiguity branch never reads this.)
+  if (tt == "mediation_indirect") {
+    ambiguity_level <- "clear"
+    ambiguity_reason <- NA_character_
+  }
 
   ci_match <- as.logical(NA)
   ci_delta_lower <- NA_real_
@@ -4021,6 +4105,17 @@ compute_and_compare_one <- function(row,
     "p_value"
   } else {
     "extraction_only"
+  }
+
+  # v0.6.10 (E-mediation): a Sobel-Z mediation indirect effect is extraction-only.
+  # The recompute above resolves it to "p_value" because the clause carries a p
+  # (e.g. "Sobel Z = 0.84, p = .40") -- but the Sobel-Z p is NOT independently
+  # recomputed (no df, and the indirect effect needs the a/b path coefficients), so
+  # treating it as a p_value check produces a spurious p_value-only WARN. Force
+  # extraction_only here (mirrors the RoBMA override below) so the row stays the
+  # honest NOTE its handler set. collabra.126266 H2/H5 mediation rows.
+  if (tt %in% c("mediation_indirect", "mcnemar_or")) {
+    check_type <- "extraction_only"
   }
 
   # v0.6.6 (E-C1): a Bayesian MODEL-AVERAGED effect (RoBMA / Bayesian
@@ -5463,8 +5558,13 @@ compute_and_compare_one <- function(row,
   # v0.6.6 block routes it to NOTE to surface its BF01 / model-averaging provenance;
   # without this exclusion the extraction-only SKIP downgrade silently overrode that
   # NOTE back to SKIP (collabra.90203 r = 0.002, BF01 = 14.93).
+  # v0.6.10 (E-mediation): also exclude a mediation indirect effect (Sobel Z). The
+  # row surfaces the indirect effect + its bootstrapped CI + the Sobel Z, so it is a
+  # NOTE (not a "nothing checked" SKIP) -- the reported effect and CI are real
+  # extracted values a consumer wants to see (collabra.126266 H2/H5 mediation).
   if (check_type == "extraction_only" && !decision_error && !p_ns &&
-      !r_ci_surfaced && !bayes_model_avg_surfaced) {
+      !r_ci_surfaced && !bayes_model_avg_surfaced &&
+      !(tt %in% c("mediation_indirect", "mcnemar_or"))) {
     status <- "SKIP"
   }
 
@@ -6173,7 +6273,8 @@ check_text <- function(text,
                        stats = c("t", "F", "r", "chisq", "z", "U", "W", "H",
                                  "regression", "spearman", "kendall", "kendall_w",
                                  "dscf", "cochran_q", "RR", "rdpct", "md_hl",
-                                 "binomial", "interaction_p"),
+                                 "binomial", "interaction_p", "mediation_indirect",
+                                 "mcnemar_or"),
                        ci_level = 0.95,
                        alpha = 0.05,
                        one_tailed = FALSE,

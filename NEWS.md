@@ -1,3 +1,90 @@
+# effectcheck 0.6.11
+
+**Two fixes from the 2026-07-01 escicheck-iterate cycle-2 canary audit (independent
+Sonnet-watches-Opus over the v0.6.10 canary set).**
+
+- **E-origcol** (collabra.57785 Table 8) — the original/comparison column of a
+  replication-vs-original summary table is not always labeled "Original study/article".
+  collabra.57785 Table 8 tags its two columns "Replication Effect and CI" / "Original
+  Effect and CI" and its rows "… (Replication)" / "… (Original)", so the v0.6.6
+  comparison-column filter (which required `original` + `article|study|paper`) missed them
+  and every one of the 11 Table-8 findings was emitted TWICE — the Original-column copy
+  leaked as a spurious own-result (43 → would-be-32 rows). The `comparison_col_re` in
+  `flattened_rows_to_parsed()` now also matches the column-header forms ("Original Effect /
+  Result / Finding / Value / Cohen's d / r / F", "Original … CI/[stat]") AND a standalone
+  parenthetical row-tag "(Original)" / "(Target article)", while still keeping the paper's
+  own "(Replication)" column and any substantive condition label that merely contains the
+  word "original" in prose. collabra.57785 drops from 43 to 32 rows (11 duplicate Original
+  findings removed); independent Sonnet re-audit no longer reports the duplication.
+- **E-mdhl-N** (PROSECCO md_hl) — a Hodges-Lehmann median difference has no recoverable N
+  from a sentence (it needs per-arm rank data), and the per-arm n's are typically not in
+  the result's own clause. The v0.6.3 fix that stopped RR/rdpct rows inheriting an
+  unrelated global N (via `arm_totals_sum`) was never extended to `md_hl`, so a md_hl row
+  still attached a bled `global_text`/`extended_context` N — PROSECCO showed an unrelated
+  N=106 on two distinct median-difference outcomes the source never quantifies. `check.R`
+  now clears a non-co-located N (and its `N_source`) for a md_hl row, mirroring the
+  interaction_p / mediation_indirect handlers.
+- **E-subgroupN** (collabra.74820) — an independent t-test with two unsubscripted per-group
+  sizes ("high CA (N = 223) and low CA (N = 19)") bound only the first (223) as the TOTAL N,
+  firing a bogus "N=223 implausibly small for df=240" WARN and forcing an equal-split Cohen's d
+  (-0.30 vs the true -0.55). `parse.R` now binds two split-context N values as n1/n2 (N = their
+  sum, `N_source = "subgroup_sum"`), guarded by a group-split keyword + an exactly-two-N
+  requirement (a lone total N is untouched).
+- **E-mcnemar-OR** (collabra.37122) — a McNemar test reported only as a discordant-pairs ODDS
+  RATIO with no chi-square value ("We also conducted a McNemar test … OR = 0.18, 95% CI
+  [0.10, 0.29], p < .001") produced NO result row — all four of the paper's McNemar tests were
+  silently dropped. New `test_type = "mcnemar_or"` + `pat_mcnemar_or` (case-insensitive, "McNemar"
+  + an "OR = …" anchor within one sentence) routes the row to an extraction-only NOTE surfacing
+  the OR + CI + p. Recovers 3 of the 4; the 4th has its "McNemar" anchor severed from its OR
+  clause by a docpluck paragraph-break (filed to docs/DOCPLUCK_HANDOFF_2026-07-01.md DP-1).
+
+Full suite 917 test_that blocks / 0 fail, `R CMD check --as-cran` 0E/0W. Regression tests
+in `tests/testthat/test-v0611-origcol-and-mdhl-n.R`. Surfaced alongside three new corpus
+golds generated via article-finder for the deeper audit (collabra.74820 neuroticism×EC
+moderation, collabra.122515 creativity-depression mediation, collabra.88158 daily-diary
+multilevel — the last dropped from the audit set due to a source-PDF binding defect:
+pages 7-12 are a mis-bound different article).
+
+# effectcheck 0.6.10
+
+**A bootstrapped mediation indirect effect reported with a Sobel Z is now a first-class
+`test_type = "mediation_indirect"`, from the 2026-06-29 escicheck-iterate new-corpus pass
+against the Outcome Bias replication+extension (collabra.126266, Aiyer/Chan/Feldman 2024).**
+
+A clause like *"the bootstrapped indirect effect of X on Y was .05, 95% CI [-.04, .12],
+Sobel Z = 0.84, p = .40, ACME found to be robust until ρ = 0.7"* previously routed the
+`Sobel Z = 0.84` to a PLAIN z-test, and then the fallback effect-size pattern grabbed the
+sensitivity-analysis `ρ = 0.7` — the value of the error-term correlation at which the ACME
+mediation stops being robust (an Imai/Keele/Tingley sensitivity bound) — as the EFFECT
+SIZE, discarding the actual indirect effect (.05) and emitting a spurious WARN. All four
+mediation rows (H2 + H5) were mis-typed `z` with `effect_reported_name = "rho"` and
+`effect_reported` = the sensitivity bound.
+
+`parse.R` adds `pat_mediation_indirect` (anchored on *"indirect effect … was <value>"* AND
+*"Sobel Z = <z>"*, both required) and a dispatch branch that classifies the row
+`mediation_indirect`, binds the indirect-effect coefficient as the reported effect
+(`effect_reported_name = "indirect_effect"`), the Sobel Z as the test statistic, and the
+bootstrapped CI as the indirect-effect CI (anchored at the indirect-effect value, before
+the trailing ρ). An `is_mediation_indirect` flag suppresses the fallback-ES ρ grab.
+`check.R` routes `mediation_indirect` to an honest extraction-only NOTE (the indirect
+effect is not recomputable from the reported numbers without the a/b path coefficients) and
+excludes it from the Phase-9 SKIP downgrade so the indirect effect + CI are surfaced.
+`mediation_indirect` is added to the `check_text()` `stats` allowlist and documented in
+API.md. The same new-corpus audit confirmed all 28 other reported statistics
+(replication/extension ANOVAs + Welch t post-hocs) are extracted correctly and the gold's
+Table-5 "Original" (Gino 2009 comparison) rows and abstract-only effect-size restatements are
+correctly NOT extracted.
+
+It also fixes the malformed **`p = <.001`** form (a spurious `=` immediately before the real
+`<`/`>` operator — a common PDF text-layer artifact) in `pat_p` / `pat_p_sci` / `pat_p_enote`:
+the operator group now accepts an optional leading `=` ONLY when a real `<`/`>` follows (a
+lookahead), so `p = <.001` parses to `p < .001` while a normal `p = .40` still captures `=`
+and `p <= .05` still captures `<=`. Surfaced by the same collabra.126266 H5 punishment
+mediation row, where docpluck delivers "Sobel Z = 4.87, p = <.001" (the PDF prints "p < .001")
+and the p had been dropped (`p_valid = FALSE`). Full suite 909 test_that blocks / 0 fail,
+`R CMD check --as-cran` 0E/0W. Regression tests in
+`tests/testthat/test-v0610-mediation-indirect-sobel-z.R`.
+
 # effectcheck 0.6.9
 
 **A `=`-as-U+00BC glyph-corruption normalization, from the 2026-06-29 escicheck-iterate

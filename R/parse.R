@@ -815,6 +815,44 @@ parse_text <- function(text, context_window_size = 2) {
     "interaction\\s+p(?:[- ]?value)?)\\s*",
     "([<=>]{0,2})\\s*([01]?\\.\\d+|[01])"
   )
+  # v0.6.11 (E-mcnemar-OR): a McNemar test reported as a discordant-pairs ODDS RATIO
+  # (no chi-square value) -- "We also conducted a McNemar test ... OR = 0.18, 95% CI
+  # [0.10, 0.29], p < .001". Such a sentence carries no test statistic, so the
+  # generic path produced NO row at all and the OR was never surfaced (collabra.37122
+  # has 4 of these, all silently dropped). Anchor on a "McNemar" mention followed
+  # (within ~80 non-period chars) by "OR = <val>"; both must co-occur. The McNemar OR
+  # is not independently recomputable from the sentence (it needs the discordant-pair
+  # counts), so check.R routes the row to an honest extraction-only NOTE that surfaces
+  # the OR (+ its CI + p, bound by the existing OR/CI/p machinery). Group 1 = OR.
+  # Up to ~140 non-period chars between "McNemar" and the OR -- the descriptive
+  # clause ("…found support for the association between temporal distance and
+  # action-inaction regret, OR = 0.18") runs ~99 chars in collabra.37122. `[^.]`
+  # keeps the match inside the one sentence.
+  # (?i): the text prints "McNemar" (mixed case); str_match is case-sensitive by
+  # default, so without the inline flag a lowercase "mcnemar" pattern never matches.
+  pat_mcnemar_or <- paste0(
+    "(?i)mcnemar\\b[^.]{0,140}?\\b(?:OR|odds\\s*ratio)\\s*=\\s*([-+]?\\d*\\.?\\d+)"
+  )
+  # v0.6.10 (E-mediation): a bootstrapped MEDIATION indirect effect reported with a
+  # Sobel Z, e.g. "the (bootstrapped) indirect effect of X on Y was .05, 95% CI
+  # [-.04, .12], Sobel Z = 0.84, p = .40, ACME found to be robust until rho = 0.7".
+  # Without this the parser routes the "Sobel Z = 0.84" to a PLAIN z-test and then
+  # the fallback-ES pattern grabs the sensitivity-analysis "rho = 0.7" (the value of
+  # the error-term correlation at which the ACME stops being robust -- an
+  # Imai/Keele/Tingley mediation sensitivity bound) as the EFFECT SIZE, discarding
+  # the actual indirect effect (.05) and emitting a spurious WARN. Capture both
+  # anchors -- the indirect-effect value (group 1, after "indirect effect ... was")
+  # AND the Sobel Z (group 2) -- so the dispatch can bind the indirect effect as the
+  # effect and the Sobel Z as the test statistic, and suppress the rho grab. Both
+  # anchors must co-occur for the pattern to fire. collabra.126266 (Outcome Bias
+  # replication+extension): H2 + H5 mediation rows (4 results).
+  # Bounded lazy spans (.{0,N}?) rather than [^.]* because the reported values are
+  # full of decimal points (".05", "[-.04, .12]") that a no-period class would stop
+  # at. The bounds keep the match within the single reporting clause.
+  pat_mediation_indirect <- paste0(
+    "indirect\\s+effect\\b.{0,40}?\\bwas\\s+([-+]?\\d*\\.?\\d+)",
+    ".{0,80}?\\bSobel\\s+[Zz]\\s*=\\s*([-+]?\\d*\\.?\\d+)"
+  )
   # v0.5.16: clinical-trial risk ratio with two-proportion slash counts.
   # Form: "<n1>/<N1> (<pct1>%) versus|and|vs <n2>/<N2> (<pct2>%) ... RR <val>;
   # 95% CI <lo> to <hi>; p[-]?(value)? = <pval>". The two-proportion clause
@@ -866,16 +904,22 @@ parse_text <- function(text, context_window_size = 2) {
   # Improved p-value regex: handle optional leading '0', various separators, and spaces
   # Match both lowercase p and uppercase P (Nature, Scientific Reports, medical journals)
   # Also match "p < 0.001" (with leading zero) and "p = .05" (without)
-  pat_p <- "\\b[pP]\\s*([<=>]{1,2})\\s*(0?\\.[0-9]+|[01]\\.[0-9]+|[01])"
+  # v0.6.10: tolerate the malformed "p = <.001" form (a spurious "=" immediately
+  # before the real operator, a common PDF text-layer artifact). The optional
+  # `(?:=\s*(?=[<>]))?` consumes a leading "= " ONLY when a real `<`/`>` operator
+  # follows (lookahead), so a normal "p = .40" still captures "=" as the operator
+  # and "p <= .05" still captures "<=". collabra.126266 H5 punishment mediation:
+  # docpluck delivers "Sobel Z = 4.87, p = <.001" (the PDF prints "p < .001").
+  pat_p <- "\\b[pP]\\s*(?:=\\s*(?=[<>]))?([<=>]{1,2})\\s*(0?\\.[0-9]+|[01]\\.[0-9]+|[01])"
   # Scientific notation p-values: p < 10^-15, p < 10-12 (PDF strips ^ in exponent)
-  pat_p_sci <- "\\b[pP]\\s*([<=>]{1,2})\\s*10\\s*\\^?\\s*[-\u2212](\\d+)"
+  pat_p_sci <- "\\b[pP]\\s*(?:=\\s*(?=[<>]))?([<=>]{1,2})\\s*10\\s*\\^?\\s*[-\u2212](\\d+)"
   # v0.5.3: scientific E-notation p-values -- p = 2.572e-08, p = 1.2e-3 (the
   # form R / JASP / Python emit). pat_p rejects these (the mantissa is not a
   # [01].x number) and pat_p_sci only handles the "10^-N" form. The whole
   # mantissa+exponent number is captured, then converted to a decimal string.
   # (normalize_text has already folded Unicode minus U+2212 to ASCII '-', so an
   # ASCII hyphen in the exponent suffices -- same assumption pat_p relies on.)
-  pat_p_enote <- "\\b[pP]\\s*([<=>]{1,2})\\s*(\\d+(?:\\.\\d+)?[eE]\\s*-\\s*\\d+)"
+  pat_p_enote <- "\\b[pP]\\s*(?:=\\s*(?=[<>]))?([<=>]{1,2})\\s*(\\d+(?:\\.\\d+)?[eE]\\s*-\\s*\\d+)"
   # "Not significant" notation: "ns", "n.s.", "NS" (only after comma/semicolon)
   pat_p_ns <- "[,;]\\s*(?:ns\\.?|n\\.s\\.?|NS|N\\.S\\.?)(?=[\\s.,;)]|$)"
   # N regex: restrict to word boundary and look for nearby equals
@@ -1144,6 +1188,8 @@ parse_text <- function(text, context_window_size = 2) {
     m_binom_h   <- stringr::str_match(s, pat_binom_h)
     m_binom_bare <- stringr::str_match(s, pat_binom_bare)
     m_interaction_p <- stringr::str_match(s, pat_interaction_p)
+    m_mediation_indirect <- stringr::str_match(s, pat_mediation_indirect)
+    m_mcnemar_or <- stringr::str_match(s, pat_mcnemar_or)
     m_n_outN    <- stringr::str_match(s, pat_n_out_of_N)
     m_RR_ci_p <- stringr::str_match(s, pat_RR_ci_p)
     m_two_props <- stringr::str_match(s, pat_two_props_slash)
@@ -1255,6 +1301,40 @@ parse_text <- function(text, context_window_size = 2) {
 
     m_n1 <- stringr::str_match(context, pat_n1)
     m_n2 <- stringr::str_match(context, pat_n2)
+
+    # v0.6.11 (E-subgroupN): two unsubscripted per-group sizes reported as
+    # "<group-A> ... N = <a> ... <group-B> ... N = <b>" -- e.g. collabra.74820
+    # "we divided the sample in high CA (score >= 3, N = 223) and low CA
+    # (score <= 2, N = 19)". The generic N extraction binds only the FIRST N (223)
+    # as the TOTAL, which (a) is wrong (223 is a subgroup), (b) makes check.R fire a
+    # bogus "N=223 implausibly small for df=240" warning, and (c) forces an
+    # equal-split Cohen's d. When n1/n2 were NOT given explicitly (no n1=/n2=) and
+    # the chunk shows a between-groups split (a high/low or two contrasting group
+    # words) with EXACTLY TWO distinct "[Nn] = <int>" values, bind them as n1/n2.
+    # Tightly guarded: requires the split keyword AND exactly two N values, so a
+    # lone total N or a single subgroup is untouched. The total N (n1+n2) is left
+    # for check.R to infer from the design + df, matching the existing pipeline.
+    if (all(is.na(m_n1)) && all(is.na(m_n2))) {
+      split_kw <- grepl(paste0(
+        "\\b(high|low|older|younger|male|female|men|women|experimental|control|",
+        "treatment|placebo|between[- ]groups?|two[- ]groups?|independent[- ]samples)\\b"),
+        context, ignore.case = TRUE, perl = TRUE)
+      Nn_vals <- suppressWarnings(as.integer(
+        stringr::str_match_all(context, "\\b[Nn]\\s*=\\s*(\\d[\\d,]*\\d|\\d+)")[[1]][, 2]
+      ))
+      Nn_vals <- Nn_vals[!is.na(Nn_vals)]
+      if (split_kw && length(unique(Nn_vals)) == 2L && length(Nn_vals) == 2L) {
+        # Order is informational only (n1 = first reported group); the t-test is
+        # symmetric in n1/n2 for the pooled-SD Cohen's d.
+        m_n1 <- matrix(c(NA, as.character(Nn_vals[1])), nrow = 1)
+        m_n2 <- matrix(c(NA, as.character(Nn_vals[2])), nrow = 1)
+        # The generic extraction bound N_value to the FIRST subgroup (e.g. 223);
+        # the true total is the sum of the two groups. Correct it so check.R does
+        # not flag the subgroup size as an implausibly small total.
+        N_value <- sum(Nn_vals)
+        N_source <- "subgroup_sum"
+      }
+    }
     m_dim <- stringr::str_match(s, pat_dims)
 
     # Match effect sizes
@@ -1303,6 +1383,12 @@ parse_text <- function(text, context_window_size = 2) {
     stat_value_decimals <- NA_integer_
     chi_inline_N <- NA_real_
     df_arity_mismatch <- FALSE
+    # v0.6.10 (E-mediation): set when this sub-chunk is a Sobel-Z mediation indirect
+    # effect, so the effect-detection block binds the indirect effect (not the
+    # sensitivity-analysis rho) and suppresses the fallback-ES rho grab.
+    is_mediation_indirect <- FALSE
+    mediation_indirect_effect <- NA_real_
+    mediation_indirect_effect_decimals <- NA_integer_
 
     # Rank-correlation context (Stage 1 / P2): an r(df) reported in a Spearman
     # or Kendall context must be routed to the rank path, not the Pearson path.
@@ -1524,6 +1610,33 @@ parse_text <- function(text, context_window_size = 2) {
         p_val_i <- m_interaction_p[3]
         m_p <- matrix(c(paste0("p", p_op_i, p_val_i), p_op_i, p_val_i), nrow = 1)
       }
+    } else if (!all(is.na(m_mediation_indirect))) {
+      # v0.6.10 (E-mediation): a bootstrapped mediation indirect effect reported
+      # with a Sobel Z. Classify as "mediation_indirect" (NOT a plain z-test) and
+      # bind the indirect-effect value (m[2]) as the reported effect and the Sobel Z
+      # (m[3]) as the test statistic. Placed in the main chain BEFORE the trailing
+      # z-test check so the Sobel Z is not consumed as a plain z. The
+      # is_mediation_indirect flag (below) suppresses the fallback-ES rho grab so the
+      # sensitivity bound "rho = 0.7" is NOT mistaken for the effect size. The
+      # indirect effect via a Sobel Z is not independently recomputable from the
+      # reported numbers (it needs the a/b path coefficients), so check.R routes the
+      # row to an honest NOTE that surfaces the indirect effect + its CI.
+      test_type <- "mediation_indirect"
+      stat_value <- numify(m_mediation_indirect[3])      # the Sobel Z
+      stat_value_decimals <- count_decimal_places(m_mediation_indirect[3])
+      is_mediation_indirect <- TRUE
+      mediation_indirect_effect <- numify(m_mediation_indirect[2])
+      mediation_indirect_effect_decimals <- count_decimal_places(m_mediation_indirect[2])
+    } else if (!all(is.na(m_mcnemar_or))) {
+      # v0.6.11 (E-mcnemar-OR): a McNemar test reported as an odds ratio (no
+      # chi-square value). No test statistic to verify; the OR is the reported
+      # effect. check.R routes test_type "mcnemar_or" to an extraction-only NOTE
+      # surfacing the OR (+ CI + p). collabra.37122 ("McNemar test ... OR = 0.18,
+      # 95% CI [0.10, 0.29], p < .001", 4 rows). No df, no N inferred.
+      test_type <- "mcnemar_or"
+      # The OR token in the same sentence is picked up by the normal pat_OR match
+      # (m_OR, below) and the effect-size + OR/CI machinery surfaces it; we only need
+      # to claim the row here so it is not left unclassified.
     } else if (!all(is.na(m_H))) {
       # Kruskal-Wallis H(df) = value
       test_type <- "H"
@@ -1704,8 +1817,16 @@ parse_text <- function(text, context_window_size = 2) {
     }
 
     # Check more specific patterns first (prioritize more specific over more general)
-    # f^2 must come BEFORE plain f
-    if (!all(is.na(m_f2))) {
+    # v0.6.10 (E-mediation): for a Sobel-Z mediation indirect effect, the reported
+    # effect is the indirect-effect coefficient captured by pat_mediation_indirect
+    # (NOT any eta/d/rho token in the sentence). Bind it FIRST and unconditionally so
+    # the trailing "ACME robust until rho = 0.7" sensitivity bound cannot be adopted.
+    if (isTRUE(is_mediation_indirect) && !is.na(mediation_indirect_effect)) {
+      effect_name <- "indirect_effect"
+      effect_reported <- mediation_indirect_effect
+      effect_reported_decimals <- mediation_indirect_effect_decimals
+    } else if (!all(is.na(m_f2))) {
+      # f^2 must come BEFORE plain f
       effect_name <- "f2"
       effect_reported <- numify(m_f2[2])
       effect_reported_decimals <- count_decimal_places(m_f2[2])
@@ -1949,7 +2070,12 @@ parse_text <- function(text, context_window_size = 2) {
     # correlation test the effect IS the r statistic (adopted later in check.R,
     # so effect_name is still NA here); use the r statistic's position instead.
     effect_match_text <- NA_character_
-    if (!is.na(effect_name)) {
+    if (isTRUE(is_mediation_indirect) && !is.na(mediation_indirect_effect)) {
+      # v0.6.10 (E-mediation): anchor the CI at the indirect-effect VALUE (e.g.
+      # ".05") -- the bootstrapped CI sits right after it ("was .05, 95% CI
+      # [-.04, .12]"), well before the Sobel Z and the trailing sensitivity rho.
+      effect_match_text <- m_mediation_indirect[2]
+    } else if (!is.na(effect_name)) {
       em <- switch(effect_name,
         "f2" = m_f2, "etap2" = m_etap2, "generalized_eta2" = m_eta2_corrupted,
         "eta2" = m_eta2, "eta" = m_eta, "partial_omega2" = m_partial_omega2,
@@ -2452,9 +2578,34 @@ flattened_rows_to_parsed <- function(table_rows) {
     # audited paper's finding -- e.g. F = 6.75 / 5.32 from the Target-article
     # column surfaced as spurious own-result rows). The paper's own rows
     # (row_label/group = "Replication", or a substantive condition label) pass.
+    # v0.6.10 (E-origcol): the comparison column is not always labeled "Original
+    # study/article" -- collabra.57785 Table 8 labels its two columns "Replication
+    # Effect and CI" / "Original Effect and CI", so the v0.6.6 regex (which required
+    # original + article|study|paper) missed it and every Table-8 finding was emitted
+    # TWICE (the Original-column duplicate leaked as a spurious own-result). Widen the
+    # "original ..." branch to also match the column-header forms "Original Effect",
+    # "Original Result/Finding/Value", "Original Cohen's d / r / F", and an "Original
+    # ... CI" / "Original ... [stat]" header. These all occur only as a flattened
+    # comparison-table column header (row_label/group), never as one of the audited
+    # paper's own substantive condition labels.
+    # The "Original" comparison column appears in several real layouts, all of which
+    # are the original/target study's values, NOT the audited paper's own results:
+    #   - a header phrase: "Original study/article/paper", "Original Effect and CI",
+    #     "Original Cohen's d", "Original r/F", "Original ... [95% CI]"
+    #     (collabra.90203 Table 8-10 "Target article"; the v0.6.6 base case),
+    #   - a parenthetical row-tag suffix: "3A: Insight into self (Original)" vs
+    #     "(Replication)" (collabra.57785 Table 8 -- the v0.6.11 E-origcol case).
+    # A standalone "(original)" / "(target article)" parenthetical tag, or "original"
+    # as a whole flattened-table column label, is the comparison column and is
+    # dropped. A substantive condition label that merely CONTAINS the word "original"
+    # in running prose (no parenthetical tag, no stat-column word) is NOT dropped.
     comparison_col_re <- paste0(
-      "(?i)\\b(target\\s+article|original\\s+(article|study|paper)|",
-      "source\\s+article|prior\\s+(study|work))\\b"
+      "(?i)(\\b(target\\s+article|source\\s+article|prior\\s+(study|work))\\b",
+      "|\\boriginal\\s+(article|study|paper|effect|result|finding|value|",
+      "cohen|d|r|f|estimate|statistic|column)\\b",
+      "|\\boriginal\\b[^\\n]{0,30}\\b(ci|effect|result|d|r|f)\\b",
+      "|\\(\\s*(original|target\\s+article|original\\s+study)\\s*\\)",
+      "|^\\s*original\\s*$)"
     )
     is_comparison_row <-
       grepl(comparison_col_re, rlab, perl = TRUE) ||
