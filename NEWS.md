@@ -1,3 +1,104 @@
+# effectcheck 0.6.13
+
+**Two new test types + two canary-re-audit fixes from the 2026-07-02 escicheck-iterate cycles 2-3
+(F1 bare Bayes factor + HR hazard ratio, both user-approved; independent Sonnet-watches-Opus canary
+re-audit over the fixed-3 + rotating set).**
+
+- **`bayes_factor`** (new `test_type`; cycle-2 F1) — a STANDALONE evidential Bayes factor reported as
+  a PRIMARY finding of a RoBMA / Bayesian meta-analysis is extracted as an extraction-only NOTE
+  surfacing the reported `BF01`/`BF10` (also the bare JASP/BayesFactor `B01`/`B10` form). The
+  extraction is deliberately conservative: a bare `BF01 = <v>` matcher would flood every Bayesian
+  paper (collabra.90203 alone prints 13+ `BF01 =` values, of which the gold wants only 2 as standalone
+  results). A qualifying standalone BF must satisfy ALL THREE, evaluated per-occurrence over a bounded
+  window around the BF's own position: (1) a primary-finding ANCHOR within 70 chars before it — one of
+  "evidence (for|against) <finding>", "in favo(u)r of the (alternative|null)", or "Bayes factor
+  (was|is|of|indicated|…)"; (2) NO co-located frequentist statistic within ±60 chars (excludes the F/t
+  companions AND the model-averaged-r companion whose clause carries `r = 0.002`); (3) NOT about "(the|
+  an|average|main) effect" (excludes the model-averaged-r companion and DV-specific complementary
+  checks). Validated by a whole-corpus guard-live-vs-bypassed false-positive sweep: fires on exactly
+  `BF01 = 0.11` (publication bias) + `BF01 = 1.24` (heterogeneity) on collabra.90203 and
+  `B10 = 20841.04` + `B10 = 1.25` on collabra.32572, and ZERO spurious rows on the other corpus papers
+  (including both SPPS Bayesian papers). Added to the `check_text()` `stats` allowlist + the Phase-9
+  extraction-only-SKIP exclusion + API.md. Regression tests in
+  `tests/testthat/test-v0613-standalone-bayes-factor.R`.
+
+- **`hazard_ratio`** (new `test_type`; cycle-3 HR) — a Cox proportional-hazards / survival-analysis
+  hazard ratio reported in a clean prose sentence — "HR = 1.87, 95% CI [1.54, 2.28], p < .01" (also
+  `aHR` / `adjusted HR` / `hazard ratio`) — is extracted as an extraction-only NOTE surfacing the HR +
+  its CI + p (a Cox HR is not independently recomputable from the reported numbers; it needs the full
+  time-to-event data). The value must be TIGHTLY bound to the HR token by an explicit `=`/`:`/`of` and
+  is forbidden from being a percentage (negative lookahead on `%`), and the standalone dispatch
+  additionally requires a CO-LOCATED CI — so a bare "HR" mention, the "HR" heart-rate abbreviation, or
+  the "95" of a nearby "95% CI" never fires. New bracketless medical/epi CI patterns
+  (`95% CI 1.54-2.28` dash/en-dash/"to" range and `95% CI: 0.45, 0.85` colon-comma) bind the CI for a
+  ratio effect (HR/OR/RR/IRR) when no bracketed CI is present. The p-back-derived CI recompute is
+  suppressed for an HR so its extraction-only CI verdict is never a false INCONSISTENT (a Cox HR p is
+  routinely an inequality; the reported CI is authoritative). Whole-corpus zero-FP sweep: 0 spurious
+  `hazard_ratio` rows on all 12 papers. **Scope note:** s41598-023-50401-z's 58 hazard ratios are ALL
+  in a docpluck-column-shredded survival table with no clean prose form, filed as docpluck DP-5
+  (`docs/DOCPLUCK_HANDOFF_2026-07-02.md`) — a docpluck extraction defect, not an effectcheck parse gap.
+  Regression tests in `tests/testthat/test-v0613-hazard-ratio.R`.
+
+- **E-mcnemar-chisq-OR** (cycle-2 canary re-audit, collabra.37122 loc 305) — a 1-df chi-square whose
+  ONLY reported effect size is an ODDS RATIO with a CI is a McNemar test, not a contingency /
+  goodness-of-fit chi-square (whose canonical effect is phi / Cramér's V; an OR comes from the 2×2
+  discordant-pair structure). Such a row now reroutes to `test_type = "mcnemar_or"` (an honest
+  extraction-only NOTE surfacing the OR + CI), instead of staying a chi-square whose OR is "unusual for
+  chi-square" and gets SKIPped as a likely extraction artifact. The mirror of the v0.6.5 rule ("a
+  V-bearing chi-square is contingency/gof, never McNemar"). Gated to `df1 == 1` + an OR effect + a
+  bound CI. Surfaced by an independent Sonnet re-audit (a Table-6 restatement of a McNemar finding the
+  paper's 3 other McNemar rows report in prose); re-audit confirmed the fix (4 McNemar rows now match
+  gold).
+
+- **E-ownclause-2arm** (cycle-2 canary re-audit, collabra.57785 loc 167) — an independent (Welch)
+  t-test whose OWN clause states two per-arm N's summing to the independent-samples total
+  (`n1 + n2 - 2 = df1`) — "(M = 4.75, SD = 1.36, N = 393) … (M = 4.22, SD = 1.33, N = 350),
+  t(741) = 5.36" (393 + 350 = 743 = 741 + 2) — now binds those two N's as `n1`/`n2`
+  (`N_source = "own_clause_arms"`) and sets the total N to their sum, eliminating a false "N = 393
+  implausibly small for df=741 (likely parsing error)" WARN and the empty `n1`/`n2`. The v0.6.11
+  E-subgroupN context scan required EXACTLY two N's across ±2 sentences, but a stats-dense results
+  section repeats the two arm N's in a neighbouring restatement (4+ copies), so that gate silently
+  failed. Placed AFTER the df1 dispatch (df1 is not assigned until later in the parse loop). Surfaced
+  + confirmed by an independent Sonnet re-audit.
+
+- **E-welch-n-clamp** (cycle-3 canary re-audit, cog_emo loc 284) — the Welch global-N override
+  back-computes N from the reported d (equal-groups `N = 4t²/d²`) when the bound N is a `global_text`
+  value implausibly larger than the Welch floor `df + 2`. For a SMALL effect the equal-groups
+  back-computation UNDERestimates N and can dip a few units below `df + 2`, which previously made the
+  guard reject the override and keep the implausible global N — corrupting the recomputed d to the
+  wrong sign/magnitude and firing a spurious WARN. The override now accepts a back-computed N within a
+  plausible band of the Welch minimum (`≥ 0.85·min_N_welch`) and CLAMPS it up to `df + 2`. Three
+  sibling Welch clauses in one sentence recovered N~530 but the 3rd (t=-1.93, d=0.17) kept the global
+  N=794; now N=523, WARN→NOTE.
+
+- **E-pairedci-indep-substring** (cycle-3 canary re-audit, cog_emo loc 284) — the v0.6.12 paired-CI-
+  unverifiable guard's within-subjects keyword regex used an UNANCHORED `dependent samples`
+  alternative, which matches as a substring of `INdependent samples`. So a genuinely independent-
+  samples Welch clause ("We conducted independent samples Welch's t-tests") was falsely treated as
+  within-subjects and its CI verdict capped at UNVERIFIABLE — masking a real reported-vs-computed CI
+  discrepancy. Anchored with a negative lookbehind `(?<!in)`. HIGH severity: affected any
+  independent-samples row with a computed CI. loc 284 now INCONSISTENT (correct); genuine
+  within-subjects paired rows still UNVERIFIABLE.
+
+- **E-corr-target-article-N** (cycle-3 canary re-audit, cog_emo loc 124) — a correlation explicitly
+  attributed to the TARGET / ORIGINAL article — a value a replication reproduces from the paper it
+  replicates (a "Table 2. Target article" intercorrelation block, or prose "the weakest effect in the
+  target article … r = 0.36") — now carries the TARGET article's OWN sample size, not the current
+  study's (global) N. For a bare `r` with no co-located N, the current study's global N is bound by
+  default, which is wrong for a target-article statistic. When BOTH the context names the
+  target/original article AND states that article's sample size ("target article's sample size of
+  239"), N is rebound to that value (loc 124: N=794→239, df=237, CI MATCH). A current-study r keeps
+  its own N. User-approved (bind the co-located target-article N).
+
+Two new `N_source` values (`own_clause_arms`) and two new `test_type`s (`bayes_factor`, `hazard_ratio`)
+are documented in API.md. Cycle-3's HR feature is orthogonal to the canary papers: 4 of the 5 canary
+renders were byte-IDENTICAL to their cycle-2 PASS renders (a deterministic diff carries the prior
+verdict), and cog_emo was re-audited PASS. Full suite 964 test_that blocks / 0 fail, `R CMD check
+--as-cran` 0E/0W. Residual canary findings are all docpluck-boundary and filed to
+`docs/DOCPLUCK_HANDOFF_2026-07-02.md` (DP-4 collabra.37122 loc-202 figure-caption CI truncation; DP-5
+s41598 shredded survival table; DP-6 cog_emo garbled Table-7 duplicate; DP-3
+collabra.57785 Table-8 Importance d/CI+design re-confirmed).
+
 # effectcheck 0.6.12
 
 **Three fixes from the 2026-07-02 escicheck-iterate cycle-1 canary re-audit (independent
