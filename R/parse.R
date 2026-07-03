@@ -985,6 +985,22 @@ parse_text <- function(text, context_window_size = 2) {
   pat_OR <- "(?:OR|odds\\s*ratio)\\s*=\\s*([-+]?\\d*\\.?\\d+)"
   pat_RR <- "(?:RR|risk\\s*ratio)\\s*=\\s*([-+]?\\d*\\.?\\d+)"
   pat_IRR <- "(?:IRR|incidence\\s*rate\\s*ratio)\\s*=\\s*([-+]?\\d*\\.?\\d+)"
+  # v0.6.13: hazard ratio (Cox proportional-hazards / survival analysis). Accepts
+  # the adjusted forms (aHR / adjusted HR) and the spelled-out "hazard ratio". The
+  # HR is an effect-size-only report with no recoverable test statistic (a Cox HR
+  # needs the full survival data), so check.R routes test_type "hazard_ratio" to an
+  # extraction-only NOTE surfacing HR + CI + p. The value must be bound TIGHTLY to
+  # the HR token by an explicit "=" / ":" / "of" (a bare "hazard ratio 95% CI ..."
+  # must NOT grab the "95" of "95% CI" -- a real FP seen on the s41598 shredded
+  # survival table). The value is also forbidden from being a percentage
+  # (negative lookahead on "%") and must look like a ratio (< 100). The standalone
+  # dispatch additionally requires a co-located CI so a passing "HR" mention never
+  # spuriously fires.
+  pat_hr <- paste0(
+    "(?:a?HR|adjusted\\s+HR|hazard\\s*ratio)\\s*",
+    "(?:=|:|\\bof\\b)\\s*",
+    "([-+]?(?:\\d{1,2}(?:\\.\\d+)?|0?\\.\\d+))(?!\\s*%)"
+  )
   # Cohen's h (effect size for proportion comparisons)
   pat_h <- "(?:Cohen'?s?\\s*h|\\bh\\b)\\s*=\\s*([-+]?\\d*\\.?\\d+)"
   # v0.3.0f: Cohen's w (chi-square effect size)
@@ -1006,6 +1022,22 @@ parse_text <- function(text, context_window_size = 2) {
   pat_CI2 <- "(?:CI|C\\.I\\.|confidence\\s*interval)\\s*(\\d+\\.?\\d*)%\\s*[:=]?\\s*\\[\\s*([-+]?\\d*\\.?\\d+)\\s*,\\s*([-+]?\\d*\\.?\\d+)\\s*\\]"
   pat_CI3 <- "\\[\\s*([-+]?\\d*\\.?\\d+)\\s*,\\s*([-+]?\\d*\\.?\\d+)\\s*\\]"
   pat_CI4 <- "\\(\\s*([-+]?\\d*\\.?\\d+)\\s*[;,]\\s*([-+]?\\d*\\.?\\d+)\\s*\\)"
+  # v0.6.13: medical / epidemiology CI reporting WITHOUT brackets, tightly anchored
+  # on an explicit "95% CI" phrase so it never fires on a bare numeric range. Two
+  # forms: a dash/en-dash/"to" range ("95% CI 1.54-2.28", "95% CI 1.40 to 3.00")
+  # and a colon/comma pair ("95% CI: 0.45, 0.85"). Only consulted (for HR / OR /
+  # RR ratio rows) when the bracketed pat_CI1..4 did not already bind a CI, so the
+  # existing psychology-corpus behaviour is unchanged. The leading bound may not be
+  # signed for a ratio (a hazard/odds/risk ratio and its CI bounds are all > 0),
+  # which also keeps this off a "difference = a - b" subtraction.
+  pat_CI_medical_range <- paste0(
+    "(\\d+\\.?\\d*)\\s*%\\s*(?:CI|C\\.I\\.|confidence\\s*interval)\\s*[:=]?\\s*",
+    "(\\d+\\.?\\d+)\\s*(?:-|\\x{2013}|\\x{2014}|\\bto\\b)\\s*(\\d+\\.?\\d+)"
+  )
+  pat_CI_medical_comma <- paste0(
+    "(\\d+\\.?\\d*)\\s*%\\s*(?:CI|C\\.I\\.|confidence\\s*interval)\\s*[:=]\\s*",
+    "(\\d+\\.?\\d+)\\s*,\\s*(\\d+\\.?\\d+)"
+  )
   # Pattern for standalone CI level (when stated separately from bounds)
   pat_CI_level <- "(\\d+\\.?\\d*)%\\s*(?:CI|C\\.I\\.|confidence\\s*interval)"
   # Pattern 5: "90% CI [-0.3, 1.2]" (with negative values)
@@ -1403,6 +1435,7 @@ parse_text <- function(text, context_window_size = 2) {
     m_OR <- stringr::str_match(s, pat_OR)
     m_RR <- stringr::str_match(s, pat_RR)
     m_IRR <- stringr::str_match(s, pat_IRR)
+    m_hr <- stringr::str_match(s, pat_hr)
     m_h <- stringr::str_match(s, pat_h)
     m_cohens_w <- stringr::str_match(s, pat_cohens_w)
     m_fallback_es <- stringr::str_match(s, pat_fallback_es)
@@ -1680,6 +1713,22 @@ parse_text <- function(text, context_window_size = 2) {
       # The OR token in the same sentence is picked up by the normal pat_OR match
       # (m_OR, below) and the effect-size + OR/CI machinery surfaces it; we only need
       # to claim the row here so it is not left unclassified.
+    } else if (!all(is.na(m_hr)) &&
+               grepl("\\d+\\s*%\\s*(?:CI|C\\.I\\.|confidence\\s*interval)|\\[\\s*[-+]?\\d*\\.?\\d+\\s*[,-]",
+                     s, perl = TRUE)) {
+      # v0.6.13 (hazard-ratio): a Cox proportional-hazards / survival-analysis
+      # hazard ratio reported in a clean prose sentence -- "HR = 1.87, 95% CI
+      # [1.54, 2.28], p < .01" (or aHR / adjusted HR / hazard ratio). No test
+      # statistic is recoverable (a Cox HR needs the full survival data), so
+      # check.R routes test_type "hazard_ratio" to an extraction-only NOTE that
+      # surfaces the HR + its CI + p. Gated to a CO-LOCATED CI (a "95% CI" phrase
+      # or a bracketed numeric range in the same sub-chunk) so a bare "HR" mention
+      # -- or the abbreviation used in prose ("the HR analysis") -- never fires.
+      # The HR value is bound as the reported effect by the effect-size dispatch
+      # below (effect_name "HR"). Column-shredded survival TABLES (where the
+      # univariate/multivariate HR/CI/p are interleaved and misaligned in the
+      # docpluck text) are a docpluck extraction defect, not handled here.
+      test_type <- "hazard_ratio"
     } else if (!all(is.na(m_H))) {
       # Kruskal-Wallis H(df) = value
       test_type <- "H"
@@ -1773,6 +1822,38 @@ parse_text <- function(text, context_window_size = 2) {
       stat_value <- numify(m_r_two_dfs[4])
       stat_value_decimals <- count_decimal_places(m_r_two_dfs[4])
       df_arity_mismatch <- TRUE
+    }
+
+    # v0.6.13 (E-ownclause-2arm): an independent t-test whose OWN sub-chunk `s`
+    # states exactly two per-arm N's that sum to the independent-samples total
+    # (n1 + n2 - 2 = df1) has those two N's bound as n1/n2, and the total N set to
+    # their sum. Placed AFTER the df1 dispatch (df1 is assigned above) and only
+    # when n1/n2 were not already resolved (the v0.6.11 E-subgroupN context scan
+    # requires EXACTLY two N's across +-2 sentences, but a stats-dense results
+    # section repeats the two arm N's in a neighbouring restatement, so the window
+    # holds 4+ copies and that gate silently fails -- leaving the FIRST arm N bound
+    # as a bogus TOTAL that check.R then flags "implausibly small for df"). The own
+    # clause is authoritative and unambiguous: exactly two distinct N's there,
+    # summing to df+2, ARE the per-arm sizes. collabra.57785 loc 167:
+    # "(M = 4.75, SD = 1.36, N = 393) ... (M = 4.22, SD = 1.33, N = 350),
+    # t(741) = 5.36 ... [independent Welch's t-test]" -- 393 + 350 = 743 = 741 + 2.
+    # Gated to a t-test with a resolved df1 and the two-N-sum == df+2 invariant, so
+    # a within/paired clause (sum would be df+1, not df+2) or an unrelated pair of
+    # N's never matches. Surfaced by the 2026-07-02 cycle-2 canary re-audit
+    # (WARN-FALSE-POSITIVE: n1/n2 unpopulated + a false "likely parsing error").
+    if (!is.na(test_type) && test_type == "t" &&
+        all(is.na(m_n1)) && all(is.na(m_n2)) && !is.na(df1)) {
+      own_arm_ns <- suppressWarnings(as.integer(
+        stringr::str_match_all(s, "\\b[Nn]\\s*=\\s*(\\d[\\d,]*\\d|\\d+)")[[1]][, 2]
+      ))
+      own_arm_ns <- own_arm_ns[!is.na(own_arm_ns)]
+      if (length(own_arm_ns) == 2L && length(unique(own_arm_ns)) == 2L &&
+          (own_arm_ns[1] + own_arm_ns[2]) == round(df1) + 2L) {
+        m_n1 <- matrix(c(NA, as.character(own_arm_ns[1])), nrow = 1)
+        m_n2 <- matrix(c(NA, as.character(own_arm_ns[2])), nrow = 1)
+        N_value <- sum(own_arm_ns)
+        N_source <- "own_clause_arms"
+      }
     }
 
     # Extract z_auxiliary for nonparametric tests
@@ -1966,6 +2047,15 @@ parse_text <- function(text, context_window_size = 2) {
       effect_name <- "IRR"
       effect_reported <- numify(m_IRR[2])
       effect_reported_decimals <- count_decimal_places(m_IRR[2])
+    } else if (!all(is.na(m_hr)) && !is.na(test_type) &&
+               test_type == "hazard_ratio") {
+      # v0.6.13: bind the hazard ratio as the reported effect, but ONLY for a row
+      # already classified hazard_ratio by the dispatch above (a co-located CI was
+      # required there) -- so a stray "HR" token in another test's sentence never
+      # binds as an effect size.
+      effect_name <- "HR"
+      effect_reported <- numify(m_hr[2])
+      effect_reported_decimals <- count_decimal_places(m_hr[2])
     } else if (!all(is.na(m_h))) {
       # Cohen's h - accept when co-occurring with a chi-square, z, or binomial
       # test (v0.6.2 adds binomial: the binomial-with-h pattern is the v0.6.2
@@ -2262,7 +2352,57 @@ parse_text <- function(text, context_window_size = 2) {
         ciL_reported_decimals <- count_decimal_places(m_median_diff[3])
         ciU_reported_decimals <- count_decimal_places(m_median_diff[4])
         if (is.na(ci_level)) { ci_level <- 0.95; ci_level_source <- "assumed_95" }
+      } else if (!is.na(effect_name) &&
+                 effect_name %in% c("HR", "OR", "RR", "IRR")) {
+        # v0.6.13: bracketless medical/epi CI for a ratio effect (HR / OR / RR /
+        # IRR). Tried only when pat_CI1..4 bound nothing AND the row's own effect is
+        # a ratio (so a bracketless "1.54-2.28" range can only be this ratio's CI,
+        # never a subtraction elsewhere). The "95% CI 1.54-2.28" / "95% CI: 0.45,
+        # 0.85" forms are common in survival / clinical reporting.
+        m_ci_med_range <- stringr::str_match(s, pat_CI_medical_range)
+        m_ci_med_comma <- stringr::str_match(s, pat_CI_medical_comma)
+        if (!all(is.na(m_ci_med_range))) {
+          ciL <- numify(m_ci_med_range[3])
+          ciU <- numify(m_ci_med_range[4])
+          ciL_reported_decimals <- count_decimal_places(m_ci_med_range[3])
+          ciU_reported_decimals <- count_decimal_places(m_ci_med_range[4])
+          if (is.na(ci_level)) {
+            ci_level <- numify(m_ci_med_range[2]) / 100
+            ci_level_source <- "inferred_from_context"
+          }
+        } else if (!all(is.na(m_ci_med_comma))) {
+          ciL <- numify(m_ci_med_comma[3])
+          ciU <- numify(m_ci_med_comma[4])
+          ciL_reported_decimals <- count_decimal_places(m_ci_med_comma[3])
+          ciU_reported_decimals <- count_decimal_places(m_ci_med_comma[4])
+          if (is.na(ci_level)) {
+            ci_level <- numify(m_ci_med_comma[2]) / 100
+            ci_level_source <- "inferred_from_context"
+          }
+        }
       }
+    }
+
+    # v0.6.13 (E-mcnemar-chisq-OR): a 1-df chi-square whose ONLY reported effect
+    # size is an ODDS RATIO with a CI is a McNemar test, not a contingency /
+    # goodness-of-fit chi-square. A contingency/gof chi-square's canonical effect
+    # is phi / Cramer's V; an odds ratio comes from the 2x2 discordant-pair
+    # structure of a McNemar test. This is the mirror of the v0.6.5 rule ("a
+    # V-bearing chi-square is contingency/gof, never McNemar"): here an OR-bearing
+    # 1-df chi-square is McNemar. Reroute to test_type "mcnemar_or" so check.R
+    # surfaces the OR + CI as an honest extraction-only NOTE, instead of leaving
+    # it a chisq row whose OR is "unusual for chi-square" and gets SKIPped as a
+    # likely extraction artifact. Caught by the 2026-07-02 cycle-2 canary re-audit
+    # (collabra.37122 loc 305: a Table-6 restatement "chi2(1, N = 265) = 0.00,
+    # OR = 0.99, 95% CI [0.77, 1.27]" of a McNemar finding the paper's 3 other
+    # McNemar rows report in prose). Gated to df1 == 1 (a 2x2 table) AND a bound
+    # CI AND effect_name == "OR" so a genuine contingency chi-square that also
+    # mentions an OR without a CI, or a >1-df chi-square, is untouched.
+    if (!is.na(test_type) && test_type == "chisq" &&
+        !is.na(effect_name) && effect_name == "OR" &&
+        !is.na(df1) && df1 == 1 &&
+        !is.na(ciL) && !is.na(ciU)) {
+      test_type <- "mcnemar_or"
     }
 
     # Only return row if we found a test statistic
@@ -2352,6 +2492,14 @@ parse_text <- function(text, context_window_size = 2) {
   # Filter out NULLs and rows without test statistics
   out <- out[!vapply(out, is.null, logical(1))]
   if (length(out) == 0) {
+    # v0.6.13 (F1): even when no test-statistic chunk parsed, a paper may still
+    # carry a standalone Bayes factor (a RoBMA meta-analysis whose only "results"
+    # in the extracted text are BF01 statements). Run the BF scan before the
+    # empty-tibble early return so those rows are not silently dropped.
+    bf_only <- .scan_standalone_bayes_factors(text_normalized)
+    if (!is.null(bf_only) && nrow(bf_only) > 0L) {
+      return(bf_only)
+    }
     return(tibble::tibble(
       location = integer(0),
       raw_text = character(0),
@@ -2536,7 +2684,201 @@ parse_text <- function(text, context_window_size = 2) {
     raw_out <- raw_out[keep_r, , drop = FALSE]
   }
 
+  # v0.6.13 (F1): standalone Bayes factor (BF01 / BF10) reported as a PRIMARY
+  # finding with no accompanying test statistic. RoBMA / Bayesian meta-analyses
+  # report the evidential Bayes factor for a meta-analytic property (publication
+  # bias, heterogeneity) as a first-class result, e.g. "moderate evidence for
+  # publication bias (BF01 = 0.11) ... weak evidence against heterogeneity
+  # (BF01 = 1.24)". These are NOT recomputable (no per-study data), so each is an
+  # extraction-only NOTE (check.R routes test_type "bayes_factor").
+  #
+  # Extraction is deliberately CONSERVATIVE (user-approved design,
+  # TRIAGE_iterate_2026-07-02.md F1): a bare `BF01 = <v>` matcher would flood
+  # every Bayesian paper -- collabra.90203 alone prints 13+ `BF01 =` values of
+  # which only 2 are standalone primary results; the other 11 are companions of
+  # an F / t test (their frequentist row is already extracted) or a
+  # model-averaged-r companion (already the v0.6.6 `r_model_averaged` row) or a
+  # DV-specific complementary Bayesian check. A qualifying standalone BF must
+  # satisfy ALL THREE, evaluated per-occurrence over a bounded window around the
+  # BF's own position (NOT the sub-chunk, which can hold two BFs -- the "0.11 ...
+  # 14.93" clause):
+  #   (1) ANCHOR: a primary-finding phrase within 70 chars BEFORE it -- one of
+  #       "evidence (for|against) <finding>", "in favo(u)r of the
+  #       (alternative|null)", or "Bayes factor (was|is|of|indicated|...)". Any
+  #       of the three admits the BF; a bare table-cell / definitional BF (no
+  #       such phrase within 70 chars) is excluded.
+  #   (2) NO co-located frequentist statistic within +/-60 chars: no F(/t(/t=/
+  #       r=/d=/OR=/chi/eta or a stripped-eta "= .0NN" token (excludes the F/t
+  #       companions AND the model-averaged-r companion whose clause carries
+  #       r = 0.002).
+  #   (3) NOT about an effect estimate: the ~55 chars before must not name
+  #       "(the|an|average|main) effect" (excludes "absence of the average
+  #       effect (BF01 = 14.93)" -> the model-averaged r, and "evidence against
+  #       an effect on moral responsibility (BF01 = 2.05)" -> a DV-specific
+  #       complementary check).
+  # The BF token itself accepts both "BF01"/"BF10" and the bare JASP/BayesFactor
+  # "B01"/"B10" forms. Validated by a whole-corpus guard-live-vs-bypassed
+  # false-positive sweep: fires on exactly BF01 = 0.11 (publication bias) +
+  # BF01 = 1.24 (heterogeneity) on collabra.90203 and B10 = 20841.04 +
+  # B10 = 1.25 on collabra.32572, and ZERO spurious rows on the other corpus
+  # papers (including the SPPS Bayesian papers).
+  bf_rows <- .scan_standalone_bayes_factors(text_normalized)
+  if (!is.null(bf_rows) && nrow(bf_rows) > 0L) {
+    raw_out <- dplyr::bind_rows(raw_out, bf_rows)
+  }
+
   raw_out
+}
+
+#' Scan normalized text for standalone (primary-finding) Bayes factors
+#'
+#' v0.6.13 (F1). Emits one extraction-only row per qualifying `BF01`/`BF10`
+#' occurrence (see the caller in `parse_text()` for the three-part discriminator
+#' rationale). Scans the FULL normalized text per-occurrence rather than
+#' per-sub-chunk, because a single clause can hold two Bayes factors ("... bias
+#' (BF01 = 0.11) ... absence of the average effect (BF01 = 14.93) ...") and only
+#' one is a standalone primary result.
+#'
+#' @param text_normalized The normalized full text (from `normalize_text()`).
+#' @return A tibble of `test_type = "bayes_factor"` rows bindable to the
+#'   `parse_text()` output, or NULL when none qualify. Each row carries the BF in
+#'   `effect_reported` (named `BF01` or `BF10`), no test statistic, no p.
+#' @keywords internal
+.scan_standalone_bayes_factors <- function(text_normalized) {
+  if (is.null(text_normalized) || length(text_normalized) == 0L ||
+      !nzchar(text_normalized)) {
+    return(NULL)
+  }
+  # Match a Bayes factor "BF01 / BF10 / B01 / B10 = <num>" (requires the "=" and a
+  # numeric value, which alone excludes table-column headers and prose definitions
+  # that carry no value). The "F" is optional: JASP / the BayesFactor R package
+  # print the bare "B10" / "B01" form (collabra.32572: "B10 = 20841.04"). Capture
+  # the subscript (01/10) and the value.
+  bf_pat <- "\\bB\\s*F?\\s*(01|10)\\s*=\\s*([0-9]+(?:\\.[0-9]+)?)"
+  mm <- gregexpr(bf_pat, text_normalized, perl = TRUE)[[1]]
+  if (length(mm) == 0L || mm[1] == -1L) return(NULL)
+  match_len <- attr(mm, "match.length")
+
+  # Effect / test tokens that mark a co-located frequentist result (guard 2). The
+  # "= .0NN" alternative catches a docpluck-stripped eta glyph ("F(2,998)=..., =
+  # .008") whose eta symbol has no ToUnicode mapping and prints as a nameless
+  # "= .0NN". Case-insensitive.
+  effect_tok <- paste0(
+    "F\\s*[\\(\\[]", "|\\bt\\s*\\(", "|\\bt\\s*=", "|\\br\\s*=",
+    "|\\bd\\s*=", "|eta", "|chi", "|\\bOR\\s*=", "|=\\s*\\.[0-9]"
+  )
+  # An "effect"-estimate subject immediately before the BF (guard 3): "the/an/
+  # average/main effect", incl. "absence of the average effect".
+  effect_subject <- paste0(
+    "(?:average|main|the|an|absence of the)\\s+",
+    "(?:average\\s+|main\\s+)?effect"
+  )
+
+  keep_txt <- character(0)
+  keep_name <- character(0)
+  keep_val <- numeric(0)
+  keep_dec <- integer(0)
+  keep_ctx <- character(0)
+  n_chars <- nchar(text_normalized)
+  for (i in seq_along(mm)) {
+    p <- mm[i]
+    len <- match_len[i]
+    # Collapse any internal whitespace (the pattern's \s* can span a line break
+    # when the token wraps, e.g. "BF01\n= 1.24") so the subscript / value are
+    # extracted from a clean single-line form and never carry a stray newline
+    # into effect_reported_name.
+    match_str <- gsub("\\s+", " ", substr(text_normalized, p, p + len - 1L))
+    # subscript (01 / 10) and the numeric value from this occurrence
+    bf_sub <- sub(".*\\bB\\s*F?\\s*(01|10).*", "\\1", match_str, perl = TRUE)
+    val_str <- sub(".*=\\s*", "", match_str)
+    bf_val <- suppressWarnings(as.numeric(val_str))
+    if (is.na(bf_val)) next
+
+    # (1) primary-finding anchor within 70 chars before. A standalone Bayes factor
+    # is introduced by one of a small set of tight lexical forms: an
+    # "evidence (for|against) <finding>" clause (collabra.90203: "evidence for
+    # publication bias (BF01 = 0.11)"), an "in favo(u)r of the (alternative|null)"
+    # verdict (collabra.32572: "the data was in favor of the alternative
+    # hypothesis, B10 = 20841.04"), or a bare "Bayes factor was/is/of/indicated/…"
+    # report (collabra.32572: "The Bayes factor was B10 = 1.25"). All three are
+    # PRIMARY-finding phrasings; a bare table-cell / definitional BF (no such
+    # phrase within 70 chars) is excluded.
+    pre70 <- substr(text_normalized, max(1L, p - 70L), p - 1L)
+    has_anchor <- grepl(
+      paste0(
+        "evidence\\s+(?:for|against)",
+        "|in\\s+favou?r\\s+of\\s+the\\s+(?:alternative|null)",
+        "|Bayes\\s+factor(?:s)?\\s+(?:was|is|of|indicated|were|suggests?|show(?:ed|s)?)"
+      ),
+      pre70, ignore.case = TRUE, perl = TRUE)
+    if (!has_anchor) next
+
+    # (2) no co-located frequentist statistic within +/-60 chars
+    span_lo <- max(1L, p - 60L)
+    span_hi <- min(n_chars, p + len + 60L)
+    span <- substr(text_normalized, span_lo, span_hi)
+    if (grepl(effect_tok, span, ignore.case = TRUE, perl = TRUE)) next
+
+    # (3) not an effect-estimate subject
+    pre55 <- substr(text_normalized, max(1L, p - 55L), p - 1L)
+    if (grepl(effect_subject, pre55, ignore.case = TRUE, perl = TRUE)) next
+
+    keep_txt  <- c(keep_txt, trimws(substr(text_normalized, span_lo, min(n_chars, p + len + 5L))))
+    keep_name <- c(keep_name, paste0("BF", bf_sub))
+    keep_val  <- c(keep_val, bf_val)
+    keep_dec  <- c(keep_dec, count_decimal_places(val_str))
+    keep_ctx  <- c(keep_ctx, trimws(substr(text_normalized, max(1L, p - 90L),
+                                           min(n_chars, p + len + 30L))))
+  }
+  if (length(keep_val) == 0L) return(NULL)
+
+  tibble::tibble(
+    location = NA_integer_,
+    raw_text = keep_txt,
+    context_window = keep_ctx,
+    test_type = "bayes_factor",
+    df1 = NA_real_,
+    df2 = NA_real_,
+    stat_value = NA_real_,
+    p_reported = NA_real_,
+    p_symbol = NA_character_,
+    p_valid = FALSE,
+    p_out_of_range = FALSE,
+    p_decimal_corrected = FALSE,
+    p_ns = FALSE,
+    one_tailed_detected = FALSE,
+    two_tailed_detected = FALSE,
+    method_context_detected = FALSE,
+    method_context_in_chunk = FALSE,
+    N = NA_real_,
+    N_source = NA_character_,
+    N_candidates_str = NA_character_,
+    n1 = NA_real_,
+    n2 = NA_real_,
+    table_r = NA_real_,
+    table_c = NA_real_,
+    effect_reported_name = keep_name,
+    effect_reported = keep_val,
+    effect_reported_decimals = keep_dec,
+    stat_value_decimals = NA_integer_,
+    effect_fallback = FALSE,
+    eta = NA_real_,
+    ci_level = NA_real_,
+    ci_level_source = NA_character_,
+    ciL_reported = NA_real_,
+    ciU_reported = NA_real_,
+    ciL_reported_decimals = NA_integer_,
+    ciU_reported_decimals = NA_integer_,
+    z_auxiliary = NA_real_,
+    b_coeff = NA_real_,
+    SE_coeff = NA_real_,
+    adj_R2 = NA_real_,
+    df_arity_mismatch = FALSE,
+    arm1_events = NA_real_,
+    arm1_total  = NA_real_,
+    arm2_events = NA_real_,
+    arm2_total  = NA_real_
+  )
 }
 
 #' Map docpluck structured table rows to parsed-statistic rows

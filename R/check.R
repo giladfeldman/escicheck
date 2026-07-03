@@ -920,6 +920,7 @@ compute_and_compare_one <- function(row,
     "or" = "OR", "odds ratio" = "OR",
     "rr" = "RR", "risk ratio" = "RR",
     "irr" = "IRR", "incidence rate ratio" = "IRR",
+    "hr" = "HR", "ahr" = "HR", "adjusted hr" = "HR", "hazard ratio" = "HR",
     "h" = "h", "cohen's h" = "h", "cohens h" = "h",
     "w" = "cohens_w", "cohen's w" = "cohens_w", "cohens w" = "cohens_w",
     "cohens_w" = "cohens_w",
@@ -1149,11 +1150,23 @@ compute_and_compare_one <- function(row,
           # Global N is much larger than df+2 -- likely from a different study.
           # Cross-validate: back-compute N from reported d (equal-n assumption)
           N_from_d <- round(4 * stat^2 / effect_reported^2)
-          # Allow small tolerance: back-computation assumes equal groups, which
-          # may underestimate N slightly relative to df+2
-          if (N_from_d >= (min_N_welch - 5) && N_from_d < N) {
+          # The equal-groups back-computation UNDERestimates N (unequal Welch groups
+          # need more total N for the same df), so a SMALL effect can push N_from_d a
+          # little below the Welch floor df+2 -- but the global N is still confirmed
+          # implausible by the outer `N > 1.5*min_N_welch` guard, so keeping it is
+          # wrong. When the back-computation lands within a plausible band of the
+          # Welch minimum (>= 0.85*min, i.e. not a garbled d) AND below the global N,
+          # override the global N with the back-computed value CLAMPED UP to the
+          # Welch floor (N can never be below df+2). Without the clamp, a small-d
+          # Welch clause whose N_from_d dipped a few units under df+2 was rejected
+          # outright and kept the implausible global N, corrupting the recomputed d
+          # to the wrong sign/magnitude and firing a spurious WARN. cog_emo
+          # (2026-07-02 cycle-3 audit): three sibling Welch clauses in one sentence
+          # -- t=12.58/d=1.09 and t=10.23/d=0.89 recovered N~530, but t=-1.93/d=0.17
+          # left N=794 because N_from_d=516 was 2 units under min_N_welch-5.
+          if (N_from_d >= round(0.85 * min_N_welch) && N_from_d < N) {
             N_original <- N
-            N <- N_from_d
+            N <- max(N_from_d, min_N_welch)
             assumptions <- c(assumptions,
               sprintf("Welch: global N=%d likely from different study; used N=%d from reported d",
                       as.integer(N_original), as.integer(N)))
@@ -1770,6 +1783,53 @@ compute_and_compare_one <- function(row,
                 as.integer(N_ctx_mismatch), as.integer(df1),
                 as.integer(df1 + 2), as.integer(df1 + 2)))
       N_source <- "corr_df_plus_2"
+    }
+
+    # v0.6.13 (E-corr-target-article-N): a correlation explicitly attributed to the
+    # TARGET / ORIGINAL article -- a value the replication reproduces from the paper
+    # it is replicating (e.g. a "Table 2. Target article" intercorrelation block, or
+    # prose "the weakest effect in the target article ... r = 0.36") -- must carry
+    # the TARGET article's own sample size, not the current study's (global) N. The
+    # current study's global N is bound by default for a bare `r` with no co-located
+    # N, which is wrong for a target-article statistic. When (a) the row's OWN clause
+    # names "the target/original article/study" AND (b) the context states that
+    # article's sample size ("target article's sample size of 239", "original study
+    # ... N = 239"), rebind N to that stated value. Tightly anchored: BOTH cues
+    # required, and only for a correlation whose bound N came from the global text
+    # (never overriding a co-located own-clause N or an explicit r(df)). cog_emo
+    # (Chan & Feldman replication of McCullough et al. 1997): loc 124 r = 0.36 in
+    # "the target article", whose Method states "we followed the target article's
+    # sample size of 239 participants" -- N was bound to the study's global 794.
+    n_src_now <- if ("N_source" %in% names(row) && length(row$N_source) > 0)
+      as.character(row$N_source[1]) else NA_character_
+    if (!is.na(n_src_now) && n_src_now == "global_text") {
+      # The bare `r` is split into its own tiny sub-chunk, so the "target article"
+      # attribution that shares its sentence lands in the context window, not the
+      # raw_text -- read the attribution from the context (still requiring the
+      # target-article SAMPLE-SIZE statement below, so both cues must co-occur).
+      ctx_txt <- if ("context_window" %in% names(row) && length(row$context_window) > 0)
+        as.character(row$context_window[1]) else ""
+      own_names_target <- grepl(
+        "\\b(?:target|original)\\s+(?:article|study|paper)", ctx_txt,
+        ignore.case = TRUE, perl = TRUE)
+      m_tgt_n <- stringr::str_match(ctx_txt, paste0(
+        "(?i)(?:target|original)\\s+(?:article|study|paper)(?:'s)?[^.]{0,40}?",
+        "(?:sample\\s*size\\s*(?:of|was|=|:)?|\\bN\\s*(?:of|=|:)?)\\s*(\\d[\\d,]*\\d|\\d+)"))
+      if (own_names_target && !all(is.na(m_tgt_n))) {
+        tgt_n <- suppressWarnings(as.integer(gsub(",", "", m_tgt_n[2])))
+        if (!is.na(tgt_n) && tgt_n > 2 && (is.na(N) || tgt_n != N)) {
+          N_tgt_prev <- N
+          N <- tgt_n
+          df1 <- N - 2
+          N_source <- "target_article_n"
+          uncertainty <- c(uncertainty,
+            sprintf(paste0("Correlation attributed to the target/original article; N ",
+                           "rebound to the target article's stated sample size (%d), not ",
+                           "the current study's N (%s)."),
+                    as.integer(tgt_n),
+                    if (is.na(N_tgt_prev)) "NA" else as.character(as.integer(N_tgt_prev))))
+        }
+      }
     }
 
     r_value <- stat # For r tests, the statistic IS the effect size
@@ -3377,6 +3437,47 @@ compute_and_compare_one <- function(row,
             "statistic, df, or effect size accompany it (the interaction test",
             "statistic is typically reported only in a supplementary table), so",
             "the result cannot be independently recomputed (extraction-only)."))
+  } else if (tt == "bayes_factor") {
+    # ------ STANDALONE BAYES FACTOR (BF01 / BF10) ------
+    # v0.6.13 (F1): a standalone evidential Bayes factor reported as a PRIMARY
+    # finding of a RoBMA / Bayesian meta-analysis -- an evidential statement about
+    # a meta-analytic property (publication bias, heterogeneity), not a
+    # frequentist test with a recomputable p or effect. parse.R
+    # (.scan_standalone_bayes_factors) bound the Bayes factor as the reported
+    # effect (effect_reported_name = "BF01"/"BF10") with no test statistic. A
+    # Bayes factor is NOT independently recomputable from the reported text (it
+    # needs the per-study effect estimates + the model priors), so this is an
+    # extraction-only NOTE that faithfully surfaces the reported BF. The
+    # conservative parse guard keeps every companion / definitional / table-cell
+    # BF out (see parse.R); this branch only ever sees standalone primary ones.
+    # collabra.90203 (Identifiable Victim replication+extension, RoBMA reanalysis
+    # of Lee & Feeley 2016): BF01 = 0.11 (publication bias) + BF01 = 1.24
+    # (heterogeneity).
+    check_type <- "extraction_only"
+    reported_type <- effect_reported_name  # "BF01" or "BF10"
+    matched_value <- NA_real_
+    matched_variant <- NA_character_
+    delta_effect_abs <- NA_real_
+    # A standalone Bayes factor has no sample-size semantics for verification;
+    # keep any N the generic extraction may have bled cleared (mirrors
+    # interaction_p / mediation_indirect). parse.R already sets N = NA for these
+    # rows, but clear defensively so nothing downstream recomputes with a stray N.
+    N <- NA_real_
+    N_source <- NA_character_
+    bf_dir <- if (!is.na(effect_reported_name) &&
+                  identical(effect_reported_name, "BF10")) {
+      "in favor of the alternative (H1)"
+    } else {
+      "in favor of the null (H0)"
+    }
+    bf_name <- if (!is.na(effect_reported_name)) effect_reported_name else "BF01"
+    uncertainty <- c(uncertainty,
+      paste0("Standalone Bayes factor (", bf_name,
+             " = ", format(effect_reported, trim = TRUE),
+             ", evidence ", bf_dir, ") extracted as a primary Bayesian-analysis ",
+             "finding. A Bayes factor is not independently recomputable from the ",
+             "reported text (it requires the per-study estimates and model priors), ",
+             "so it is surfaced as reported (extraction-only)."))
   } else if (tt == "mediation_indirect") {
     # ------ MEDIATION INDIRECT EFFECT (Sobel Z) ------
     # v0.6.10 (E-mediation): a bootstrapped mediation indirect effect reported with
@@ -3426,6 +3527,31 @@ compute_and_compare_one <- function(row,
             "and its CI/p are surfaced, but the OR is not independently recomputable",
             "from the reported statistics (it needs the discordant-pair counts), so",
             "this is extraction-only."))
+  } else if (tt == "hazard_ratio") {
+    # ------ HAZARD RATIO (Cox proportional-hazards / survival analysis) ------
+    # v0.6.13: a hazard ratio reported in a clean prose sentence -- "HR = 1.87,
+    # 95% CI [1.54, 2.28], p < .01" (or aHR / adjusted HR / hazard ratio).
+    # parse.R bound the HR as the reported effect (effect_reported_name = "HR")
+    # with no test statistic. A Cox HR is NOT independently recomputable from the
+    # reported numbers (it needs the full time-to-event survival data), so this is
+    # an extraction-only NOTE that surfaces the HR + its reported CI + p. The
+    # reported CI's internal consistency (estimate strictly inside the interval;
+    # bounds > 0 for a ratio) is checked by the OR/ratio-CI machinery below (a
+    # hazard ratio and its CI are log-normal, exactly like an odds ratio).
+    check_type <- "extraction_only"
+    reported_type <- "HR"
+    matched_value <- NA_real_
+    matched_variant <- NA_character_
+    delta_effect_abs <- NA_real_
+    # A hazard ratio carries no sample-size semantics for verification; clear any N
+    # the generic extraction may have bled from the surrounding context.
+    N <- NA_real_
+    N_source <- NA_character_
+    uncertainty <- c(uncertainty,
+      paste("Hazard ratio (Cox proportional-hazards / survival analysis) reported:",
+            "the HR and its CI/p are surfaced, but a hazard ratio is not",
+            "independently recomputable from the reported statistics (it needs the",
+            "full time-to-event data), so this is extraction-only."))
   } else if (tt == "dscf") {
     # ------ DSCF (Dwass-Steel-Critchlow-Fligner) POST-HOC W ------
     # The DSCF W is the studentized-range statistic of a Kruskal-Wallis
@@ -3447,14 +3573,26 @@ compute_and_compare_one <- function(row,
   # computed CI delta. Inputs: SE_logOR (rare), p-value (back-derived SE), or
   # 2x2 cells (rare in psychology corpora).
   # ============================================================================
-  if (!is.na(canonical_type) && canonical_type == "OR" &&
+  if (!is.na(canonical_type) && canonical_type %in% c("OR", "HR") &&
       !is.na(effect_reported) && effect_reported > 0) {
+    # v0.6.13: a hazard ratio shares the odds ratio's log-normal CI structure, so
+    # the same ci_OR_all() machinery surfaces a computed CI for an HR too. But for
+    # an HR the row is extraction-only and its reported CI is authoritative -- do
+    # NOT back-derive an SE from the reported p to recompute-and-compare (a Cox HR
+    # p is routinely an inequality like "< .01", and a p-derived CI is only an
+    # over-approximation, so comparing it against the reported CI and declaring
+    # INCONSISTENT would falsely imply the reported values are wrong -- the same
+    # trap the v0.6.12 E-pairedci fix closed for within-subjects d). Pass
+    # p_value = NULL for HR so only the estimate-in-CI structural invariant is
+    # surfaced; the OR path keeps its p-back-derivation.
     OR_ci_all <- ci_OR_all(
       OR = effect_reported,
       SE_logOR = NULL,
       level = ci_level_used,
       cells = NULL,
-      p_value = if (!is.na(p_reported) && p_reported > 0 && p_reported < 1) p_reported else NULL
+      p_value = if (identical(canonical_type, "HR")) NULL
+                else if (!is.na(p_reported) && p_reported > 0 && p_reported < 1) p_reported
+                else NULL
     )
     if (length(OR_ci_all) > 0L) {
       primary <- OR_ci_all[[1]]
@@ -3876,8 +4014,16 @@ compute_and_compare_one <- function(row,
                      if ("raw_text" %in% names(row) && length(row$raw_text) > 0) as.character(row$raw_text[1]) else "",
                      if ("context_window" %in% names(row) && length(row$context_window) > 0) as.character(row$context_window[1]) else ""
                    ))
+                   # v0.6.13 (E-pairedci-indep-substring): anchor "dependent
+                   # samples" with a negative lookbehind so it does NOT match as a
+                   # substring of "INdependent samples" -- an independent-samples
+                   # Welch clause ("We conducted independent samples Welch's
+                   # t-tests", cog_emo) was being falsely treated as within-subjects,
+                   # capping a genuinely independent row's CI verdict at UNVERIFIABLE
+                   # and masking a real INCONSISTENT. The other alternatives have no
+                   # such substring collision.
                    .within_kw <- grepl(
-                     "paired|repeated measures|within-subjects|within subjects|dependent samples|pre-post|before-after",
+                     "paired|repeated measures|within-subjects|within subjects|(?<!in)dependent samples|pre-post|before-after",
                      .ci_ctx, perl = TRUE)
                    .within_es <- !is.na(canonical_type) && canonical_type %in% c("dz", "dav", "drm")
                    .within_kw || .within_es
@@ -5662,9 +5808,14 @@ compute_and_compare_one <- function(row,
   # row surfaces the indirect effect + its bootstrapped CI + the Sobel Z, so it is a
   # NOTE (not a "nothing checked" SKIP) -- the reported effect and CI are real
   # extracted values a consumer wants to see (collabra.126266 H2/H5 mediation).
+  # v0.6.13 (F1): also exclude a standalone Bayes factor. The row surfaces the
+  # reported BF01 / BF10 as a primary Bayesian-analysis finding -- a real extracted
+  # value the consumer wants to see, so it is a NOTE, not a "nothing checked" SKIP
+  # (collabra.90203 BF01 = 0.11 publication bias, BF01 = 1.24 heterogeneity).
   if (check_type == "extraction_only" && !decision_error && !p_ns &&
       !r_ci_surfaced && !bayes_model_avg_surfaced &&
-      !(tt %in% c("mediation_indirect", "mcnemar_or"))) {
+      !(tt %in% c("mediation_indirect", "mcnemar_or", "bayes_factor",
+                  "hazard_ratio"))) {
     status <- "SKIP"
   }
 
@@ -6374,7 +6525,7 @@ check_text <- function(text,
                                  "regression", "spearman", "kendall", "kendall_w",
                                  "dscf", "cochran_q", "RR", "rdpct", "md_hl",
                                  "binomial", "interaction_p", "mediation_indirect",
-                                 "mcnemar_or"),
+                                 "mcnemar_or", "bayes_factor", "hazard_ratio"),
                        ci_level = 0.95,
                        alpha = 0.05,
                        one_tailed = FALSE,
