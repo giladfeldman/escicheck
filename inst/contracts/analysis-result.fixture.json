@@ -1,0 +1,32 @@
+{
+  "schemaVersion": 1,
+  "requiredFields": [
+    "source",
+    "test_type",
+    "stat_value",
+    "df1",
+    "df2",
+    "p_reported",
+    "p_computed",
+    "status",
+    "decision_error"
+  ],
+  "statuses": ["PASS", "OK", "NOTE", "WARN", "ERROR", "SKIP"],
+  "testTypes": [
+    "t", "F", "r", "chisq", "z", "U", "W", "H", "regression",
+    "spearman", "kendall", "kendall_w", "dscf", "cochran_q", "binomial",
+    "RR", "rdpct", "md_hl", "interaction_p", "mediation_indirect",
+    "mcnemar_or", "bayes_factor", "hazard_ratio", "table_estimate"
+  ],
+  "sample": {
+    "source": "text",
+    "test_type": "t",
+    "stat_value": 2.31,
+    "df1": 48,
+    "df2": null,
+    "p_reported": 0.025,
+    "p_computed": 0.025,
+    "status": "PASS",
+    "decision_error": false
+  }
+}

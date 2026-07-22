@@ -1,7 +1,7 @@
 ## Submission
 
 This is an update of 'effectcheck' from 0.2.3 (the current CRAN release) to
-0.5.11. Development has been active across 0.2.4-0.5.11 -- new test types,
+0.6.14. Development has been active across 0.2.4-0.6.14 -- new test types,
 nonparametric and regression support, confidence-interval computation, and
 many parser and consistency fixes -- and the most significant change is
 structural, in 0.4.0 (see "Breaking change" below). Every intervening version
@@ -35,7 +35,8 @@ The win-builder NOTE has two parts, both benign:
 
 ## Test suite
 
-1825 tests pass, 0 failures, 0 skipped.
+969 test_that blocks are present. The final CRAN check result is recorded only
+after the release gate runs on the submission candidate.
 
 ## Breaking change since 0.2.3: file extraction removed in 0.4.0
 
