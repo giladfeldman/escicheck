@@ -2628,8 +2628,24 @@ parse_text <- function(text, context_window_size = 2) {
       if (length(idx) > 1L) {
         # Prefer rows whose raw_text has a parenthesized form (body text).
         paren_idx <- idx[has_paren[idx]]
-        if (length(paren_idx) > 0L) {
-          # Keep the FIRST parenthesized row, drop all others in this key
+        if (length(paren_idx) >= 2L) {
+          # v0.6.14 (E-corr-two-prose): TWO OR MORE parenthesized body rows share
+          # this key. This dedup exists to collapse a body-text row against its
+          # TABLE-FRAGMENT restatement (paren body form + non-paren `r = -.43`
+          # table cell) -- NOT to collapse two distinct prose reports. A paper can
+          # report two genuinely different correlations that coincidentally share
+          # the same r, df, N and carry no CI to tell them apart -- e.g.
+          # collabra.23443's H2A "willingness to donate" r(797) = .16 and H2C
+          # "estimates of others" r(797) = .16 (different variables, different
+          # clauses). Both are parenthesized `r(797)` prose forms, so neither is a
+          # table fragment; collapsing them silently drops a real second result
+          # (PARSE-MISS). Keep EVERY parenthesized body row; drop only the
+          # non-parenthesized fragment(s) in this key group.
+          keep[idx] <- FALSE
+          keep[paren_idx] <- TRUE
+        } else if (length(paren_idx) == 1L) {
+          # Exactly one parenthesized body row + one-or-more non-paren fragments:
+          # the classic body-vs-table-fragment duplicate. Keep the body row.
           keep[idx] <- FALSE
           keep[paren_idx[1L]] <- TRUE
         } else {

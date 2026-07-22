@@ -1,3 +1,16 @@
+# effectcheck 0.6.14
+
+**Correlation deduplication correctness fix.**
+
+- **E-corr-two-prose** — correlation deduplication now preserves two distinct
+  prose findings that happen to have the same reported `r`, df, and inferred
+  N. The earlier body-versus-table-fragment safeguard treated every matching
+  parenthesized `r(df)` row as one finding, silently dropping a real second
+  correlation when a paper reported the same numeric value for different
+  variables. The deduplication now keeps all parenthesized prose rows and
+  removes only their non-parenthesized table-fragment counterparts. Regression
+  coverage is in `tests/testthat/test-v0614-corr-two-prose-not-collapsed.R`.
+
 # effectcheck 0.6.13
 
 **Two new test types + two canary-re-audit fixes from the 2026-07-02 escicheck-iterate cycles 2-3
