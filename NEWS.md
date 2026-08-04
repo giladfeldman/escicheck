@@ -1,3 +1,34 @@
+# effectcheck 0.6.15
+
+**Restatement guard for the v0.6.14 prose-dedup un-collapse + Mode B typed-n binding.**
+
+- **E-modeb-t-n** — Mode B (`check_text(table_rows=)`) now binds a typed `n`
+  field on a t-test table row. docpluck types a per-sample `n` column on rows
+  that print n but NOT df (collabra.23443 Table 5:
+  `{t: 16.6, d: 0.59, n: 799, CI [0.51, 0.66]}`); the t branch previously
+  discarded it (only the r branch consumed `fields.n`), so such rows carried no
+  N and fell to SKIP/insufficient_data even though the sample size was
+  delivered. With N bound, the reported d verifies against the dz / d_ind
+  variant family (Table 5's d = 0.59 matches dz = 16.6/sqrt(799) = 0.587 —
+  SKIP -> PASS). Surfaced by the 2026-08-03 Sonnet canary audit; regression
+  tests in `tests/testthat/test-v0615-modeb-t-n-binding.R`.
+
+- **E-corr-two-prose-ci-gate** — v0.6.14's un-collapse of same-key parenthesized
+  prose rows was CI-blind, so a RESTATED finding that repeats its own CI
+  verbatim ("we ran a two-tailed paired t-test ... t(742) = 3.15, d = 0.15,
+  95% CI [0.07, 0.22]" later restated as "Additionally, as reported in Study
+  3A, ... t(742) = 3.15, d = 0.15, 95% CI [0.07, 0.22]" -- collabra.57785)
+  double-counted as two results. The un-collapse now fires ONLY when the key
+  group reports NO CI: an identical non-NA reported CI marks a restatement of
+  one finding (a repeated report quotes its own CI; two genuinely-distinct
+  results sharing stat, df, N, effect AND exact CI bounds is not a real case),
+  which still collapses to the first parenthesized row. The collabra.23443
+  H2A/H2C same-r-no-CI case (the v0.6.14 motivation) is unaffected -- both
+  distinct correlations are still kept. Caught by the 2026-07-04
+  whole-corpus baseline-vs-fixed render diff (57785: 23 -> 24 rows);
+  regression test added to
+  `tests/testthat/test-v0614-corr-two-prose-not-collapsed.R`.
+
 # effectcheck 0.6.14
 
 **Correlation deduplication correctness fix.**
