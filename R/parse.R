@@ -32,7 +32,7 @@ normalize_text <- function(x) {
   # --- Minus/dash variants (all to ASCII hyphen-minus) ---
   x <- gsub("\u2212", "-", x)  # Unicode minus sign (U+2212)
   # U+FFFD context-aware recovery: in effect-size context, likely corrupted eta-squared
-  # Pattern: ", FFFD = 0.04" or ", FFFD = 0.04, 90% CI" (pdftotext corrupts η² to U+FFFD)
+  # Pattern: ", FFFD = 0.04" or ", FFFD = 0.04, 90% CI" (pdftotext corrupts eta-squared (Greek eta + 2) to U+FFFD)
   x <- gsub(",\\s*\uFFFD\\s*=\\s*([-+]?\\d)", ", eta-squared = \\1", x, perl = TRUE)
   x <- gsub("\\b\uFFFD\\s*=\\s*([-+]?\\d)", "eta-squared = \\1", x, perl = TRUE)
   x <- gsub("\uFFFD", "-", x)  # Remaining U+FFFD to dash (genuine minus signs)
@@ -172,7 +172,7 @@ normalize_text <- function(x) {
   x <- gsub("\u00B2", "^2", x)
 
   # Greek letter + regular digit 2 (pdftotext -enc UTF-8 output):
-  # η2 → eta-squared, ω2 → omega-squared, ε2 → epsilon-squared
+  # Greek eta2 -> eta-squared, omega2 -> omega-squared, epsilon2 -> epsilon-squared
   x <- gsub("\u03b7\\s*2\\s*=", "eta-squared =", x, perl = TRUE)
   x <- gsub("\u03c9\\s*2\\s*=", "omega-squared =", x, perl = TRUE)
   x <- gsub("\u03b5\\s*2\\s*=", "epsilon-squared =", x, perl = TRUE)
@@ -334,7 +334,7 @@ normalize_text <- function(x) {
   # This fixes cases like "p = \n0.837" or "p = on social distance\n0.837" -> "p = 0.837"
   # Allow up to 50 chars of text between p= and the number (to handle OCR errors)
   # Guard: if there's already a valid p-value right after p=, don't replace
-  # v0.3.0d fix: old (?![.0]?\d) failed on "0.001" — [.0]? ate '0', then \d couldn't match '.'
+  # v0.3.0d fix: old (?![.0]?\d) failed on "0.001" -- [.0]? ate '0', then \d couldn't match '.'
   # Fix uses [ \t]*+ (possessive horizontal whitespace) after [<=>] to prevent two bugs:
   # 1. Backtracking: \s* would backtrack past space, lookahead sees space not digit, fires
   # 2. Newline eating: \s*+ would consume \n, leaving nothing for the \n literal in pattern
@@ -373,7 +373,7 @@ normalize_text <- function(x) {
   # ============================================================================
 
   # Fix "p < 001" -> "p < .001" (missing dot before 001)
-  # This is always an artifact — "001" is never a valid p-value representation
+  # This is always an artifact -- "001" is never a valid p-value representation
   x <- gsub("(p\\s*<\\s*)001\\b", "\\1.001", x, perl = TRUE)
 
   # Fix "p = NNN" where NNN has 3+ digits -> "p = .NNN"
@@ -438,11 +438,11 @@ numify_int <- function(x) {
 #'
 #' Counts trailing digits after the decimal point in a numeric string,
 #' preserving trailing zeros (which numify() loses). Used for APA-precision
-#' tracking — "0.0400" returns 4, "0.04" returns 2, "2" returns 0.
+#' tracking -- "0.0400" returns 4, "0.04" returns 2, "2" returns 0.
 #'
 #' Must be called on the raw regex match group, before numify().
 #'
-#' @param x Character (single value) — the raw matched string
+#' @param x Character (single value) -- the raw matched string
 #' @return Integer count of decimal places, or NA_integer_ if input is NA/empty
 #' @keywords internal
 count_decimal_places <- function(x) {
@@ -825,7 +825,7 @@ parse_text <- function(text, context_window_size = 2) {
   # counts), so check.R routes the row to an honest extraction-only NOTE that surfaces
   # the OR (+ its CI + p, bound by the existing OR/CI/p machinery). Group 1 = OR.
   # Up to ~140 non-period chars between "McNemar" and the OR -- the descriptive
-  # clause ("…found support for the association between temporal distance and
+  # clause ("...found support for the association between temporal distance and
   # action-inaction regret, OR = 0.18") runs ~99 chars in collabra.37122. `[^.]`
   # keeps the match inside the one sentence.
   # (?i): the text prints "McNemar" (mixed case); str_match is case-sensitive by
@@ -852,6 +852,27 @@ parse_text <- function(text, context_window_size = 2) {
   pat_mediation_indirect <- paste0(
     "indirect\\s+effect\\b.{0,40}?\\bwas\\s+([-+]?\\d*\\.?\\d+)",
     ".{0,80}?\\bSobel\\s+[Zz]\\s*=\\s*([-+]?\\d*\\.?\\d+)"
+  )
+  # v0.6.16 (E10 / E-bare-mediation-ci): a BOOTSTRAPPED mediation effect is
+  # reported with a CI (and usually a p), never a Sobel Z -- so the Sobel-anchored
+  # pattern above never fired and the result was silently dropped. Cognition &
+  # Emotion 10.1080/02699931.2024.2434156 reports "The average direct effect was
+  # 0.15, 95% CI [-0.13 to 0.45], p = .3, whereas the bootstrapped unstandardised
+  # indirect effect (Average Causal Mediation Effect, ACME) was 0.67, 95% CI
+  # [0.47-0.89], p < .001." -- two extractable results, zero rows emitted. The
+  # text WAS delivered by the extractor (verified in the render), so this is an
+  # ESCImate parse defect, not a docpluck gap. Found by the Sonnet canary audit
+  # 2026-08-04.
+  #
+  # Anchored on an explicit mediation-effect NAME so an ordinary "the effect was
+  # 0.15, 95% CI [...]" sentence cannot be mistaken for a mediation path. The CI
+  # separator accepts "to", "-", or "," (all three appear in this paper alone).
+  pat_mediation_ci <- paste0(
+    "\\b(?:average\\s+(?:causal\\s+mediation|direct)\\s+effect|ACME|ADE|",
+    "indirect\\s+effect|direct\\s+effect)\\b",
+    "[^.]{0,120}?\\bwas\\s+([-+]?\\d*\\.?\\d+)",
+    "[^.]{0,40}?\\b(\\d{2})\\s*%\\s*CI\\s*[\\[\\(]\\s*",
+    "([-+]?\\d*\\.?\\d+)\\s*(?:to|,|-)\\s*([-+]?\\d*\\.?\\d+)\\s*[\\]\\)]"
   )
   # v0.5.16: clinical-trial risk ratio with two-proportion slash counts.
   # Form: "<n1>/<N1> (<pct1>%) versus|and|vs <n2>/<N2> (<pct2>%) ... RR <val>;
@@ -897,6 +918,33 @@ parse_text <- function(text, context_window_size = 2) {
   # returned 0 stats because median-difference was not a recognised
   # test_type.
   pat_median_diff <- "median\\s+difference\\s+(?:was\\s+|of\\s+)?([-+]?\\d+(?:\\.\\d+)?)\\s*[;,]?\\s*95\\s*%\\s*(?:confidence\\s*interval\\s*\\(CI\\)|CI)\\s*([-+]?\\d+(?:\\.\\d+)?)\\s*(?:to|-)\\s*([-+]?\\d+(?:\\.\\d+)?)(?:[^a-zA-Z]*?[pP][- ]?(?:value)?\\s*([<=>]{0,2})\\s*([01]?\\.\\d+|[01]))?"
+  # v0.6.16 (E11 / E-bare-d-ci): a post-hoc contrast reported as a bare Cohen's
+  # d with its own CI and no test statistic of its own -- the Scheffe /
+  # Games-Howell reporting style. cog_emo 10.1080/02699931.2024.2434156 prints
+  # "Md = 3.80, 95% CI [2.46, 5.15], p < .001; d = 0.60, 95% CI [0.43, 0.77]"
+  # for six contrasts; all six produced ZERO rows even though the extractor
+  # delivered the sentence. Distinct from the covered bare-r (v0.5.10) and
+  # bare-b/SE (v0.5.6) forms: here the EFFECT SIZE carries the interval.
+  #
+  # Requires d + a bracketed CI immediately after it, so an incidental "d = .5"
+  # in prose cannot spuriously create a row. There is no test statistic, so the
+  # row is extraction-only and check.R routes it to a NOTE -- the d and its CI
+  # are surfaced as reported, never presented as independently verified.
+  # The CI must be IMMEDIATELY adjacent to the d it belongs to: only optional
+  # whitespace/punctuation and an optional "95%" may intervene. A permissive
+  # gap let a d bind a CI belonging to a DIFFERENT d in the same sentence --
+  # collabra.57785 "the effect size of between-subjects design ..., d = 0.39,
+  # was smaller and below the range of confidence intervals of that of
+  # within-subjects design, d = 0.55, 95% CI [0.47, 0.62]" bound 0.39 to
+  # [0.47, 0.62], which is 0.55's interval. Attaching another finding's CI to
+  # this one is a fabricated pairing, so the anchor is deliberately strict:
+  # a d whose own CI is not adjacent simply carries no CI.
+  pat_d_ci_nostat <- paste0(
+    "(?<![a-zA-Z_])d\\s*=\\s*([-+]?\\d*\\.?\\d+)",
+    "\\s*[,;]?\\s*(?:(\\d{2})\\s*%\\s*)?CI\\s*[\\[\\(]\\s*",
+    "([-+]?\\d*\\.?\\d+)\\s*(?:,|to|-)\\s*([-+]?\\d*\\.?\\d+)\\s*[\\]\\)]"
+  )
+
   # Auxiliary z for nonparametric tests (z co-reported with U/W)
   pat_z_aux <- "(?<![a-zA-Z])z\\s*=\\s*([-+]?\\d*\\.?\\d+)"
 
@@ -955,7 +1003,7 @@ parse_text <- function(text, context_window_size = 2) {
   # despite the CI being captured. Caught by the 2026-05-23 escicheck-iterate
   # validation against the AI stats gold.
   pat_etap2 <- "(?:partial\\s*eta\\s*[-]?squared|partial\\s*eta[-]?2|partial\\s*\u03b7\u00b2|\u03b7p\u00b2|partial\\s*\u03b7\\^2|\u03b7p\\^2|\u03b7\\^2p|\u03b7\\^2_p|eta\\^2p|eta\\^2_p)\\s*=\\s*([-+]?\\d*\\.?\\d+)"
-  # v0.3.0f: Generalized eta-squared — explicit labels + PDF corruption forms
+  # v0.3.0f: Generalized eta-squared -- explicit labels + PDF corruption forms
   # Must be checked BEFORE pat_eta2 since "geta-squared" contains "eta-squared"
   pat_gen_eta2 <- paste0(
     "(?:[Gg]eta\\s*[-]?squared|[Gg]eta[-]?2",
@@ -1221,6 +1269,8 @@ parse_text <- function(text, context_window_size = 2) {
     m_binom_bare <- stringr::str_match(s, pat_binom_bare)
     m_interaction_p <- stringr::str_match(s, pat_interaction_p)
     m_mediation_indirect <- stringr::str_match(s, pat_mediation_indirect)
+    m_mediation_ci       <- stringr::str_match(s, pat_mediation_ci)
+    m_d_ci_nostat        <- stringr::str_match(s, pat_d_ci_nostat)
     m_mcnemar_or <- stringr::str_match(s, pat_mcnemar_or)
     m_n_outN    <- stringr::str_match(s, pat_n_out_of_N)
     m_RR_ci_p <- stringr::str_match(s, pat_RR_ci_p)
@@ -1319,11 +1369,58 @@ parse_text <- function(text, context_window_size = 2) {
     #     genuinely ambiguous (e.g. a between-groups "N = 350 ... N = 393") and is
     #     left to the existing n1/n2 + context flow.
     own_is_ttest <- grepl("\\bt\\s*\\(", s, perl = TRUE)
-    if (own_is_ttest && length(N_own_candidates) == 1L) {
+
+    # v0.6.16 (E7 / E-zrow-subsample-n): a proportion/z clause that states its
+    # OWN denominator as "<k>/<N>" is authoritative -- it names the exact sample
+    # the statistic was computed on. collabra.37122's reversal-subsample rows
+    # read "(113/133, the total number of participants who showed reversal ...)
+    # versus ... (20/133, 15.04%), ... z = 7.98" yet bound N = 493, the PARENT
+    # study total from the surrounding window. The wrong N is not cosmetic: it
+    # feeds the emitted `all_variants` values a reader sees (r_from_z 0.3382
+    # published where N = 133 gives ~0.57; d_ind 0.7188 vs the correct 1.3839 --
+    # nearly double), and those fields are surfaced regardless of the row's
+    # SKIP status. Same "prefer the signal inside the row's own clause"
+    # discriminator as the v0.6.8 t-test fix above, which was gated to t-tests
+    # and so never covered z / proportion rows.
+    #
+    # Gate: the clause must state a slash-denominator, and all such
+    # denominators in the clause must AGREE (a clause mixing "113/133" and
+    # "20/140" is genuinely ambiguous and is left to the existing flow).
+    m_slash_den <- stringr::str_match_all(
+      s, "\\b\\d+\\s*/\\s*(\\d+)\\b")[[1]]
+    slash_dens <- if (nrow(m_slash_den) > 0) {
+      unique(na.omit(sapply(m_slash_den[, 2], numify_int)))
+    } else {
+      numeric(0)
+    }
+    if (length(slash_dens) == 1L && is.finite(slash_dens[1]) && slash_dens[1] > 0) {
+      N_value <- slash_dens[1]
+      N_source <- "own_clause_denominator"
+      N_candidates <- unique(c(slash_dens, N_candidates))
+    } else if (own_is_ttest && length(N_own_candidates) == 1L) {
       N_value <- N_own_candidates[1]
       N_source <- "own_clause"
       # Surface the own-clause value FIRST among candidates so any downstream
       # "first candidate" consumer also sees the authoritative value.
+      N_candidates <- unique(c(N_own_candidates, N_candidates))
+    } else if (length(N_own_candidates) == 1L &&
+               !grepl("\\br\\s*=|\\br\\s*\\(", s, perl = TRUE)) {
+      # v0.6.16 (E7, generalized): the v0.6.8 own-clause preference was gated to
+      # t-tests, so a z / chi-square / proportion row whose own clause states
+      # exactly one unambiguous N still inherited a neighbour's N from the
+      # window. The reasoning that made it right for a t-test -- the clause
+      # states the sample its own statistic was computed on -- is test-type
+      # independent. Still requires exactly one distinct own-clause N.
+      #
+      # r-tests are EXCLUDED (as in the v0.6.8 gate): a correlation without an
+      # explicit df runs a best-N-by-p-value-fit selection over ALL candidates
+      # and emits a "Multiple sample sizes" note. Binding the first own-clause N
+      # short-circuits that selection and silently drops the ambiguity note --
+      # caught by test-metaesci-v023.R:530 and
+      # test-v0612-ownclause-n-and-repcol-dedup.R:188 when this branch was first
+      # written without the exclusion.
+      N_value <- N_own_candidates[1]
+      N_source <- "own_clause"
       N_candidates <- unique(c(N_own_candidates, N_candidates))
     } else {
       N_value <- if (length(N_candidates) > 0) N_candidates[1] else NA_real_
@@ -1465,6 +1562,14 @@ parse_text <- function(text, context_window_size = 2) {
     is_mediation_indirect <- FALSE
     mediation_indirect_effect <- NA_real_
     mediation_indirect_effect_decimals <- NA_integer_
+    # v0.6.16 (E10): CI bounds carried from pat_mediation_ci for adoption in the
+    # CI block below (ciL/ciU are not in scope at the dispatch site above).
+    mediation_ci_bounds <- c(NA_real_, NA_real_)
+    mediation_ci_level  <- NA_real_
+    # v0.6.16 (E11): the d matched by pat_d_ci_nostat (the one whose CI is
+    # adjacent), so the generic first-"d ="-in-chunk scan cannot override it.
+    d_ci_nostat_effect <- NA_real_
+    d_ci_nostat_effect_decimals <- NA_integer_
 
     # Rank-correlation context (Stage 1 / P2): an r(df) reported in a Spearman
     # or Kendall context must be routed to the rank path, not the Pearson path.
@@ -1497,13 +1602,13 @@ parse_text <- function(text, context_window_size = 2) {
     } else if (!all(is.na(m_t_p_nodf))) {
       # v0.6.1: bare "t = value" near a p-clause, NO df. Compact table /
       # inline-report form. df1 stays NA; check.R routes to NOTE because the
-      # exact p-check needs df. Less strict than pat_t_nodf — the p-clause
+      # exact p-check needs df. Less strict than pat_t_nodf -- the p-clause
       # anchor in the regex is what disambiguates a real t-test from any
       # unrelated "t = value". See parse.R::pat_t_p_nodf for the rationale.
       test_type <- "t"
       stat_value <- numify(m_t_p_nodf[2])
       stat_value_decimals <- count_decimal_places(m_t_p_nodf[2])
-      # df1 remains NA — downstream Phase 5/6/7 paths handle NA-df by either
+      # df1 remains NA -- downstream Phase 5/6/7 paths handle NA-df by either
       # using a back-computed bound from N (when N is recoverable) or returning
       # status=NOTE.
     } else if (!all(is.na(m_F))) {
@@ -1703,6 +1808,29 @@ parse_text <- function(text, context_window_size = 2) {
       is_mediation_indirect <- TRUE
       mediation_indirect_effect <- numify(m_mediation_indirect[2])
       mediation_indirect_effect_decimals <- count_decimal_places(m_mediation_indirect[2])
+    } else if (!all(is.na(m_mediation_ci))) {
+      # v0.6.16 (E10 / E-bare-mediation-ci): a BOOTSTRAPPED mediation effect --
+      # an ACME / ADE / indirect / direct effect reported with a CI and (usually)
+      # a p, but NO Sobel Z. The v0.6.10 branch above requires the Sobel Z, so
+      # this form produced ZERO rows (cog_emo 10.1080/02699931.2024.2434156: the
+      # ADE 0.15 [-0.13, 0.45] p = .3 and the ACME 0.67 [0.47, 0.89] p < .001
+      # were both dropped, though the extractor delivered the sentence).
+      #
+      # There is no test statistic to verify -- a bootstrapped ACME is not
+      # recomputable from the reported numbers (it needs the resampled a/b path
+      # draws) -- so this is an extraction-only row: the effect + CI + p are
+      # surfaced honestly and check.R routes it to a NOTE. stat_value stays NA
+      # (claiming a statistic we do not have would be pretending).
+      test_type <- "mediation_indirect"
+      is_mediation_indirect <- TRUE
+      mediation_indirect_effect <- numify(m_mediation_ci[2])
+      mediation_indirect_effect_decimals <- count_decimal_places(m_mediation_ci[2])
+      # The CI is captured by the generic CI machinery further down (ciL/ciU are
+      # not yet in scope here -- they are initialized ~500 lines later), so the
+      # bounds this pattern matched are deliberately NOT bound at this point.
+      # They are carried on the match object and adopted in the CI block below.
+      mediation_ci_bounds <- c(numify(m_mediation_ci[4]), numify(m_mediation_ci[5]))
+      mediation_ci_level  <- numify(m_mediation_ci[3])
     } else if (!all(is.na(m_mcnemar_or))) {
       # v0.6.11 (E-mcnemar-OR): a McNemar test reported as an odds ratio (no
       # chi-square value). No test statistic to verify; the OR is the reported
@@ -1920,6 +2048,30 @@ parse_text <- function(text, context_window_size = 2) {
       stat_value <- b_coeff / SE_coeff
     }
 
+    # v0.6.16 (E11 / E-bare-d-ci): LAST RESORT -- a post-hoc contrast reported as
+    # a bare Cohen's d with its own CI and NO test statistic (Scheffe /
+    # Games-Howell style). Fires only when nothing above claimed the chunk, so it
+    # can never pre-empt a real t / F / chi-square / z row; the d + CI of a
+    # normally-reported test is still bound by the effect-size machinery below.
+    # cog_emo 10.1080/02699931.2024.2434156 reports six such contrasts
+    # ("Md = 3.80, 95% CI [2.46, 5.15], p < .001; d = 0.60, 95% CI [0.43, 0.77]")
+    # and emitted zero rows despite the text being delivered. Extraction-only:
+    # there is no statistic to recompute from, so check.R routes it to a NOTE
+    # surfacing the reported d and its interval -- never a verification claim.
+    if (is.na(test_type) && !all(is.na(m_d_ci_nostat))) {
+      test_type <- "d_reported_only"
+      # Bind the d that THIS pattern matched -- the one whose CI is adjacent.
+      # The generic effect-size scan below takes the FIRST "d =" in the chunk,
+      # which on a two-effect sentence pairs one finding's d with another's CI:
+      # collabra.57785 "..., d = 0.39, was smaller and below the range of
+      # confidence intervals of that of within-subjects design, d = 0.55, 95%
+      # CI [0.47, 0.62]" emitted d = 0.39 with 0.55's interval [0.47, 0.62] --
+      # a fabricated pairing of two different results. Record the matched value
+      # so the effect-size block below adopts it instead.
+      d_ci_nostat_effect <- numify(m_d_ci_nostat[2])
+      d_ci_nostat_effect_decimals <- count_decimal_places(m_d_ci_nostat[2])
+    }
+
     # Extract effect size (prioritize by specificity)
     effect_name <- NA_character_
     effect_reported <- NA_real_
@@ -1945,7 +2097,14 @@ parse_text <- function(text, context_window_size = 2) {
     # effect is the indirect-effect coefficient captured by pat_mediation_indirect
     # (NOT any eta/d/rho token in the sentence). Bind it FIRST and unconditionally so
     # the trailing "ACME robust until rho = 0.7" sensitivity bound cannot be adopted.
-    if (isTRUE(is_mediation_indirect) && !is.na(mediation_indirect_effect)) {
+    if (!is.na(test_type) && test_type == "d_reported_only" &&
+        !is.na(d_ci_nostat_effect)) {
+      # v0.6.16 (E11): adopt the d whose CI is adjacent, not the first d in the
+      # chunk -- see the dispatch comment above (57785 two-effect sentence).
+      effect_name <- "d"
+      effect_reported <- d_ci_nostat_effect
+      effect_reported_decimals <- d_ci_nostat_effect_decimals
+    } else if (isTRUE(is_mediation_indirect) && !is.na(mediation_indirect_effect)) {
       effect_name <- "indirect_effect"
       effect_reported <- mediation_indirect_effect
       effect_reported_decimals <- mediation_indirect_effect_decimals
@@ -1990,7 +2149,7 @@ parse_text <- function(text, context_window_size = 2) {
       effect_reported <- numify(m_cohens_f[2])
       effect_reported_decimals <- count_decimal_places(m_cohens_f[2])
     } else if (!all(is.na(m_bare_f))) {
-      # Bare "f = value" after comma — Cohen's f (for F-tests or t-tests reporting f)
+      # Bare "f = value" after comma -- Cohen's f (for F-tests or t-tests reporting f)
       effect_name <- "f"
       effect_reported <- numify(m_bare_f[2])
       effect_reported_decimals <- count_decimal_places(m_bare_f[2])
@@ -2134,12 +2293,12 @@ parse_text <- function(text, context_window_size = 2) {
           effect_reported == floor(effect_reported) &&
           abs(effect_reported) > 2) {
         if (abs(effect_reported) > 5) {
-          # d=6, d=8 etc. — virtually never a real effect size
+          # d=6, d=8 etc. -- virtually never a real effect size
           effect_name <- NA_character_
           effect_reported <- NA_real_
           effect_reported_decimals <- NA_integer_
         } else {
-          # d=3, d=4, d=5 — check context for spurious patterns
+          # d=3, d=4, d=5 -- check context for spurious patterns
           reject <- FALSE
           context_lower <- tolower(s)
           spurious <- c("study\\s+\\d", "experiment\\s+\\d",
@@ -2207,7 +2366,13 @@ parse_text <- function(text, context_window_size = 2) {
       # v0.6.10 (E-mediation): anchor the CI at the indirect-effect VALUE (e.g.
       # ".05") -- the bootstrapped CI sits right after it ("was .05, 95% CI
       # [-.04, .12]"), well before the Sobel Z and the trailing sensitivity rho.
-      effect_match_text <- m_mediation_indirect[2]
+      # v0.6.16 (E10): the same anchor for the CI-reported (no-Sobel) form,
+      # whose value comes from pat_mediation_ci instead.
+      effect_match_text <- if (!all(is.na(m_mediation_indirect))) {
+        m_mediation_indirect[2]
+      } else {
+        m_mediation_ci[2]
+      }
     } else if (!is.na(effect_name)) {
       em <- switch(effect_name,
         "f2" = m_f2, "etap2" = m_etap2, "generalized_eta2" = m_eta2_corrupted,
@@ -2334,7 +2499,23 @@ parse_text <- function(text, context_window_size = 2) {
     # matched, so md_hl can sanity-check CI symmetry and downstream CI-audit
     # columns (ci_reported etc.) see the bounds.
     if (is.na(ciL) && is.na(ciU)) {
-      if (!is.na(test_type) && test_type == "RR" && !all(is.na(m_RR_ci_p))) {
+      if (!any(is.na(mediation_ci_bounds))) {
+        # v0.6.16 (E10): a bootstrapped mediation CI printed with a "to" or "-"
+        # separator ("95% CI [-0.13 to 0.45]", "95% CI [0.47-0.89]") is not
+        # covered by the generic pat_CI* set, so adopt the bounds the
+        # mediation pattern already captured. Without this the row surfaced an
+        # effect and p with no interval -- the interval being the only
+        # verification handle a bootstrapped ACME has.
+        ciL <- mediation_ci_bounds[1]
+        ciU <- mediation_ci_bounds[2]
+        if (!is.na(mediation_ci_level)) {
+          ci_level <- mediation_ci_level / 100
+          ci_level_source <- "explicit_with_bounds"
+        } else if (is.na(ci_level)) {
+          ci_level <- 0.95
+          ci_level_source <- "assumed_95"
+        }
+      } else if (!is.na(test_type) && test_type == "RR" && !all(is.na(m_RR_ci_p))) {
         ciL <- numify(m_RR_ci_p[3])
         ciU <- numify(m_RR_ci_p[4])
         ciL_reported_decimals <- count_decimal_places(m_RR_ci_p[3])
@@ -2557,7 +2738,7 @@ parse_text <- function(text, context_window_size = 2) {
   # text. Each numeric appears twice in the extracted corpus: once with a full
   # parenthesized form (e.g. `r(741) = -.43, 95% CI [-.49, -.37]`) and once
   # as a table cell with the same value (e.g. `r = -.43 [-.49, -.37]`). The
-  # parser legitimately picks up both — but they are the same statistical
+  # parser legitimately picks up both -- but they are the same statistical
   # result, so emitting two rows inflates the row count and lets the table
   # fragment's check_scope drag the user-facing summary toward extraction-only
   # status.
@@ -2565,7 +2746,7 @@ parse_text <- function(text, context_window_size = 2) {
   # Dedup conservatively: only collapse rows that match exactly on
   # (test_type, stat_value within 1e-3, df1, df2, N). When two rows match,
   # keep the one whose raw_text contains the parenthesized canonical form
-  # (e.g. `r(741)`, `t(50)`, `F(2,40)`) — that is the body-text version. The
+  # (e.g. `r(741)`, `t(50)`, `F(2,40)`) -- that is the body-text version. The
   # table fragment is dropped.
   #
   # Caught by the 2026-05-23 escicheck-iterate cycle-1 validation against
@@ -2666,7 +2847,7 @@ parse_text <- function(text, context_window_size = 2) {
           keep[idx] <- FALSE
           keep[paren_idx[1L]] <- TRUE
         } else {
-          # No parenthesized form — keep the first, drop the rest
+          # No parenthesized form -- keep the first, drop the rest
           keep[idx] <- FALSE
           keep[idx[1L]] <- TRUE
         }
@@ -2832,7 +3013,7 @@ parse_text <- function(text, context_window_size = 2) {
     # "evidence (for|against) <finding>" clause (collabra.90203: "evidence for
     # publication bias (BF01 = 0.11)"), an "in favo(u)r of the (alternative|null)"
     # verdict (collabra.32572: "the data was in favor of the alternative
-    # hypothesis, B10 = 20841.04"), or a bare "Bayes factor was/is/of/indicated/…"
+    # hypothesis, B10 = 20841.04"), or a bare "Bayes factor was/is/of/indicated/..."
     # report (collabra.32572: "The Bayes factor was B10 = 1.25"). All three are
     # PRIMARY-finding phrasings; a bare table-cell / definitional BF (no such
     # phrase within 70 chars) is excluded.

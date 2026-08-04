@@ -9,7 +9,7 @@ check_text(
   stats = c("t", "F", "r", "chisq", "z", "U", "W", "H", "regression", "spearman",
     "kendall", "kendall_w", "dscf", "cochran_q", "RR", "rdpct", "md_hl", "binomial",
     "interaction_p", "mediation_indirect", "mcnemar_or", "bayes_factor",
-    "hazard_ratio"),
+    "hazard_ratio", "d_reported_only"),
   ci_level = 0.95,
   alpha = 0.05,
   one_tailed = FALSE,
