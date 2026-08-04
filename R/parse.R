@@ -2628,24 +2628,41 @@ parse_text <- function(text, context_window_size = 2) {
       if (length(idx) > 1L) {
         # Prefer rows whose raw_text has a parenthesized form (body text).
         paren_idx <- idx[has_paren[idx]]
-        if (length(paren_idx) >= 2L) {
+        # v0.6.14 (E-corr-two-prose): the group's rows share the dedup key, so
+        # their (rounded) CI bounds are either all NA or all the same value.
+        # CI-absent groups cannot be told apart by the CI discriminator.
+        group_has_ci <- !is.na(ciL[idx[1L]]) || !is.na(ciU[idx[1L]])
+        if (length(paren_idx) >= 2L && !group_has_ci) {
           # v0.6.14 (E-corr-two-prose): TWO OR MORE parenthesized body rows share
-          # this key. This dedup exists to collapse a body-text row against its
-          # TABLE-FRAGMENT restatement (paren body form + non-paren `r = -.43`
-          # table cell) -- NOT to collapse two distinct prose reports. A paper can
-          # report two genuinely different correlations that coincidentally share
-          # the same r, df, N and carry no CI to tell them apart -- e.g.
-          # collabra.23443's H2A "willingness to donate" r(797) = .16 and H2C
-          # "estimates of others" r(797) = .16 (different variables, different
-          # clauses). Both are parenthesized `r(797)` prose forms, so neither is a
-          # table fragment; collapsing them silently drops a real second result
-          # (PARSE-MISS). Keep EVERY parenthesized body row; drop only the
-          # non-parenthesized fragment(s) in this key group.
+          # this key AND the group reports NO CI. This dedup exists to collapse a
+          # body-text row against its TABLE-FRAGMENT restatement (paren body form
+          # + non-paren `r = -.43` table cell) -- NOT to collapse two distinct
+          # prose reports. A paper can report two genuinely different correlations
+          # that coincidentally share the same r, df, N and carry no CI to tell
+          # them apart -- e.g. collabra.23443's H2A "willingness to donate"
+          # r(797) = .16 and H2C "estimates of others" r(797) = .16 (different
+          # variables, different clauses). Both are parenthesized `r(797)` prose
+          # forms, so neither is a table fragment; collapsing them silently drops
+          # a real second result (PARSE-MISS). Keep EVERY parenthesized body row;
+          # drop only the non-parenthesized fragment(s) in this key group.
+          #
+          # The !group_has_ci gate is load-bearing: when the group's rows DO share
+          # an identical non-NA reported CI, they are a RESTATEMENT of one finding
+          # (a repeated report quotes its own CI verbatim -- collabra.57785
+          # loc-151 "we ran a two-tailed paired t-test ... t(742) = 3.15, d =
+          # 0.15, 95% CI [0.07, 0.22]" vs loc-171 "Additionally, AS REPORTED IN
+          # STUDY 3A ... t(742) = 3.15, d = 0.15, 95% CI [0.07, 0.22]"); two
+          # genuinely-distinct results sharing stat, df, N, effect AND the exact
+          # CI bounds is not a real case, while a restatement always does. Without
+          # this gate the 57785 pair double-counts (caught by the 2026-07-04
+          # whole-corpus baseline-vs-fixed render diff).
           keep[idx] <- FALSE
           keep[paren_idx] <- TRUE
-        } else if (length(paren_idx) == 1L) {
-          # Exactly one parenthesized body row + one-or-more non-paren fragments:
-          # the classic body-vs-table-fragment duplicate. Keep the body row.
+        } else if (length(paren_idx) >= 1L) {
+          # Either the classic body-vs-table-fragment duplicate (one parenthesized
+          # body row + non-paren fragment(s)), or a RESTATEMENT group (2+ paren
+          # rows sharing an identical non-NA CI -- see the v0.6.14 note above).
+          # Both collapse to the first parenthesized row.
           keep[idx] <- FALSE
           keep[paren_idx[1L]] <- TRUE
         } else {
@@ -3061,6 +3078,15 @@ flattened_rows_to_parsed <- function(table_rows) {
       tt <- "t"
       stat <- num1(f$t)
       if (has(f, "df")) d1 <- num1(f$df)
+      # v0.6.15 (E-modeb-t-n): docpluck types a per-sample `n` column on t-test
+      # table rows that print n but NOT df (collabra.23443 Table 5:
+      # `{t: 16.6, d: 0.59, n: 799, CI_lower, CI_upper}`). The r branch below has
+      # always bound `fields.n`; the t branch discarded it, so such rows carried
+      # no N at all and fell to SKIP/insufficient_data even though the sample
+      # size was delivered typed. Bind it the same way. (df stays NA when the
+      # table does not print it -- N alone lets check.R compute the dz / d_ind
+      # variant family for the reported d.)
+      if (has(f, "n")) nn <- num1(f$n)
       if (has(f, "d")) {
         # v0.6.8 (E-A3 follow-on): docpluck types the joint/separate-evaluation
         # effect column generically as `d`, but a within-subjects (joint /

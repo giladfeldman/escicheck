@@ -65,6 +65,31 @@ test_that("a body-text r and its NON-paren table-fragment restatement STILL coll
   expect_equal(as.numeric(rr$df1[1]), 741)
 })
 
+test_that("a RESTATED finding with an identical reported CI still collapses to one", {
+  # The load-bearing gate on the v0.6.14 un-collapse: when two parenthesized
+  # prose rows share the key INCLUDING an identical non-NA CI, they are a
+  # restatement of ONE finding, not two results. collabra.57785 reports the
+  # Study-3A satisfaction paired t-test twice -- once in the Study 5 results
+  # ("we ran a two-tailed paired t-test ... t(742) = 3.15, p = .002, d = 0.15,
+  # 95% CI [0.07, 0.22]") and once as "Additionally, as reported in Study 3A,
+  # ... t(742) = 3.15, p = .002, d = 0.15, 95% CI [0.07, 0.22]". The first
+  # (CI-blind) version of the v0.6.14 fix kept both -- a double-count caught by
+  # the whole-corpus baseline-vs-fixed render diff. With the CI gate, they
+  # collapse back to one.
+  txt <- paste0(
+    "We ran a two-tailed paired t-test and found that participants were more ",
+    "satisfied with experiential purchases (N = 743, M = 8.10, SD = 1.31) than ",
+    "material purchases (M = 7.92, SD = 1.28), t(742) = 3.15, p = .002, ",
+    "d = 0.15, 95% CI [0.07, 0.22]. Additionally, as reported in Study 3A, ",
+    "participants were more satisfied with experiential purchases (M = 8.10, ",
+    "SD = 1.31, N = 743) than material purchases (M = 7.92, SD = 1.28), ",
+    "t(742) = 3.15, p = .002, d = 0.15, 95% CI [0.07, 0.22]."
+  )
+  res <- effectcheck::check_text(txt)
+  tt <- res[!is.na(res$test_type) & res$test_type == "t", ]
+  expect_equal(nrow(tt), 1L)
+})
+
 test_that("two same-r rows WITH DIFFERENT CIs remain separate (unchanged behavior)", {
   # Two correlations with the same r but different CI bounds were already kept by
   # the v0.5.14 key (CI is part of the key). Confirm the fix leaves this intact.
