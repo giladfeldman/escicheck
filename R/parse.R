@@ -434,6 +434,79 @@ numify_int <- function(x) {
   suppressWarnings(as.integer(x))
 }
 
+#' Pick the document-level fallback sample size from all `N = ...` candidates
+#'
+#' Used only as the LAST resort, when a statistic's own clause, its local
+#' context, and its extended context all fail to supply an N.
+#'
+#' The rule is "most frequently mentioned N, else the largest". The frequency
+#' branch encodes a real signal -- a study total gets restated across the
+#' methods and results -- but it is only meaningful when one value is actually
+#' more frequent than the rest.
+#'
+#' v0.6.17: a TIED top frequency is broken among the TIED VALUES (largest of
+#' them), never by falling through to the global maximum.
+#'
+#' `table()` orders its counts by ascending numeric name and `which.max()`
+#' returns the first maximum, so a tie previously resolved to the SMALLEST tied
+#' candidate. On 10.1016/j.jesp.2009.12.010 every candidate tied at frequency 2
+#' (7, 13, 25, 31, 38 -- each twice, all cells of one accepters/rejecters
+#' subgroup table), so the paper's global N became 7, its smallest subgroup
+#' cell, and the Study 2 mediation z rows published r_from_z = 0.7341 and
+#' d = 2.162 against a true N of 76 (0.312 and 0.328).
+#'
+#' Taking the largest of the TIED values -- rather than `max(ns)` over every
+#' candidate -- matters, and an intermediate version of this fix that escaped to
+#' `max(ns)` was caught by the corpus diff doing real damage: on
+#' 10.1525/collabra.32572 the candidates are a tight cluster
+#' (273 x3, 274 x4, 275 x4, 276 x2, 277 x2, 279) plus a lone 3302 outlier. With
+#' 274 and 275 tied at the top, escaping to the maximum handed every F row
+#' N = 3302 -- an order of magnitude above the study's real 999 (per gold) and
+#' far worse than the 274 the old rule picked. A tie means the top candidates
+#' are equally attested; it is not licence to prefer an unrelated number that
+#' was mentioned once.
+#'
+#' KNOWN TRADE-OFF (cross-model review, codex 2026-08-04, reproduced): in a
+#' multi-study paper whose per-study and pooled Ns are each mentioned equally
+#' often -- e.g. Study 1 N=40 x2, Study 2 N=60 x2, pooled N=100 x2 -- this rule
+#' returns the pooled 100, where the old rule returned 40. Neither is right in
+#' general: for a row with no local N belonging to one of the three, each rule
+#' scores exactly 1 of 3. The tie-break is chosen on the DIRECTION of its error,
+#' not its rate. Effect sizes scale as 1/sqrt(N), so a too-SMALL N inflates the
+#' computed effect and manufactures a false discrepancy against a correctly
+#' reported paper, while a too-LARGE N attenuates it toward agreement. For a
+#' consistency checker the first is the more damaging failure. The companion
+#' df-authority override in check.R then rejects an over-large N outright on
+#' every non-Welch t row, which the old rule's under-estimates could never be
+#' caught by.
+#'
+#' Note this returns a best-effort fallback, not a verified N: callers that act
+#' on it must mark provenance (`N_source = "global_text"`) so downstream checks
+#' can surface the uncertainty to the user. Where a df is available it is
+#' structurally authoritative and overrides this value entirely (check.R).
+#'
+#' @param ns Numeric vector of candidate sample sizes (already positive, non-NA)
+#' @return A single numeric N, or `NA_real_` when there are no candidates
+#' @keywords internal
+global_n_from_candidates <- function(ns) {
+  ns <- ns[!is.na(ns) & ns > 0]
+  if (length(ns) == 0L) {
+    return(NA_real_)
+  }
+  n_counts <- table(ns)
+  top <- max(n_counts)
+  if (top > 1L) {
+    # One or more values are the most-attested. Prefer the largest of THEM: a
+    # study total outranks a subgroup of itself, and both are better attested
+    # than any once-mentioned number elsewhere in the document.
+    max(as.numeric(names(n_counts)[n_counts == top]))
+  } else {
+    # Every candidate is unique -- no popularity signal at all. Take the
+    # largest, which is the most likely total sample.
+    max(ns)
+  }
+}
+
 #' Count decimal places in the raw matched string
 #'
 #' Counts trailing digits after the decimal point in a numeric string,
@@ -1122,20 +1195,7 @@ parse_text <- function(text, context_window_size = 2) {
     # Extract all N values found in text (strip commas from thousands separators)
     ns <- as.numeric(gsub(",", "", global_N_matches[[1]][, 2]))
     ns <- ns[!is.na(ns) & ns > 0]
-
-    if (length(ns) > 0) {
-      # If multiple N values, take the most common (mode)
-      n_counts <- table(ns)
-      if (max(n_counts) > 1) {
-        # Mode exists - most frequently mentioned N
-        as.numeric(names(n_counts)[which.max(n_counts)])
-      } else {
-        # All unique - take the largest (likely total sample)
-        max(ns)
-      }
-    } else {
-      NA_real_
-    }
+    global_n_from_candidates(ns)
   } else {
     NA_real_
   }
