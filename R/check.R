@@ -2683,7 +2683,7 @@ compute_and_compare_one <- function(row,
       }
 
       # v0.3.0f: Additional contingency table effect sizes
-      # Cohen's w = sqrt(chi2/N) — same as phi, different label
+      # Cohen's w = sqrt(chi2/N) -- same as phi, different label
       if (!is.na(stat) && !is.na(N) && N > 0) {
         w_val <- sqrt(stat / N)
         if (!is.na(canonical_type) && canonical_type == "cohens_w") {
@@ -3013,7 +3013,7 @@ compute_and_compare_one <- function(row,
 
     # v0.3.0m: Detect unstandardized b masquerading as beta
     # When effect_reported matches b_coeff, the parser extracted "b = X" but
-    # labelled it "beta" — comparing to standardized_beta is invalid.
+    # labelled it "beta" -- comparing to standardized_beta is invalid.
     b_is_unstandardized <- FALSE
     if (!is.na(canonical_type) && canonical_type == "beta" &&
         !is.na(b_val) && !is.na(effect_reported) &&
@@ -3048,7 +3048,7 @@ compute_and_compare_one <- function(row,
         }
         # When b_is_unstandardized, value is stored in computed_beta_for_output
         # for the output column, but NOT in computed_variants or alternatives
-        # — prevents Phase 5 from matching unstandardized b against standardized beta
+        # -- prevents Phase 5 from matching unstandardized b against standardized beta
       }
 
       partial_r_val <- tryCatch(partial_r_from_t(stat, df1), error = function(e) NA_real_)
@@ -3361,6 +3361,59 @@ compute_and_compare_one <- function(row,
       paste("Cochran Q reported as a meta-analytic heterogeneity test -",
             "no standard effect size; consistency check is on the reported",
             "p-value vs chi-square(Q, df). I-squared not independently verified."))
+
+    # v0.6.16 (E5 / E-cochranq-global-n): a Cochran Q is a heterogeneity test
+    # over the META-ANALYSIS's effects/studies (its "N" is a count of effects,
+    # k), NOT over the host paper's participants. A sample size found only in
+    # distant document context is therefore an unrelated quantity and must not
+    # be attached: collabra.90203's "Q_T [40] = 104.65" carried N = 1004, the
+    # host paper's own participant count, from global_text -- a fabricated
+    # provenance on a row whose N concept is entirely different. This is the
+    # same class the v0.5.14 Bayesian-model-averaged guard and the v0.5.18
+    # md_hl guard above already close; it was never extended to cochran_q.
+    # Found by the Sonnet canary audit of collabra.90203 (2026-08-04).
+    # The guard is CONCEPT-based, not source-list-based: a participant N is the
+    # wrong QUANTITY for this test no matter which context it was scraped from,
+    # so every non-co-located provenance is cleared. (An earlier version listed
+    # only global_text/extended_context and missed local_context -- a study-level
+    # "N = 1004" a few sentences away binds as local_context and was still
+    # adopted. There is no provenance under which a participant count legitimately
+    # becomes a Q row's N: Q's own "N" is k, the number of effects, which this
+    # parser does not extract, so NA is the honest value in every case.)
+    n_src_cq <- if ("N_source" %in% names(row) && length(row$N_source) > 0 &&
+                    !is.na(row$N_source[1])) row$N_source[1] else NA_character_
+    if (!is.na(n_src_cq) && !identical(n_src_cq, "not_found")) {
+      N <- NA_real_
+      N_source <- NA_character_
+      # The output tibble reads N_source from row$N_source (mutated, like the
+      # md_hl / RR / rdpct blocks) -- clear it too, or N is NA while the
+      # provenance still misleadingly reads "global_text".
+      if ("N_source" %in% names(row)) row$N_source[1] <- NA_character_
+      uncertainty <- c(uncertainty,
+        paste("A sample size found only in distant document context was not",
+              "adopted for this heterogeneity test: Cochran Q is computed over",
+              "the meta-analysis's effects (k), not over the host paper's",
+              "participants, so that N does not back this result."))
+    }
+  } else if (tt == "d_reported_only") {
+    # ------ BARE COHEN'S D WITH A CI, NO TEST STATISTIC ------
+    # v0.6.16 (E11): a post-hoc contrast (Scheffe / Games-Howell style) that
+    # reports only "d = X, 95% CI [L, U]" plus a p. There is no test statistic,
+    # df, or N to recompute from, so nothing here is independently verifiable --
+    # the row exists so the reported effect and its interval are SURFACED rather
+    # than silently dropped (they were: six such contrasts in cog_emo
+    # 10.1080/02699931.2024.2434156 produced zero rows). check_type stays
+    # extraction-only and the status routes to NOTE; claiming any verification
+    # would be pretending.
+    # `status` is not yet initialized at this point in the flow (it is set in a
+    # later phase), so this branch only records the extraction-only nature and
+    # the caveat; the Phase-9 extraction-only rule performs the NOTE routing.
+    check_type <- "extraction_only"
+    uncertainty <- c(uncertainty,
+      paste("Effect size reported without a test statistic (post-hoc contrast",
+            "style: d + CI + p only). The d and its interval are extracted as",
+            "reported; with no statistic, df, or N there is nothing to recompute",
+            "them from, so this row is not independently verified."))
   } else if (tt == "binomial") {
     # ------ EXACT BINOMIAL TEST WITH COHEN'S H ------
     # v0.6.2: When the verbatim is "<n> out of <N> ... binomial p [op] X,
@@ -3370,7 +3423,7 @@ compute_and_compare_one <- function(row,
     # recoverable, recompute the two-sided binomial p via binom.test() and
     # compare against p_reported. Cohen's h itself is NOT independently
     # checkable from a single proportion + null (it needs the two compared
-    # proportions explicitly — if only "X% chose the target" is reported,
+    # proportions explicitly -- if only "X% chose the target" is reported,
     # we accept the h as reported and route to NOTE).
     rt <- if ("raw_text" %in% names(row) && length(row$raw_text) > 0)
             as.character(row$raw_text[1]) else ""
@@ -3720,7 +3773,7 @@ compute_and_compare_one <- function(row,
       selection_diffs <- sapply(seq_along(same_type_variants), function(i) {
         v <- same_type_variants[[i]]
         vname <- names(same_type_variants)[i]
-        # v0.3.0m: Defensive guard — v$value could be a list from malformed variant
+        # v0.3.0m: Defensive guard -- v$value could be a list from malformed variant
         val <- tryCatch(as.numeric(v$value[1]), error = function(e) NA_real_)
         if (is.null(val) || length(val) == 0 || is.na(val)) return(Inf)
         dist_to_median <- abs(abs(val) - abs_reported)
@@ -3762,7 +3815,7 @@ compute_and_compare_one <- function(row,
       # nearest grid point and use that distance. This is much more precise
       # than using min/max/median anchors.
       output_diffs <- sapply(same_type_variants, function(v) {
-        # v0.3.0m: Defensive guard — v$value could be a list from malformed variant
+        # v0.3.0m: Defensive guard -- v$value could be a list from malformed variant
         val <- tryCatch(as.numeric(v$value[1]), error = function(e) NA_real_)
         if (is.null(val) || length(val) == 0 || is.na(val)) return(Inf)
         dist_to_median <- abs(abs(val) - abs_reported)
@@ -3789,8 +3842,70 @@ compute_and_compare_one <- function(row,
         matched_variant <- names(same_type_variants)[k]
         mv <- same_type_variants[[k]]
         # Use output delta (median distance) for status, not selection delta
-        delta_effect_abs <- output_diffs[k]
+        # v0.6.16 (E4): unname() -- output_diffs is a NAMED vector, so the
+        # scalar carried a stray variant-name attribute into the output
+        # column (delta_effect became a named number). Harmless in R
+        # arithmetic, but it serializes as an object rather than a bare
+        # number for JSON/API consumers and breaks identity comparisons.
+        delta_effect_abs <- unname(output_diffs[k])
         matched_value <- mv$value
+
+        # v0.6.16 (E4 / E-delta-vs-matched-value): keep the emitted delta and
+        # the emitted matched_value describing THE SAME number.
+        #
+        # For a correlation-dependent variant (drm / dav: the value depends on
+        # the unknown within-pair correlation, so it is computed as a grid with
+        # a $range and $grid_values), `output_diffs` above is the distance to
+        # the NEAREST GRID POINT -- which is the statistically honest question
+        # ("is the reported value achievable under some plausible r?"), not the
+        # distance to the r-midpoint `mv$value`. But `matched_value` was still
+        # the midpoint, so the row published three numbers that contradicted
+        # each other: reported 0.15, matched 0.1095, delta 0.0038 (the true gap
+        # to the midpoint is 0.0405 -- a 10x understatement in the field that
+        # drives the PASS/WARN/ERROR threshold and that users read as the
+        # reported-vs-computed gap). Found by the Sonnet canary audit of
+        # collabra.57785 (2026-08-04) and reproduced minimally before fixing.
+        #
+        # Fix: when the delta was taken against a grid point, publish THAT grid
+        # point as `matched_value` and say so in `assumptions`. The verdict
+        # threshold is unchanged (it always used the grid distance); what
+        # changes is that the row is now self-consistent:
+        # delta_effect == |effect_reported| - |matched_value|.
+        if (!is.null(mv$range) && length(mv$range) == 2 &&
+            !any(is.na(mv$range)) &&
+            abs_reported >= min(abs(mv$range)) &&
+            abs_reported <= max(abs(mv$range)) &&
+            !is.null(mv$grid_values) && length(mv$grid_values) > 0) {
+          .gk <- which.min(abs(abs(mv$grid_values) - abs_reported))
+          .grid_hit <- as.numeric(mv$grid_values[.gk])
+          if (is.finite(.grid_hit)) {
+            # v0.6.16 (E9): `matched_variant` is deliberately NOT suffixed here.
+            # A ":grid" tag would be clearer in isolation, but ten downstream
+            # consumers compare matched_variant by exact equality
+            # (`%in% c("dz","dav","drm")`, `== "r"`, membership in
+            # computed_variants/same_type_variants), so a suffix would silently
+            # break the dz-family repro/design gates added earlier in v0.6.16.
+            # The provenance instead goes to `assumptions_used` below, which is
+            # the field that already carries per-row computation caveats. This
+            # is the finding a canary auditor read as a wrong-family match
+            # (collabra.77859 Table 2: "drm" beside a matched_value of 0.0827
+            # when drm's own point estimate is 0.0783) -- the pairing is
+            # internally correct, it was the LABEL that under-specified.
+            # Preserve the reported value's sign convention (the whole match is
+            # magnitude-based, as in Phase 5 and the v0.6.16 CI alignment).
+            matched_value <- if (!is.na(effect_reported) && effect_reported < 0) {
+              -abs(.grid_hit)
+            } else {
+              abs(.grid_hit)
+            }
+            assumptions <- c(assumptions,
+              paste0("Reported value matched a correlation-dependent ",
+                     matched_variant, " grid point (", round(abs(.grid_hit), 4),
+                     "); the delta is measured against that grid point, not ",
+                     "against the r-midpoint estimate (",
+                     round(abs(as.numeric(mv$value[1])), 4), ")"))
+          }
+        }
 
         # v0.3.0: Add assumption note when matched via range
         if (!is.null(mv$range) && length(mv$range) == 2 &&
@@ -3856,7 +3971,7 @@ compute_and_compare_one <- function(row,
 
       if (length(computed_variants) > 0) {
         diffs <- sapply(computed_variants, function(v) {
-          # v0.3.0m: Defensive guard — v$value could be a list from malformed variant
+          # v0.3.0m: Defensive guard -- v$value could be a list from malformed variant
           val <- tryCatch(as.numeric(v$value[1]), error = function(e) NA_real_)
           if (is.null(val) || length(val) == 0 || is.na(val)) {
             return(Inf)
@@ -3868,7 +3983,7 @@ compute_and_compare_one <- function(row,
           k <- which.min(diffs)
           matched_variant <- names(computed_variants)[k]
           matched_value <- computed_variants[[k]]$value
-          delta_effect_abs <- diffs[k]
+          delta_effect_abs <- unname(diffs[k])
         }
       }
     }
@@ -3892,7 +4007,7 @@ compute_and_compare_one <- function(row,
         k <- which.min(diffs)
         matched_variant <- names(computed_variants)[k]
         matched_value <- computed_variants[[k]]$value
-        delta_effect_abs <- diffs[k]
+        delta_effect_abs <- unname(diffs[k])
       }
     }
   }
@@ -3981,20 +4096,76 @@ compute_and_compare_one <- function(row,
     # Find best match across all CI candidates
     best_delta <- Inf
     for (cname in names(ci_candidates)) {
-      # v0.3.0m: Defensive guard — ci_candidates may contain lists
+      # v0.3.0m: Defensive guard -- ci_candidates may contain lists
       cL <- tryCatch(as.numeric(ci_candidates[[cname]][1]), error = function(e) NA_real_)
       cU <- tryCatch(as.numeric(ci_candidates[[cname]][2]), error = function(e) NA_real_)
       if (is.na(cL) || is.na(cU) || !is.finite(cL) || !is.finite(cU)) next
       dL <- abs(cL - ciL_rep)
       dU <- abs(cU - ciU_rep)
       max_delta <- max(dL, dU)
+      # v0.6.16 (E3 / E-ci-sign-align): the value match is magnitude-based
+      # (Phase 5 compares abs(computed) against abs(reported)), because the sign
+      # of a computed t-derived effect follows the arbitrary group-coding
+      # direction of the t statistic, not the paper's reporting convention. The
+      # CI comparison must follow the same convention: when the computed
+      # candidate CI lies ENTIRELY on the opposite side of zero from the
+      # reported CI, also try the sign-flipped candidate [-cU, -cL] and keep
+      # whichever aligns better (collabra.23443 S1-R13: reported d-scale
+      # [0.14, 0.24] vs computed r-scale [-0.235, -0.141] flagged a spurious
+      # INCONSISTENT with deltas ~0.38). Gated on strict opposite-signedness so
+      # a zero-straddling CI is never flipped, and recorded via a
+      # ":sign-aligned" suffix on ci_method_match so the alignment is visible,
+      # never silent. A genuinely wrong CI stays INCONSISTENT: flipping only
+      # aligns direction, it cannot shrink a magnitude mismatch. Deliberate
+      # tradeoff (same one the magnitude-based value match already makes): a
+      # paper's reporting DIRECTION is not verifiable from an APA string,
+      # because the computed sign depends on group coding the checker cannot
+      # see -- so a flip is never itself evidence of error. The only
+      # direction check that IS decidable -- the reported estimate lying
+      # outside its own reported CI -- is flagged independently by
+      # sign_ci_violation (v0.6.3) and is unaffected by this alignment.
+      # Guard (codex CLI review 2026-08-04, reproduced before fixing): the
+      # flip is only justified when the paper's OWN estimate and OWN CI agree
+      # with each other (i.e. the paper reports one coherent direction
+      # convention). When the reported estimate lies outside its own reported
+      # CI -- the v0.6.3 dropped-minus signature (r = -0.50, CI [0.34, 0.63])
+      # -- the direction disagreement is the paper's own error and must stay
+      # INCONSISTENT; an unguarded flip laundered it into MATCH + PASS.
+      cand_sign_aligned <- FALSE
+      # The reported point value the CI brackets: the co-reported effect size
+      # when present; for a correlation row the r IS the statistic (its
+      # adoption into effect_reported happens later, at the v0.3.0l/v0.6.6
+      # block, so read `stat` directly here). When NO point estimate exists,
+      # coherence cannot be established -- default to NOT flipping (a false
+      # INCONSISTENT is a recoverable WARN-class false positive; a false
+      # MATCH launders a real sign error into a PASS).
+      rep_point <- if (!is.na(effect_reported)) effect_reported
+                   else if (tt %in% c("r", "rho") && !is.na(stat)) stat
+                   else NA_real_
+      rep_convention_coherent <- !is.na(rep_point) &&
+        rep_point >= ciL_rep && rep_point <= ciU_rep
+      opposite_sides <- rep_convention_coherent &&
+        ((cU < 0 && ciL_rep > 0) || (cL > 0 && ciU_rep < 0))
+      if (opposite_sides) {
+        dL_flip <- abs(-cU - ciL_rep)
+        dU_flip <- abs(-cL - ciU_rep)
+        if (max(dL_flip, dU_flip) < max_delta) {
+          dL <- dL_flip
+          dU <- dU_flip
+          max_delta <- max(dL_flip, dU_flip)
+          flip_L <- -cU
+          cU <- -cL
+          cL <- flip_L
+          cand_sign_aligned <- TRUE
+        }
+      }
       if (max_delta < best_delta) {
         best_delta <- max_delta
         ci_delta_lower <- dL
         ci_delta_upper <- dU
         computed_ciL <- cL
         computed_ciU <- cU
-        ci_method_match <- cname
+        ci_method_match <- paste0(cname, if (cand_sign_aligned) ":sign-aligned" else "")
       }
     }
 
@@ -4126,7 +4297,7 @@ compute_and_compare_one <- function(row,
     }
 
     # ------------------------------------------------------------------
-    # v0.3.5 (MetaESCI 2E): ci_symmetry_class — categorical refinement
+    # v0.3.5 (MetaESCI 2E): ci_symmetry_class -- categorical refinement
     # ------------------------------------------------------------------
     {
       expects_asym <- (!is.na(canonical_type) &&
@@ -4366,7 +4537,7 @@ compute_and_compare_one <- function(row,
 
   # v0.6.6 (E-C1): a Bayesian MODEL-AVERAGED effect (RoBMA / Bayesian
   # model-averaging / PMA) reported as `r = 0.002` is NOT a frequentist Pearson
-  # correlation — it is a posterior model-averaged estimate that comes with a
+  # correlation -- it is a posterior model-averaged estimate that comes with a
   # Bayes factor (BF01), not a p-value or a recomputable r. effectcheck must not
   # flatten it to a plain `r` and (worse, via the r-adopts-itself block below)
   # mark it a verified PASS. Detect the model-averaging context from the row's
@@ -4413,13 +4584,13 @@ compute_and_compare_one <- function(row,
              "independently verifiable against a recomputed r or p-value"))
   }
 
-  # v0.3.0l: r-test upgrade — r IS both the statistic and the effect size.
+  # v0.3.0l: r-test upgrade -- r IS both the statistic and the effect size.
   # When r is reported as the test stat (e.g., r(48) = .42), it serves as its own
   # effect size. If df is available for p-value verification, this is a fully
-  # verified result — not "p_value_only".
+  # verified result -- not "p_value_only".
   #
   # v0.6.6 (E-B): the same adoption must fire when the r is reported with a CI
-  # but NO p-value — the v0.5.10 bare-r-with-CI form. Such a row previously had
+  # but NO p-value -- the v0.5.10 bare-r-with-CI form. Such a row previously had
   # check_type == "extraction_only" (no p_reported), so this block was skipped,
   # `effect_reported` stayed NA, and the row went to SKIP even though the r IS
   # the effect and the reported CI gives a verification path. collabra.57785's
@@ -4437,12 +4608,12 @@ compute_and_compare_one <- function(row,
     matched_variant <- "r"
     matched_value <- stat
     delta_effect_abs <- 0
-    # r matches itself exactly — set PASS now; Phase 9 may downgrade
+    # r matches itself exactly -- set PASS now; Phase 9 may downgrade
     # if a p-value decision error is detected
     status <- "PASS"
   }
 
-  # v0.3.0c: Correlation guard — r-tests without df or N cannot be verified
+  # v0.3.0c: Correlation guard -- r-tests without df or N cannot be verified
   # For r-tests, stat IS the r-value, so computed_variants$r trivially matches
   # the reported effect. Without df (for p-value) or N (for CI), this is a
   # self-referential match with no independent verification. Route to extraction_only.
@@ -4583,8 +4754,8 @@ compute_and_compare_one <- function(row,
   }
 
   # v0.3.0f: d-vs-t cross-check for extraction artifacts
-  # For t-tests: expected d ≈ t/sqrt(df+1) (paired) or 2t/sqrt(df+2) (ind).
-  # When reported |d| > 3 AND > 3× the maximum plausible d, it's garbled
+  # For t-tests: expected d ~= t/sqrt(df+1) (paired) or 2t/sqrt(df+2) (ind).
+  # When reported |d| > 3 AND > 3x the maximum plausible d, it's garbled
   # (typically from two-column PDF interleaving).
   if (!is.na(canonical_type) &&
       canonical_type %in% c("d", "g", "dz", "dav", "drm") &&
@@ -4904,6 +5075,72 @@ compute_and_compare_one <- function(row,
         paste0("Non-integer df (", format(df1), ") indicates a Welch / ",
                "independent-samples t-test (a paired t has integer df = n-1); ",
                "design reclassified from paired to independent"))
+    }
+
+    # v0.6.16 (E2 / E-design-label-vs-dz): a BARE table row carries no design
+    # signal of its own -- no prose clause, no design keyword, no reported
+    # effect-size family (docpluck does not attach the table CAPTION that names
+    # the design to the row; DP-3/DP-9 class). Such a row fell through every
+    # branch above to the "independent" default, which then CONTRADICTS the
+    # variant the check itself matched: collabra.23443 Tables 5/7 are
+    # one-sample t-tests whose only matching variant is dz (the paired/one-sample
+    # family), yet the row shipped design_inferred = "independent".
+    #
+    # The verdicts were already correct (PASS via dz); only the metadata label
+    # lied. Report the honest state instead: ambiguous, with the reason naming
+    # the dz-only match. Deliberately NOT flipped to "paired"/"one-sample"
+    # (user decision, 2026-08-04) -- a dz match is consistent with one-sample
+    # AND paired designs, and a true independent-samples row can match dz
+    # coincidentally, so asserting a specific within-design would overclaim a
+    # signal the text never delivered. Conservative-when-ambiguous is the
+    # tool's stated principle.
+    #
+    # Scoped narrowly so a row that DOES carry a design signal is untouched.
+    # The row must be a TABLE row (`from_table`, set by the Mode B table-row
+    # consumer -- NOT inferred from empty context: a bare table row's
+    # `context_window` holds its own cell label, e.g. "Table 5: MTurk", so an
+    # emptiness test does not identify one), it must still carry the bare
+    # "independent" default, and its matched variant must be dz-family. A
+    # reported effect-size TYPE does not disambiguate here: docpluck types the
+    # Table-5 d column as a plain "d", which is exactly the ambiguity -- a
+    # printed "d" on a one-sample test is numerically dz, and the caption that
+    # would settle it is not attached to the row (DP-3 / DP-9 class).
+    # "Bare" means the row states no design of its own. The negative guard
+    # REUSES the design vocabularies this same branch already treats as
+    # definitive (`one_sample_patterns`, `paired_patterns`,
+    # `independent_patterns`) rather than restating a second, narrower list --
+    # a hand-copied list drifts from the real vocabulary and silently
+    # ambiguates rows that DID state their design. (Sonnet cross-model review
+    # 2026-08-04 caught exactly that: an earlier hardcoded regex omitted
+    # "against chance" / "against the midpoint", which line ~4924 treats as a
+    # definitive one-sample signal.) The pattern objects only exist when the
+    # row had context text, so fall back to empty vectors.
+    .design_vocab <- c(
+      if (exists("one_sample_patterns")) one_sample_patterns else character(0),
+      if (exists("paired_patterns")) paired_patterns else character(0),
+      if (exists("independent_patterns")) independent_patterns else character(0),
+      "welch", "between-subjects", "between subjects", "repeated measures"
+    )
+    .ctx_lower <- tolower(context_text)
+    row_states_design <- length(.design_vocab) > 0 &&
+      any(vapply(.design_vocab,
+                 function(p) grepl(p, .ctx_lower, fixed = FALSE),
+                 logical(1)))
+    row_is_bare_table <- ("from_table" %in% names(row) &&
+                          length(row$from_table) > 0 &&
+                          isTRUE(row$from_table[1])) &&
+      !row_states_design
+    if (design_inferred == "independent" &&
+        row_is_bare_table &&
+        !is.na(matched_variant) &&
+        matched_variant %in% c("dz", "dav", "drm")) {
+      design_inferred <- "ambiguous"
+      uncertainty <- c(uncertainty,
+        paste0("Design not stated on this row (bare table row: no prose clause ",
+               "and no design keyword; a table caption naming the design is not ",
+               "attached to the row) and the only matching variant is ",
+               matched_variant, " (paired / one-sample family); design reported ",
+               "as ambiguous rather than assuming the independent-samples default"))
     }
   } else if (tt == "F") {
     context_text <- ""
@@ -5651,6 +5888,50 @@ compute_and_compare_one <- function(row,
       if (status == "WARN") status <- "NOTE"
     }
 
+    # v0.6.16 (E6 / E-multiplicity-adjusted-p): the paper states a
+    # multiple-comparison correction, so the REPORTED p is adjusted while
+    # p_computed is the raw per-test p. Comparing them is comparing two
+    # different quantities, and a "reported ns / computed sig" flag on such a
+    # row is a false positive against a paper that is internally consistent.
+    # collabra.90203: "post-hoc comparisons ... with Bonferroni correction",
+    # t(998) = 2.37 reported p = .053; raw p = .017977, and .017977 x 3
+    # comparisons = .0539 -- the reported value. The sibling rows corroborate
+    # (t = 2.46 -> .0422 ~ .041 reported; t = 0.097 -> 2.77 clamped to the
+    # reported p = 1.00, a value only reachable under an adjustment).
+    #
+    # Only the DECISION flag is suppressed; the row keeps its computed p and is
+    # downgraded to NOTE with the reason stated, never silently cleared. We do
+    # NOT attempt to invert the correction (the comparison count is not reliably
+    # recoverable from prose) -- claiming a verified adjusted p would be the
+    # kind of pretending the project forbids.
+    mult_ctx <- {
+      .mc <- tolower(paste(
+        if ("raw_text" %in% names(row) && length(row$raw_text) > 0) as.character(row$raw_text[1]) else "",
+        if ("context_window" %in% names(row) && length(row$context_window) > 0) as.character(row$context_window[1]) else ""
+      ))
+      # \u0161id\u00e1k = "sidak" with caron/acute accents. Escaped, not literal:
+      # R CMD check --as-cran WARNS on non-ASCII characters in R code (portability).
+      grepl(paste0("bonferroni|holm|sidak|\u0161id\u00e1k|tukey|scheff|games-howell|",
+                   "dunnett|benjamini|hochberg|false discovery rate|\\bfdr\\b|",
+                   "corrected for multiple comparisons|adjusted for multiple comparisons|",
+                   "multiple[- ]comparison correction|p[- ]values? (?:were |was )?adjusted"),
+            .mc, perl = TRUE)
+    }
+    if (decision_error && isTRUE(mult_ctx) &&
+        identical(decision_error_reason, "reported_ns_computed_sig")) {
+      decision_error <- FALSE
+      decision_error_reason <- NA_character_
+      uncertainty <- c(uncertainty,
+        paste("Decision error suppressed: the surrounding text states a",
+              "multiple-comparison correction (e.g. Bonferroni/Holm/FDR), so the",
+              "reported p is an ADJUSTED p while the computed p is the raw",
+              "per-test p -- the two are different quantities and their",
+              "disagreement is not evidence of a reporting error. The adjusted",
+              "p was not independently re-derived (the comparison count is not",
+              "reliably recoverable from prose)."))
+      if (status %in% c("WARN", "ERROR")) status <- "NOTE"
+    }
+
     # r-test with globally-inferred N: suppress decision_error (v0.2.6)
     # When N comes from the methods/intro section rather than adjacent text,
     # it may not apply to this specific correlation (e.g., subgroup analysis).
@@ -6295,22 +6576,57 @@ compute_and_compare_one <- function(row,
         # independent t has d ~ 2t / sqrt(df). Previously a one-sample row emitted
         # the independent formula, so a user running it computed d ~ 2x the correct
         # value (collabra.57785 Study 3B/3C one-sample t(742) rows).
-        os_design <- exists("design_inferred") &&
-          design_inferred %in% c("one-sample", "paired")
+        # v0.6.16 (E2 follow-through, Codex CLI review 2026-08-04 -- reproduced
+        # before fixing): the emission must follow the variant the VERDICT is
+        # based on, not only the design label. A v0.6.16 bare-table row is
+        # labelled "ambiguous" while its verdict rests on a matched dz, and it
+        # was emitting the independent `d_ind <- 2 * stat / sqrt(df1)` formula
+        # -- which, on a table row with no df, evaluates to NA. A user checking
+        # our work would see a formula that does not reproduce the number we
+        # passed. Treat a dz-family MATCHED VARIANT as within-family here, which
+        # also covers the ambiguous case without asserting a design.
+        os_design <- (exists("design_inferred") &&
+                      design_inferred %in% c("one-sample", "paired")) ||
+          (!is.na(matched_variant) && matched_variant %in% c("dz", "dav", "drm"))
         if (os_design) {
           n_os <- if (!is.na(N)) N else if (!is.na(df1)) df1 + 1 else NA_real_
-          es_label <- if (design_inferred == "one-sample") "d_onesample" else "dz"
+          es_label <- if (exists("design_inferred") && design_inferred == "one-sample") {
+            "d_onesample"
+          } else if (!is.na(matched_variant) && matched_variant %in% c("dz", "dav", "drm")) {
+            matched_variant
+          } else {
+            "dz"
+          }
+          .design_word <- if (exists("design_inferred") &&
+                              design_inferred %in% c("one-sample", "paired")) {
+            design_inferred
+          } else {
+            "one-sample / paired"
+          }
           c(
             if (!is.na(n_os)) sprintf("N <- %s # = df + 1 for a %s t-test",
-                                      format(n_os, trim = TRUE), design_inferred) else NULL,
+                                      format(n_os, trim = TRUE), .design_word) else NULL,
             if (!is.na(n_os)) sprintf("%s <- stat / sqrt(N) # Cohen's d for a %s test",
-                                      es_label, design_inferred)
+                                      es_label, .design_word)
             else sprintf("# %s <- stat / sqrt(N) (N unknown)", es_label)
           )
         } else {
+          # v0.6.16 (E8): when the row was matched and graded against a specific
+          # independent-samples variant, emit THAT variant's formula first and
+          # under its own name, so running the code reproduces the number the
+          # verdict used. The `2 * stat / sqrt(df1)` line is kept, but renamed to
+          # `d_ind_approx` and marked, because it is an approximation the tool
+          # does NOT grade against -- emitting it as a bare `d_ind` made a
+          # reader's reproduction disagree with our own verdict (collabra.77859,
+          # 7 rows, diverging up to 0.0256).
+          .graded <- if (!is.na(matched_variant) && !is.na(matched_value)) {
+            sprintf("%s <- %.6f # the value this row's verdict was graded against",
+                    matched_variant, as.numeric(matched_value))
+          } else NULL
           c(
-            "d_ind <- 2 * stat / sqrt(df1) # Cohens d (approx)",
-            if (!is.na(N)) sprintf("d_exact <- stat * sqrt(1/%.1f + 1/%.1f) # Assuming equal n", N / 2, N / 2) else NULL
+            .graded,
+            if (!is.na(N)) sprintf("d_exact <- stat * sqrt(1/%.1f + 1/%.1f) # Assuming equal n", N / 2, N / 2) else NULL,
+            "d_ind_approx <- 2 * stat / sqrt(df1) # approximation only - NOT the graded value"
           )
         }
       } else if (tt == "F") {
@@ -6340,24 +6656,50 @@ compute_and_compare_one <- function(row,
       )
 
       if (tt == "t") {
-        os_design_out <- exists("design_inferred") &&
-          design_inferred %in% c("one-sample", "paired")
+        # v0.6.16: mirror the repro_code gate above -- a dz-family MATCHED
+        # VARIANT is within-family regardless of the design label, so an
+        # "ambiguous" bare-table row shows the dz its verdict actually used.
+        os_design_out <- (exists("design_inferred") &&
+                          design_inferred %in% c("one-sample", "paired")) ||
+          (!is.na(matched_variant) && matched_variant %in% c("dz", "dav", "drm"))
         if (os_design_out) {
           # Display the one-sample / paired d = t / sqrt(N) that the verdict uses.
-          es_label_out <- if (design_inferred == "one-sample") "d_onesample" else "dz"
+          es_label_out <- if (exists("design_inferred") && design_inferred == "one-sample") {
+            "d_onesample"
+          } else if (!is.na(matched_variant) && matched_variant %in% c("dz", "dav", "drm")) {
+            matched_variant
+          } else {
+            "dz"
+          }
           n_os_out <- if (!is.na(N)) N else if (!is.na(df1)) df1 + 1 else NA_real_
           val_os <- if (!is.na(matched_value)) matched_value
                     else if (!is.na(n_os_out)) stat / sqrt(n_os_out) else NA_real_
           if (!is.na(val_os)) {
             out <- c(out, sprintf("> %s", es_label_out), sprintf("[1] %.4f", val_os))
           }
+        } else if (!is.na(matched_variant) && !is.na(matched_value)) {
+          # v0.6.16 (E8 / E-repro-output-vs-graded-value): print the value the
+          # VERDICT was graded against, under its own variant name. Previously
+          # this branch printed `computed_variants$d_ind$value` (or, worse, the
+          # crude `2 * stat / sqrt(df1)` approximation below) under a flat
+          # "d_ind" label even when the row was matched and graded against
+          # d_ind_equalN. A user following our own instruction to "run this code
+          # to verify" got a DIFFERENT number than the tool used -- observed on
+          # 7 of 15 t-test rows in collabra.77859, diverging by up to 0.0256
+          # (e.g. printed 0.6460 vs the graded 0.6204), which directly defeats
+          # Design Principle 3 (reproducibility). Found by the Sonnet canary
+          # audit, 2026-08-04.
+          out <- c(out, sprintf("> %s", matched_variant),
+                   sprintf("[1] %.4f", as.numeric(matched_value)))
         } else if ("d_ind" %in% names(computed_variants)) {
           out <- c(out, "> d_ind", sprintf("[1] %.4f", computed_variants$d_ind$value))
         } else if ("d_ind" %in% names(alternatives)) { # Fallback code is calculating d_ind as primary
           out <- c(out, "> d_ind", sprintf("[1] %.4f", alternatives$d_ind$value))
-        } else {
-          # Fallback calc for output display if not stored (e.g. from code logic)
-          out <- c(out, "> d_ind", sprintf("[1] %.4f", 2 * stat / sqrt(df1)))
+        } else if (!is.na(df1) && df1 > 0) {
+          # Last-resort display value. Label it as the APPROXIMATION it is --
+          # never as a bare `d_ind` that a reader would take for the graded
+          # value (v0.6.16 E8).
+          out <- c(out, "> d_ind_approx", sprintf("[1] %.4f", 2 * stat / sqrt(df1)))
         }
       } else if (tt == "F") {
         if ("eta2" %in% names(computed_variants)) {
@@ -6525,7 +6867,10 @@ check_text <- function(text,
                                  "regression", "spearman", "kendall", "kendall_w",
                                  "dscf", "cochran_q", "RR", "rdpct", "md_hl",
                                  "binomial", "interaction_p", "mediation_indirect",
-                                 "mcnemar_or", "bayes_factor", "hazard_ratio"),
+                                 "mcnemar_or", "bayes_factor", "hazard_ratio",
+                                 # v0.6.16 (E11): bare Cohen's d + CI post-hoc
+                                 # contrast (no test statistic of its own).
+                                 "d_reported_only"),
                        ci_level = 0.95,
                        alpha = 0.05,
                        one_tailed = FALSE,

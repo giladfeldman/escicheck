@@ -1,3 +1,167 @@
+# effectcheck 0.6.16
+
+**Nine audit findings from the 2026-08-04 canary sweep** (CI sign-alignment E3,
+honest design labels E2, self-consistent deltas E4, Cochran-Q sample-size guard
+E5, multiplicity-adjusted-p guard E6, own-clause N binding E7, reproducible
+repro-code E8, and two recovered PARSE-MISS classes E10/E11). Two further audit
+findings were REFUTED by local reproduction and documented rather than "fixed"
+(see `docs/TRIAGE_iterate_2026-08-03.md`).
+
+- **E7 / E-zrow-subsample-n** — a clause stating its own denominator
+  (`"113/133 ... versus 20/133 ..., z = 7.98"`) now binds that N instead of a
+  parent total scraped from the surrounding window. collabra.37122's
+  reversal-subsample rows carried `N = 493` (the whole study) and published
+  `r_from_z = 0.3382` where the correct N = 133 gives ~0.57, and `d_ind` 0.7188
+  against a true 1.3839 — nearly double. A `SKIP` status did NOT contain this:
+  `all_variants` values are surfaced to the reader regardless of status. The
+  v0.6.8 own-clause preference is also generalized beyond t-tests (r-tests stay
+  excluded so their best-N-by-p-value selection and "Multiple sample sizes" note
+  keep working — caught by two existing tests when the exclusion was missing).
+
+- **E8 / E-repro-output-vs-graded-value** — `repro_code` / `repro_output` now
+  emit the variant and value the row's verdict was actually graded against.
+  Independent-samples rows printed a crude `2 * stat / sqrt(df1)` approximation
+  under a flat `d_ind` label while the row had been graded against
+  `d_ind_equalN` / `g_ind`, diverging by up to 0.0256 on 7 of 15 t-test rows in
+  collabra.77859. A user following the tool's own instruction to run the code
+  got a different number than the verdict used — a direct violation of Design
+  Principle 3. The approximation is retained but renamed `d_ind_approx` and
+  marked "NOT the graded value".
+
+- **E10 / E-bare-mediation-ci** — a bootstrapped mediation effect (ACME / ADE)
+  reports a CI, never a Sobel Z, so the v0.6.10 Sobel-anchored pattern never
+  fired and the result was dropped entirely. Now extracted with its CI (the
+  `to` / `-` bracket separators are not in the generic CI pattern set) and
+  routed to NOTE — a bootstrapped ACME is not recomputable from the reported
+  numbers, so surfacing it honestly is the correct outcome.
+
+- **E11 / E-bare-d-ci** — a post-hoc contrast reported as a bare
+  `d = X, 95% CI [L, U]` with no test statistic (Scheffé / Games-Howell style)
+  is extracted as a new `d_reported_only` test type. Six such contrasts in
+  cog_emo produced zero rows. Last-resort only: a normally-reported t-test whose
+  d carries a CI is still a fully-checked `t` row (pinned by test). The effect
+  is bound from the CI-adjacent match rather than the first `d =` in the chunk —
+  the whole-corpus render diff caught an intermediate version pairing one
+  finding's `d = 0.39` with another's interval `[0.47, 0.62]`, a fabricated
+  result worse than dropping the row.
+
+**Earlier findings from the same sweep: CI sign-alignment (E3),
+an honest design label for bare table rows (E2), a self-consistent
+reported-vs-computed delta (E4), a Cochran-Q sample-size guard (E5), and a
+multiplicity-adjusted-p decision-error guard (E6).**
+
+- **E4 / E-delta-vs-matched-value** — `delta_effect` and `matched_value` must
+  describe the same number. For a correlation-dependent variant (`drm` / `dav`:
+  the value depends on the unknown within-pair correlation, so it is computed as
+  a grid), the delta was measured against the nearest GRID POINT — the
+  statistically honest question ("is the reported value achievable under some
+  plausible r?") — while `matched_value` published the r-midpoint. The row
+  therefore emitted three mutually contradictory numbers. Worst observed case:
+  reported `0.64` vs published matched `0.888` with a stated gap of `0.015`,
+  where the true gap to the midpoint is `0.248` (a 16x understatement in the
+  field that drives the PASS/WARN/ERROR threshold and that users read as the
+  reported-vs-computed gap). The grid point actually measured against is now
+  published as `matched_value`, with its provenance in `assumptions_used`;
+  verdict thresholds are unchanged (they always used the grid distance).
+  `delta_effect` is also `unname()`d at all three assignment sites — it was
+  carrying a stray variant-name attribute that serialized as an object rather
+  than a bare number through the JSON API. Found by the Sonnet canary audit of
+  collabra.57785 on 2 rows; a corpus-wide invariant check then found **11
+  violations across 3 papers** (`drm`, `dav`, and `d_onesample`). Regression
+  tests in `tests/testthat/test-v0616-delta-matches-matched-value.R`.
+
+- **E5 / E-cochranq-global-n** — a Cochran Q heterogeneity row no longer adopts
+  a sample size scraped from surrounding document context. Q is computed over a
+  meta-analysis's effects (its "N" is k, the number of effects), so a host
+  paper's participant count is a different quantity entirely: collabra.90203's
+  `Q_T [40] = 104.65` carried `N = 1004` — the replication's own participant
+  count — with fabricated `global_text` provenance. The guard is concept-based
+  rather than source-list-based (an earlier draft listed only
+  `global_text`/`extended_context` and still adopted a study-level `N` a few
+  sentences away, which binds as `local_context`): there is no provenance under
+  which a participant count legitimately becomes a Q row's N. Same class as the
+  v0.5.14 Bayesian-model-averaged guard and the v0.5.18 `md_hl` guard, never
+  extended to `cochran_q`. Found by the Sonnet canary audit of collabra.90203.
+  Regression tests in `tests/testthat/test-v0616-cochranq-no-global-n.R`.
+
+- **E6 / E-multiplicity-adjusted-p** — when the surrounding text states a
+  multiple-comparison correction (Bonferroni / Holm / Šidák / Tukey / Scheffé /
+  Games-Howell / Dunnett / Benjamini-Hochberg / FDR), a
+  `reported_ns_computed_sig` decision error is a false positive: the reported p
+  is ADJUSTED while the computed p is the raw per-test p, so the two are
+  different quantities. collabra.90203's Bonferroni-corrected post-hoc
+  `t(998) = 2.37, p = .053` was flagged WARN against a raw p of `.0180` — and
+  `.0180 x 3 comparisons = .0539`, the reported value; the sibling rows
+  corroborate (`t = 2.46` -> `.0422` vs reported `.041`; `t = 0.097` -> `2.77`
+  clamped to the reported `p = 1.00`, a value unreachable without an
+  adjustment). **Only that direction is suppressed**: a correction only ever
+  makes p larger, so a `reported_sig_computed_ns` row stays flagged even under a
+  stated correction, and the flag still fires when no correction is mentioned —
+  both pinned by tests, because a broader guard would launder a real error
+  class. The adjusted p is deliberately NOT re-derived (the comparison count is
+  not reliably recoverable from prose); the row keeps its computed p, drops to
+  NOTE, and states the reason. Found by the Sonnet canary audit of
+  collabra.90203. Regression tests in
+  `tests/testthat/test-v0616-multiplicity-adjusted-p.R`.
+
+- **E-design-label-vs-dz (E2)** — a bare table row (Mode B: a typed table row
+  handed over by the extractor) carries no design signal of its own: the table
+  CAPTION that names the design is not attached to the row (DP-3 / DP-9 class).
+  Such a row fell through every design-inference branch to the
+  independent-samples default, which then CONTRADICTED the variant the check
+  itself matched — collabra.23443 Tables 5/7 are one-sample t-tests whose only
+  matching variant is `dz`, yet the row shipped
+  `design_inferred = "independent"`. The verdicts were already correct (PASS via
+  dz); only the metadata label lied. Such a row now reports
+  `design_inferred = "ambiguous"` with an `uncertainty_reasons` entry naming the
+  dz-only match. Deliberately NOT flipped to `"paired"` / `"one-sample"`: a dz
+  match is consistent with both, and a genuine independent-samples row can match
+  dz coincidentally, so asserting a within-design would overclaim a signal the
+  text never delivered (conservative-when-ambiguous). The "does this row state
+  its own design?" guard reuses the branch's existing `one_sample_patterns` /
+  `paired_patterns` / `independent_patterns` vocabularies rather than a
+  hand-copied subset — a Sonnet cross-model review (2026-08-04) caught an earlier
+  hardcoded regex that omitted `"against chance"` / `"against the midpoint"` and
+  would have ambiguated rows that DID state their design.
+  Follow-through (Codex CLI review 2026-08-04, reproduced before fixing): the
+  `repro_code` / `repro_output` emission now keys off the matched dz-family
+  variant as well as the design label. An `"ambiguous"` row was still emitting
+  the independent `d_ind <- 2 * stat / sqrt(df1)` formula, which on a df-less
+  table row evaluates to `NA` — a user checking our work would have run a
+  formula that does not reproduce the number the PASS is based on (same defect
+  class as the v0.6.8 one-sample fix, newly reachable through the new label).
+  Regression tests in `tests/testthat/test-v0616-e2-bare-table-design-ambiguous.R`.
+
+**CI comparison follows the magnitude convention of the value match
+(sign-alignment).**
+
+- **E-ci-sign-align** — the effect-size value match has always been
+  magnitude-based (`abs(computed)` vs `abs(reported)`), because the sign of a
+  computed t-derived effect follows the arbitrary group-coding direction of
+  the t statistic, not the paper's reporting convention. The CI comparison,
+  however, compared SIGNED bounds — so a reported positive CI on a negative-t
+  row was checked against a computed CI on the opposite side of zero, flagging
+  a spurious `ci_check_status = "INCONSISTENT"` with fabricated deltas
+  (collabra.23443 S1-R13: `t(1596) = -7.67, d = 0.19 [0.14, 0.24]` vs the
+  computed r-scale CI `[-0.235, -0.141]`, deltas ~0.38). The best-candidate
+  loop now also tries the sign-flipped candidate `[-cU, -cL]` when — and only
+  when — the computed CI lies entirely on the opposite side of zero from the
+  reported CI, keeping whichever aligns better. The alignment is never
+  silent: `ci_method_match` carries a `:sign-aligned` suffix (surfaced in the
+  app UI as "(sign-aligned)"). A zero-straddling CI is never flipped, and a
+  genuine magnitude mismatch stays INCONSISTENT — flipping aligns direction
+  only, it cannot shrink a magnitude discrepancy. The flip is additionally
+  gated on the paper's own reporting being internally coherent — the reported
+  point estimate must lie within its own reported CI. Without that guard a
+  dropped-minus row (`r = -0.50, 95% CI [0.34, 0.63]`, the v0.6.3
+  `sign_ci_violation` signature) was laundered into `MATCH` + PASS — found by
+  a Codex CLI cross-model review (2026-08-04), reproduced locally, and pinned
+  red-then-green. When no point estimate exists, the flip never fires
+  (conservative: a false INCONSISTENT is recoverable; a false MATCH is not).
+  Surfaced by the 2026-08-03 Sonnet canary audit of collabra.23443
+  (escicheck-iterate cycle 5, finding E3); regression tests in
+  `tests/testthat/test-v0616-ci-sign-align.R`.
+
 # effectcheck 0.6.15
 
 **Restatement guard for the v0.6.14 prose-dedup un-collapse + Mode B typed-n binding.**
