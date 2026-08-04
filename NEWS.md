@@ -1,3 +1,70 @@
+# effectcheck 0.6.17
+
+**Three sample-size defects that published wrong effect sizes**, found by
+expanding the escicheck-iterate comparison harness onto papers that had an AI
+`stats` gold but had never been compared against the library (~548 gold results
+the library had never been audited against).
+
+- **`global_N` resolved a frequency TIE to the SMALLEST candidate.** The
+  document-level fallback took the mode of every `N = <int>` in the text, but
+  `table()` orders counts by ascending numeric name and `which.max()` returns
+  the FIRST maximum — so whenever the top frequency was shared, the "mode"
+  silently became the smallest number in the paper. On
+  10.1016/j.jesp.2009.12.010 every candidate tied at frequency 2 (7, 13, 25, 31,
+  38 — each twice, all cells of one accepters/rejecters subgroup table), so the
+  paper's global N became **7**, its smallest subgroup cell. The rule is now a
+  documented, tested helper (`global_n_from_candidates()`): a tie resolves to
+  the largest **tied** value, never by escaping to the global maximum. That last
+  distinction matters — an intermediate version that used `max(ns)` on a tie was
+  caught by the corpus diff handing 10.1525/collabra.32572's F rows N = 3302 (a
+  lone outlier among a 273–279 cluster) against a true 999.
+
+- **A z-test published effect sizes from a scraped N in complete silence.** The
+  `z` branch computes `d = 2z/sqrt(N)`, `dz = z/sqrt(N)` and `r = z/sqrt(z²+N)`,
+  but every N-plausibility guard in the package is keyed on df — and a z-test
+  has no df — so none of them could fire. The two Study-2 Sobel mediation rows
+  on jesp.2009.12.010 published `r_from_z = 0.7341` and `d = 2.162` from N = 7
+  with an entirely **empty** `uncertainty_reasons`; the study's real N is 76,
+  giving 0.312 and 0.328 — more than **double** the truth. The branch now
+  announces a document-level N and states that every effect size below scales
+  with it. (As in v0.6.16's E7, a `SKIP`/`NOTE` status does not contain this:
+  `all_variants` values reach the reader regardless of status.)
+
+- **A global-text N could outrank a stated df.** The existing
+  "global-text N incompatible with df" override only fired at `N > df + 12`, so
+  any scraped N in `[df+1, df+12]` cleared both it and the minimum-N guard and
+  was kept — even though df fixes N to within one unit (df+1 paired, df+2
+  independent). This was latent until the tie fix above raised jesp.2009's
+  global N from an obviously-broken 7 (rejected by the minimum-N guard, then
+  correctly re-derived as 34 from df) to a plausible-looking 38 that sailed
+  through both guards, degrading `g_ind` from 1.1052 to 1.0482 on the Study-1
+  t(32) rows. For a `global_text` N, df now wins for any value above df+2.
+  Welch rows are untouched (they take a separate branch where N legitimately
+  exceeds df+2) — a cross-model reviewer flagged that risk and local
+  reproduction refuted it; the routing is now pinned by a regression test.
+
+- **A df-replaced N could contradict the row's own design label.** The override
+  above picks its replacement with `if (canonical_type %in% c("dz","dav","drm"))
+  df1 + 1 else df1 + 2` — but `canonical_type` is the reported *effect-size
+  family*, not the design. A t-test reporting no effect size at all has
+  `canonical_type = NA`, so it fell to the `else` and took the
+  independent-samples N even on a row the checker itself labelled
+  `design_inferred = "paired"`: a paired `t(49)` published N = 51 where the true
+  paired N is 50. Two corrections: when the effect-size family does not settle
+  the design, the incompatible N is discarded so the existing ambiguous-design
+  path re-infers it (computing *both* variants); and the published `N` is
+  reconciled to df+1 when the final design label is paired/one-sample and `N` is
+  still the df+2 default. Scoped narrowly — a t-test with a known df, no
+  explicit group sizes, and `N` exactly equal to df+2 — so an explicitly
+  reported N is never touched. Verified against ground truth on
+  10.1525/collabra.23443, whose three one-sample `t(798)` rows move from
+  N = 800 to N = 799, matching the gold's `n_total = 799` exactly.
+
+Also verified on the fixed-3 canary: 10.1525/collabra.90203's `t(998)` pairwise
+contrasts now bind N = 1000 (df+2, the two conditions actually compared) instead
+of the paper-level 1004, and their reported-vs-computed CI mismatch shrinks
+accordingly.
+
 # effectcheck 0.6.16
 
 **Nine audit findings from the 2026-08-04 canary sweep** (CI sign-alignment E3,

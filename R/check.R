@@ -1206,8 +1206,22 @@ compute_and_compare_one <- function(row,
               as.integer(N_original), N
             )
           )
-        } else if (N > max_expected_N + 10) {
-          # N is much larger than expected for this df.
+        } else if (N > max_expected_N + 10 ||
+                   (N > max_expected_N + 0.5 &&
+                    "N_source" %in% names(row) && !is.na(row$N_source[1]) &&
+                    row$N_source[1] == "global_text")) {
+          # N is larger than the df allows.
+          #
+          # v0.6.17: the `+ 10` slack applies only to a TRUSTED (inline /
+          # adjacent) N, where a modest mismatch may reflect reporting rounding
+          # or a subgroup the clause names. For a `global_text` N -- a
+          # last-resort document-level scrape with no tie to this statistic --
+          # ANY value above df+2 is incompatible, and df is structurally
+          # authoritative. The old threshold let a global N in [df+1, df+12]
+          # clear both this check and the minimum-N guard and be kept:
+          # 10.1016/j.jesp.2009.12.010's Study 1 t(32) rows bound the paper's
+          # global N of 38 where df fixes N at 34 (confirmed by gold
+          # n_total = 34), computing g_ind = 1.0482 instead of 1.1052.
           n_source_val <- if ("N_source" %in% names(row) && !is.na(row$N_source[1])) {
             row$N_source[1]
           } else {
@@ -1220,17 +1234,38 @@ compute_and_compare_one <- function(row,
             # override above. Without this, the recomputed d uses a wrong N and the
             # result is flagged WARN even though the reported effect is consistent.
             N_original <- N
+            # v0.6.17: `canonical_type` is the reported EFFECT-SIZE family, not
+            # the design. df tells us N is df+1 (paired) or df+2 (independent) --
+            # it does NOT tell us which. When the effect-size family does not
+            # settle it (canonical_type NA, e.g. a t-test reporting no effect
+            # size at all), do not silently commit to the independent reading:
+            # drop N and let the ambiguous-design path below re-infer it, which
+            # computes BOTH variants and labels design_inferred = "ambiguous".
+            # Committing to df+2 here published N = 51 on a paired t(49) whose
+            # true N is 50, on a row the checker itself labelled "paired".
+            # (Widened reach in v0.6.17: the override now fires for ANY
+            # global_text N above df+2, not only above df+12.)
             N <- if (!is.na(canonical_type) && canonical_type %in% c("dz", "dav", "drm")) {
               df1 + 1
-            } else {
+            } else if (!is.na(canonical_type) && canonical_type %in% c("d", "g")) {
               df1 + 2
+            } else {
+              NA_real_
             }
             assumptions <- c(
               assumptions,
-              sprintf(
-                "Global-text N=%d is incompatible with df=%.0f; replaced with N=%.0f inferred from df",
-                as.integer(N_original), df1, N
-              )
+              if (is.na(N)) {
+                sprintf(
+                  paste0("Global-text N=%d is incompatible with df=%.0f; discarded ",
+                         "(design unknown, so N is re-inferred from df below)"),
+                  as.integer(N_original), df1
+                )
+              } else {
+                sprintf(
+                  "Global-text N=%d is incompatible with df=%.0f; replaced with N=%.0f inferred from df",
+                  as.integer(N_original), df1, N
+                )
+              }
             )
             uncertainty <- c(
               uncertainty,
@@ -2734,6 +2769,45 @@ compute_and_compare_one <- function(row,
     }
   } else if (tt == "z") {
     # ------ Z-TEST COMPUTATIONS ------
+
+    # v0.6.17: announce a document-level (global_text) N before computing
+    # anything from it.
+    #
+    # Every effect size below (d = 2z/sqrt(N), dz = z/sqrt(N), r = z/sqrt(z^2+N))
+    # is a direct function of N, and a z-test carries no df -- so none of the t
+    # branch's N-plausibility guards (minimum-N vs df, the Welch floor, the
+    # global-N override cross-checked against a reported d) can fire here. That
+    # left the z branch with no guard at all: on 10.1016/j.jesp.2009.12.010 the
+    # Study 2 mediation rows bound N = 7 -- a rejecters-subgroup table cell
+    # ~7,000 characters away, selected as the paper's global N -- and published
+    # r_from_z = 0.7341 and d = 2.162 with an EMPTY uncertainty_reasons. The
+    # study's real N is 76 (stated in prose as "A total of 76 Israeli students",
+    # a form `pat_N` does not match), giving 0.312 and 0.328.
+    #
+    # The companion v0.6.17 fix in parse.R stops a frequency TIE from resolving
+    # to the smallest candidate, but that only makes the fallback less wrong --
+    # it is still a document-level guess. The user must be told which rows rest
+    # on one. Mirrors the t branch's Phase-2C message (check.R ~L1342).
+    #
+    # Values in `all_variants` reach the user regardless of the row's status, so
+    # this message is the only thing standing between a scraped N and a
+    # confident-looking effect size.
+    if ("N_source" %in% names(row) && !is.na(row$N_source[1]) &&
+        row$N_source[1] == "global_text" && !is.na(N)) {
+      assumptions <- c(
+        assumptions,
+        "Sample size N inferred from elsewhere in the document (verify it applies to this z-test)"
+      )
+      uncertainty <- c(
+        uncertainty,
+        sprintf(
+          paste0("Sample size (N=%d) was not stated with this z-test; it was taken from ",
+                 "elsewhere in the document. All effect sizes below scale with N -- ",
+                 "verify N before using them."),
+          as.integer(N)
+        )
+      )
+    }
 
     # Stage 1 / P6: Cohen's h from a two-proportion z-test. When the chunk
     # reports two proportions p1 and p2, h is the appropriate effect size.
@@ -6416,6 +6490,35 @@ compute_and_compare_one <- function(row,
     if (nchar(cat_tag) > 0) {
       ambiguity_reason <- paste0(ambiguity_reason, cat_tag)
     }
+  }
+
+  # v0.6.17: reconcile the published N with the FINAL design label.
+  #
+  # N is committed early (check.R ~L1300), before the prose-based design
+  # detection (~L5110) has run. When that later phase concludes "paired" but the
+  # early commit had no effect-size family to go on, it had defaulted to the
+  # independent reading df+2 -- so the row published N = df+2 while its own
+  # design_inferred said "paired", a self-contradiction and a wrong N. Observed
+  # on a paired t(49) (published N = 51, true 50) and reported independently by
+  # the 2026-08-04 canary audit of collabra.57785 (Table-8 row, N = 744 where
+  # gold n_total = 743), where the wrong N also propagates into repro_code.
+  #
+  # Scope is deliberately narrow: only a t-test, only when df is known, only
+  # when the FINAL label is a df+1 family (paired / one-sample), and only when
+  # the published N is exactly the df+2 independent value. An explicitly
+  # reported N (n1/n2 given, or any N that is not the df+2 default) is left
+  # untouched -- this corrects an inference, never an observation.
+  if (!is.na(tt) && tt == "t" && !is.na(df1) && df1 > 0 &&
+      !is.na(N) && is.na(n1) && is.na(n2) &&
+      exists("design_inferred") && !is.na(design_inferred) &&
+      design_inferred %in% c("paired", "one-sample") &&
+      abs(N - (df1 + 2)) < 1e-9) {
+    N <- df1 + 1
+    assumptions <- c(
+      assumptions,
+      sprintf("N reconciled to df + 1 = %.0f for the %s design detected from the surrounding text",
+              N, design_inferred)
+    )
   }
 
   tibble::tibble(
