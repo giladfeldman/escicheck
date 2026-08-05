@@ -4,8 +4,8 @@
 # (beta) reported as the effect size of a t-test -- "(β = 0.83, t(261) = 5.82,
 # p < .001)" -- was cross-matched against the t-test's Cohen's d variants
 # (matched_variant = d_ind_equalN / gav / drm). A beta is not a Cohen's d; a
-# multi-predictor / mediation beta is not recoverable from the t-statistic
-# alone, so matching it to a computed d is "garbage statistics" (design
+# multi-predictor / mediation beta is not a function of the t-statistic,
+# so matching it to a computed d is "garbage statistics" (design
 # principle 5) -- the PASS/NOTE verdict depended on whether the beta value
 # coincidentally resembled the computed d. Fix: when canonical_type == "beta"
 # and tt == "t", leave it unmatched and report an honest NOTE (mirrors Gap 3).
@@ -27,8 +27,17 @@ test_that("v0.5.4: a beta on a t-test is not cross-matched to a Cohen's d", {
     expect_true(is.na(row$matched_value[1]), info = vq)
     # recognised but unverifiable -> NOTE, never a coincidental PASS
     expect_equal(row$status[1], "NOTE", info = vq)
-    expect_true(grepl("not recoverable",
-                      paste(row$uncertainty_reasons, collapse = " ")), info = vq)
+    # 2026-08-05 (triple-verification audit): this used to grep for "not
+    # recoverable". That phrasing was retracted as OVERBROAD -- for SIMPLE
+    # regression the standardized beta equals r = t/sqrt(t^2+df) exactly, which
+    # this package computes elsewhere. The guard's BEHAVIOUR is unchanged and
+    # still correct (a bare t clause does not establish the predictor count, and
+    # assuming k = 1 would publish a wrong beta for every mediation path), so
+    # the test now pins behaviour + semantic content instead of the sentence.
+    reasons <- paste(row$uncertainty_reasons, collapse = " ")
+    expect_true(grepl("beta", reasons, ignore.case = TRUE), info = vq)
+    expect_true(grepl("not independently verified", reasons, fixed = TRUE), info = vq)
+    expect_false(grepl("not recoverable", reasons, fixed = TRUE), info = vq)
   }
 })
 

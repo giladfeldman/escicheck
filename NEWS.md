@@ -1,3 +1,50 @@
+# effectcheck 0.6.19
+
+**Two shipped "cannot verify" messages claimed mathematical impossibility that does
+not hold.** Found by the 2026-08-05 re-audit of every won't-fix / not-recoverable
+ruling in the repo, run under the portfolio-wide triple-verification rule (each claim
+checked against the primary source, then codex, then a Sonnet pass instructed to
+refute). **No verdict, status, or computed value changes** — the conservative
+behaviour was and remains correct. Only the stated *reason* was wrong, and on a
+science platform a false claim about what is mathematically knowable is itself a
+defect.
+
+- **Cohen's h on a goodness-of-fit chi-square** said h *"is not recoverable from the
+  chi-square statistic alone"*. That is overbroad: for **df = 1 against an explicit
+  50-50 null with N known**, `chi2 = N(2p̂ − 1)²`, so `|p̂ − 0.5| = sqrt(chi2/N)/2` and
+  h is determined **up to sign** (chi2 = 6.4, N = 100 → p̂ = .6265, h = .2558). The
+  claim does hold for k > 2 categories, a non-.5 null, or unknown N. The message now
+  says the chi-square does not pin the proportions down *here* (it aggregates all
+  categories and the null proportion is not established from the text), rather than
+  asserting impossibility in principle.
+
+- **A standardized beta reported on a t-test** said a beta *"is not recoverable from
+  the t-statistic alone"*, unconditionally. For **simple (single-predictor)
+  regression** the standardized beta equals `r = t/sqrt(t² + df)` exactly — a formula
+  this package already implements (`standardized_beta_from_t()`) and applies to rows
+  typed `regression`. The claim is true only for multi-predictor / mediation models.
+  The guard still fires unconditionally **by design**: a bare `t` clause does not
+  establish the predictor count, and assuming k = 1 would silently publish a wrong
+  beta for every mediation path — the exact failure this guard exists to prevent. The
+  message now says the model is not identifiable from the clause.
+
+- **The DP-3 partial-η² mechanism** is corrected at its two remaining sites
+  (`NEWS.md` 0.6.7 entry, `R/parse.R`). The won't-fix verdict for body prose stands
+  (OCR / shape-recognition tier); the *reason* — "the glyph lives in a font with no
+  ToUnicode CMap" — is refuted: the symbol is **4 filled vector curves with no char
+  object**, i.e. drawn ink that was never text. The 0.6.7 entry also recorded the
+  ruling as "confirmed" on the strength of a circular check (counting `η` in the
+  extracted text, i.e. asking the extractor under suspicion whether its own output was
+  complete). Practical consequence: font/CMap/ToUnicode recovery can never fix this
+  class; a vector-path recogniser can.
+
+Regression tests: the two message assertions previously grepped the retracted
+phrases, so correcting them would have looked like a regression. Both now pin
+**behaviour plus semantic content** and add an explicit `expect_false` on the
+retracted phrase — verified RED against the old wording before being restored.
+
+Full report: `docs/FINDINGS_2026-08-05_rejection_reaudit.md`.
+
 # effectcheck 0.6.18
 
 **Four sample-size defects that published wrong or unlabeled Ns**, found by the
@@ -130,10 +177,13 @@ respect are pinned in `test-v0618-prose-restatement-dedup.R`.
 narrowed to a p-value-only check and could still publish `status = "OK"` with
 `ci_check_status = "MATCH"` and nothing in `uncertainty_reasons` — a reader saw
 a green row and could not tell the paper had reported an effect size the tool
-never verified. (On `collabra.90203` the partial-eta-squared glyph has no
-ToUnicode mapping in the source PDF, so the body text arrives as a nameless
-`= .008`; the value is recovered from the table view, but silence on the
-body-text row was still dishonest.) A confidence interval cannot exist without
+never verified. (On `collabra.90203` the partial-eta-squared symbol is drawn in
+the source PDF as filled vector curves with no character object at all, so the
+body text arrives as a nameless `= .008`; the value is recovered from the table
+view, but silence on the body-text row was still dishonest. *Mechanism corrected
+2026-08-05: this entry originally said the glyph "has no ToUnicode mapping" —
+that cause is refuted; the symbol is ink, not badly-encoded text. The behaviour
+described here is unchanged and correct.*) A confidence interval cannot exist without
 an estimate, so its presence is proof an effect size was reported — the row now
 says the effect size was not verified. Found by the cycle-2 canary audit.
 
@@ -782,8 +832,14 @@ the AI stats gold. Full suite 877 test_that blocks / 0 fail, `R CMD check --as-c
   path. When the table row carries `df1`+`df2` the value is **recomputed from F and
   verified** (collabra.90203 Table 9 H5d `F(2,998)=0.792, η²p=.002 [.000,.009]` → PASS);
   when df is absent it routes to an honest NOTE that surfaces the η²p + CI. This is the
-  **only** recoverable source of η²p for this paper — the body-text glyph has no ToUnicode
-  CMap and is stripped to a bare `( = .000, …)` (docpluck OCR-tier won't-fix, confirmed).
+  **only** recoverable source of η²p for this paper — the body-text symbol is absent from
+  the delivered text, leaving a bare `( = .000, …)` (OCR / shape-recognition tier).
+  *(Mechanism corrected 2026-08-05: this entry originally read "the body-text glyph has no
+  ToUnicode CMap … docpluck OCR-tier won't-fix, confirmed". The verdict stands but that
+  reason is **refuted** — the symbol is 4 filled vector curves with no char object, not a
+  mis-encoded font glyph — and "confirmed" rested on a circular check (counting `η` in the
+  extracted text, i.e. asking the extractor under suspicion whether its own output was
+  complete). See `docs/REPLY_FROM_DOCPLUCK_2026-06-25.md`.)*
   An effect-only ANOVA cell (typed `eta2` + CI, blank F) becomes a `table_estimate` row
   named `etap2`. An UNtyped `est` is still left unbound (no regression).
 

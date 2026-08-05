@@ -6,8 +6,11 @@
 #
 # WHAT WENT WRONG
 #
-# On that paper the partial-eta-squared glyph has no ToUnicode mapping in the
-# source PDF, so the body text arrives as a nameless "F(2, 998) = 3.91,
+# On that paper the partial-eta-squared symbol is drawn as filled vector curves
+# with no character object in the source PDF (mechanism corrected 2026-08-05 by
+# triple-verification re-audit; this comment previously said "has no ToUnicode
+# mapping", which is refuted -- it is ink, not badly-encoded text. The test and
+# the behaviour it pins are unaffected), so the body text arrives as a nameless "F(2, 998) = 3.91,
 # p = .02, = .008. 95% CI [.000, .021]" -- the CI parses, the effect size
 # cannot. The row then narrowed to a p-value-only check and published
 #
