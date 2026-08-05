@@ -1,3 +1,152 @@
+# effectcheck 0.6.18
+
+**Four sample-size defects that published wrong or unlabeled Ns**, found by the
+2026-08-04 escicheck-iterate canary audits of `collabra.57785`, `collabra.90203`
+and `pci.rr.100726`. Every one was reproduced at HEAD before any code changed,
+and each carries a regression test that was watched RED against the unfixed code.
+
+- **A docpluck table row never received the document-level N.**
+  `flattened_rows_to_parsed()` emits no `N_source`, so a flattened table t-row
+  with no printed `n` reached the checker with `N = NA` and fell to the internal
+  `df + 2` default — even when the paper states its N plainly in prose. On
+  `collabra.57785` the Table-8 `t(742)` rows published **N = 744** where the
+  paper states 743 (`= df + 1`; gold `n_total = 743`). A table t-row now binds
+  the document N when that N is **df-compatible** — exactly `df + 1` or
+  `df + 2`. The exact-match window is the evidence gate: two independently
+  sourced numbers agreeing to the unit is real information, while a scraped
+  document N matching neither candidate cannot slip in. Table rows deliberately
+  do NOT get the unconditional global-N fallback prose rows have.
+
+- **An ambiguous-design row published its internal assumption as fact.** The
+  ambiguous branch stores the independent `df + 2` in `N` "for independent
+  calculations", and that internal value leaked to the published top-level `N`
+  with no `N_source` and no message naming the paired alternative;
+  `repro_code` then asserted "Assuming equal n". Now the row states both
+  candidates (`df + 1` paired / `df + 2` independent) in `uncertainty_reasons`
+  and `repro_code` emits the paired formula alongside the independent one.
+
+- **`N_source` said `"not_found"` next to a populated `N`.** A self-contradiction:
+  the N *was* found — by inference from df. `pci.rr.100726` published
+  `N = 870` with `N_source = "not_found"`. Any N derived from df is now labeled
+  **`"df_inferred"`**.
+
+- **A scraped N outranked the row's own df for sources other than `global_text`.**
+  v0.6.17 fixed this for the one `N_source` its reproduction happened to use;
+  `local_context` / `extended_context` are the same kind of evidence — a number
+  the statistic's own clause never claimed — and carried the identical defect.
+  `"Participants (N = 1001) … t(667) = 3.67, d = 0.28 [0.13, 0.44]"` bound
+  N = 1001 where df fixes N at 669, computing `d = 0.2320` against a reported
+  0.28 and firing a **false WARN plus a false CI mismatch** — while the row's own
+  uncertainty text already read "Reported N (1001) is larger than expected
+  (668-669) for df=667" and used 1001 anyway. The override is now keyed on a
+  named set, `.SCRAPED_N_SOURCES`. Sources stated *by* the statistic's own
+  clause (`own_clause`, `subgroup_sum`, `arm_totals_sum`, `chi_inline`, …) are
+  deliberately excluded — an explicitly reported N that disagrees with df is a
+  finding to surface, not a value to silently overwrite.
+
+**A post-hoc contrast that reprints the omnibus ANOVA error df is no longer
+scored against `df + 2`.** After a k-level ANOVA, stats packages routinely
+reprint the omnibus error df on each pairwise contrast, but a two-level contrast
+uses only ~2/k of the sample. On `collabra.90203` an `F(2, 998)` omnibus
+(N = 1001) is followed by `t(998) = 2.46, p = .041, d = 0.19 [0.04, 0.35]`;
+binding N = 1000 computed `d = 0.1556` (delta 0.0344) and produced a **WARN plus
+an INCONSISTENT CI flag**, both false — at the true contrast N = 669 the
+computed `d = 0.1902` (delta 0.0002) and the CI reproduces the reported one.
+
+The rule ships in a deliberately conservative form. A cross-model review
+(Codex) **refuted the first draft**, which fired on same-document df equality
+alone: a paper can legitimately contain a 3-arm `F(2, 998)` *and* a real
+two-group comparison of the full sample with a genuine `t(998)`. That
+counterexample was reproduced locally before the design changed. So omnibus-df
+matching now only **proposes** a candidate N, and adoption requires BOTH that
+the surrounding text describes a post-hoc / pairwise / Tukey / Bonferroni
+comparison AND that the row's own reported effect size is explained materially
+better by the candidate than by `df + 2`.
+
+A second review round (also Codex) showed why the text requirement is
+load-bearing: effect-size fit alone is **circular**, because an unequal-groups
+full-sample t reports a d larger than the equal-n `df + 2` estimate and can fit
+the candidate coincidentally — a document with `F(2, 98)` and a genuine
+`t(98) = 2.00` whose unprinted cells are `n1 = 20, n2 = 80` would have been
+rewritten to N = 67 against a true 100. CI-width corroboration does not rescue
+it (unequal groups widen the interval in the same direction a smaller N does),
+and `contrast_N / (df + 2)` is `2/k` in both cases, so the two are
+mathematically indistinguishable from the numbers alone. Both counterexamples
+are pinned as tests.
+
+A row whose reported effect matches *neither* N keeps its inconsistency flag;
+suppressing it unconditionally would mask a genuine reporting error. Explicit
+per-group sizes always outrank the hypothesis, and a 2-group `F(1, df)` never
+triggers it.
+Adopted Ns are labeled `N_source = "omnibus_df_contrast"` and disclose the
+balanced-cell assumption in `uncertainty_reasons`.
+
+Verified on the real corpus render: the two false positives clear
+(WARN → PASS, CI INCONSISTENT → MATCH) while the same paper's honestly-reported
+`t(667)` / `t(668)` rows stay byte-identical.
+
+A cross-model review of this release's own diff surfaced six further defects,
+each reproduced locally before being fixed: `subgroup_sum` was exempted from the
+df-authority override although it is matched over the wider context (so a
+subgroup pair in `[df+3, df+12]` bypassed it); the Welch branch's
+implausible-N cross-check was still keyed on `global_text` alone, which became
+the only remaining guard once stated-Welch rows began skipping the non-Welch
+path; the Welch back-computation `N = 4t²/d²` treated a reported Hedges' *g* as
+a Cohen's *d* (now converted via `d = g / J`, after a first attempt that simply
+excluded *g* proved worse — it left the implausible scraped N in place); the new
+relative p-value gate falsely flagged legitimate rounding (`p = .01` printed at
+two decimals honestly represents a computed `.0051`), so the ratio now applies
+only outside the rounding band the printed precision implies; and
+`N_source = "df_inferred"` was not emitted when a *scraped* source had been
+discarded and replaced, leaving the row advertising a provenance its published
+number no longer had.
+
+**The z-branch scraped-N disclosure now covers every scraped source.** v0.6.17
+added the warning because a z-test has no df, so none of the df-keyed
+N-plausibility guards that protect t-rows can fire — whatever N is bound is used
+for `d = 2z/sqrt(N)`, `dz = z/sqrt(N)` and `r = z/sqrt(z² + N)` with nothing to
+contradict it. But it was keyed on `global_text` alone, leaving `local_context`
+/ `extended_context` / `subgroup_sum` silent. `"The calibration sample
+(N = 100) was used first. In the target subsample (n = 25), z = 2.00, p = .046,
+r = .20."` bound N = 100, published `status = "OK"` with an entirely **empty**
+`uncertainty_reasons`, and computed `r = 0.196` against the reported `.20` — an
+apparent match, where the clause's own `n = 25` gives `0.371`. Re-keyed on
+`.SCRAPED_N_SOURCES`. Found by the final pre-push cross-model review.
+
+**Known, unfixed:** a statistic quoted twice in running text is still scored
+twice. `pci.rr.100726` is a peer-review letter whose comment prints one
+`t(868) = -3.01, p = .006` twice to illustrate APA comma placement, and the
+render emits two rows. Three dedup rules were built and each was disproved —
+by the v0.6.14 invariant that two genuinely distinct correlations can share
+every reported number (`r(797) = .16` twice in one sentence, different
+variables), and finally by the real paper itself, whose echo carries its own
+`t(df)` anchor and so is indistinguishable from a second result. Separating the
+two needs a signal this layer does not have. **The duplicate is left in place
+deliberately**: a duplicate row is a counting error the reader can see, a
+dropped row is a lost result they cannot. The invariants any future fix must
+respect are pinned in `test-v0618-prose-restatement-dedup.R`.
+
+**A reported CI with no parseable effect size is no longer silent.** Such a row
+narrowed to a p-value-only check and could still publish `status = "OK"` with
+`ci_check_status = "MATCH"` and nothing in `uncertainty_reasons` — a reader saw
+a green row and could not tell the paper had reported an effect size the tool
+never verified. (On `collabra.90203` the partial-eta-squared glyph has no
+ToUnicode mapping in the source PDF, so the body text arrives as a nameless
+`= .008`; the value is recovered from the table view, but silence on the
+body-text row was still dishonest.) A confidence interval cannot exist without
+an estimate, so its presence is proof an effect size was reported — the row now
+says the effect size was not verified. Found by the cycle-2 canary audit.
+
+Also fixed in the same render: the ANOVA-design uncertainty message was authored
+with an escaped em-dash, which passed the source-file ASCII check but reached
+the **user** as a corrupted byte. A new test asserts emitted messages contain no
+non-ASCII bytes — checking the source alone was blind to this.
+
+Internal: `pat_N` is hoisted to a package-level `.pat_doc_N` with a shared
+`.doc_global_n()` helper, so `check_text()` and `parse_text()` cannot drift
+apart (an attribute on `parse_text()`'s return value was tried first and
+silently vanished on the zero-statistics early-return paths).
+
 # effectcheck 0.6.17
 
 **Three sample-size defects that published wrong effect sizes**, found by

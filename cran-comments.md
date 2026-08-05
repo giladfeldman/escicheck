@@ -35,7 +35,7 @@ The win-builder NOTE has two parts, both benign:
 
 ## Test suite
 
-1013 test_that blocks are present. The final CRAN check result is recorded only
+1054 test_that blocks are present. The final CRAN check result is recorded only
 after the release gate runs on the submission candidate.
 
 ## Breaking change since 0.2.3: file extraction removed in 0.4.0

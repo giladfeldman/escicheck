@@ -599,7 +599,7 @@ ci_R2_all <- function(R2, df1, df2, F_val = NA_real_, level = 0.95) {
 #' Wald-on-log uses SE_logOR if supplied, otherwise back-derives it from the
 #' reported CI bounds when both are available, otherwise estimates it from
 #' the reported p-value (when p > 0). If none of those are available it
-#' returns an empty list — there is no information to construct a CI from
+#' returns an empty list -- there is no information to construct a CI from
 #' the point estimate alone.
 #'
 #' @param OR Odds ratio (point estimate)
@@ -1049,7 +1049,7 @@ semi_partial_r_from_t <- function(t, df, R2_full = NA_real_, R2_other = NA_real_
 # Cohen's f\u00b2 from R\u00b2
 # Formula: f^2 = R^2 / (1 - R^2)
 # Adjusted R-squared from R-squared
-# Formula: R²_adj = 1 - (1-R²)(N-1)/(N-k-1) where k = number of predictors (df1)
+# Formula: R2_adj = 1 - (1-R2)(N-1)/(N-k-1) where k = number of predictors (df1)
 # N estimated from F-test as df1 + df2 + 1
 #' @keywords internal
 adjusted_R2_from_R2 <- function(R2, N, k) {

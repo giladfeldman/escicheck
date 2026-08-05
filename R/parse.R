@@ -507,6 +507,40 @@ global_n_from_candidates <- function(ns) {
   }
 }
 
+#' The `N = <int>` / `nobs = <int>` sample-size token
+#'
+#' v0.6.18: hoisted from a `parse_text()` local so `.doc_global_n()` (shared
+#' with `check_text()`) uses the SAME pattern -- one definition, no drift
+#' (the v0.5.9 chi_tok lesson: a token duplicated across sites diverges).
+#' A lowercase bare `n = X` is deliberately NOT matched -- it is commonly a
+#' per-group size (see the scoped v0.5.8 chi-square exception).
+#' @keywords internal
+.pat_doc_N <- "\\b(?:N|nobs)\\s*=\\s*(\\d[\\d,]*\\d|\\d+)"
+
+#' Document-level N from normalized text
+#'
+#' v0.6.18: the single shared computation of the document-global sample size
+#' (every `N = <int>` / `nobs = <int>` match in the text, resolved by
+#' `global_n_from_candidates()`). Extracted from `parse_text()` so
+#' `check_text()` can offer the same value to docpluck TABLE rows -- an
+#' attribute on `parse_text()`'s return value was tried first and silently
+#' vanished on the zero-statistics early-return paths, exactly the class of
+#' seam bug a shared helper cannot have.
+#'
+#' @param text_normalized The full document text, already `normalize_text()`d
+#' @return A single numeric N, or `NA_real_`
+#' @keywords internal
+.doc_global_n <- function(text_normalized) {
+  m <- stringr::str_match_all(text_normalized, .pat_doc_N)
+  if (length(m[[1]]) > 0) {
+    ns <- as.numeric(gsub(",", "", m[[1]][, 2]))
+    ns <- ns[!is.na(ns) & ns > 0]
+    global_n_from_candidates(ns)
+  } else {
+    NA_real_
+  }
+}
+
 #' Count decimal places in the raw matched string
 #'
 #' Counts trailing digits after the decimal point in a numeric string,
@@ -1048,7 +1082,9 @@ parse_text <- function(text, context_window_size = 2) {
   # v0.5.5: also accept "nobs" (the JASP "number of observations" token = total
   # N). Bare lowercase "n =" is intentionally NOT matched -- it is commonly a
   # per-group size, and matching it would mis-read a group n as the total N.
-  pat_N  <- "\\b(?:N|nobs)\\s*=\\s*(\\d[\\d,]*\\d|\\d+)"
+  # v0.6.18: the pattern itself now lives at package level (`.pat_doc_N`) so
+  # `.doc_global_n()` -- shared with check_text() -- cannot drift from it.
+  pat_N  <- .pat_doc_N
   pat_n1 <- "\\bn1\\s*=\\s*(\\d[\\d,]*\\d|\\d+)"
   pat_n2 <- "\\bn2\\s*=\\s*(\\d[\\d,]*\\d|\\d+)"
   pat_dims <- "(\\d+)\\s*[x\u00d7]\\s*(\\d+)"
@@ -1190,15 +1226,8 @@ parse_text <- function(text, context_window_size = 2) {
   # GLOBAL SAMPLE SIZE EXTRACTION (Phase 2C Enhancement)
   # Extract N from entire text as fallback when not found locally
   # ============================================================================
-  global_N_matches <- stringr::str_match_all(text_normalized, pat_N)
-  global_N <- if (length(global_N_matches[[1]]) > 0) {
-    # Extract all N values found in text (strip commas from thousands separators)
-    ns <- as.numeric(gsub(",", "", global_N_matches[[1]][, 2]))
-    ns <- ns[!is.na(ns) & ns > 0]
-    global_n_from_candidates(ns)
-  } else {
-    NA_real_
-  }
+  # v0.6.18: computation shared with check_text() via .doc_global_n().
+  global_N <- .doc_global_n(text_normalized)
 
   # v0.6.8 (E-A1): section-scoped one-sample carry-forward map.
   # A "one-sample t-test against {the midpoint|scale midpoint|chance|N}"

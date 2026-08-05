@@ -41,7 +41,7 @@ compare_with_statcheck <- function(text, ...) {
 #' Compare effectcheck and statcheck on a file (DEFUNCT in v0.4.0)
 #'
 #' Removed in effectcheck 0.4.0. The text-input variant
-#' [compare_with_statcheck()] is the supported entry point — extract via
+#' [compare_with_statcheck()] is the supported entry point -- extract via
 #' docpluck and pass the result.
 #'
 #' @param path Defunct argument.
