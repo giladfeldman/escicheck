@@ -438,6 +438,109 @@ VARIANT_METADATA <- list(
   )
 }
 
+#' Attach an omnibus-contrast N candidate to post-hoc t-rows
+#'
+#' v0.6.18. A stats package reporting post-hoc pairwise contrasts after a
+#' k-level ANOVA routinely reprints the OMNIBUS error df on each contrast. A
+#' two-level contrast cannot have that df -- it uses roughly 2/k of the sample
+#' -- so binding `N = df + 2` computes the effect against far too large an N,
+#' shrinking it and firing a false WARN plus a false CI mismatch.
+#'
+#' On 10.1525/collabra.90203: an `F(2, 998)` omnibus (N = 1001, ~334/cell) is
+#' followed by `t(998) = 2.46, p = .041, d = 0.19 [0.04, 0.35]`. At N = 1000 the
+#' recomputed d is 0.1556 (delta 0.0344, WARN + INCONSISTENT CI); at the true
+#' contrast N = 669 it is 0.1902 (delta 0.0002) and the computed CI
+#' [0.038, 0.342] reproduces the reported [0.04, 0.35].
+#'
+#' **This function only proposes a hypothesis.** A cross-model review (Codex,
+#' 2026-08-04) refuted the first draft, which fired on df equality alone: a
+#' paper can legitimately contain a 3-arm `F(2, 998)` AND a real two-group
+#' comparison of the full sample with a genuine `t(998)`. That counterexample
+#' was REPRODUCED locally before this design was adopted. So the candidate is
+#' attached here and `compute_and_compare_one()` adopts it ONLY when the row's
+#' own reported effect size is better explained by it than by `df + 2`. A row
+#' whose reported effect matches NEITHER candidate keeps its inconsistency
+#' flag -- suppressing it unconditionally would mask a genuine reporting error.
+#'
+#' @param parsed The bound parse tibble for one document.
+#' @return `parsed` with an `omnibus_contrast_N` column (NA where no
+#'   hypothesis applies).
+#' @keywords internal
+.attach_omnibus_contrast_candidate <- function(parsed) {
+  parsed$omnibus_contrast_N <- NA_real_
+  if (!all(c("test_type", "df1", "df2") %in% names(parsed))) {
+    return(parsed)
+  }
+
+  # Omnibus F rows with 3+ groups (df1 >= 2). A 2-group F(1, df) is excluded:
+  # its "pairwise contrast" IS the whole sample, so df + 2 is already right.
+  is_omni <- !is.na(parsed$test_type) & parsed$test_type == "F" &
+    !is.na(parsed$df1) & parsed$df1 >= 2 &
+    !is.na(parsed$df2) & parsed$df2 > 0
+  if (!any(is_omni)) {
+    return(parsed)
+  }
+
+  # Map each omnibus error df -> the balanced-cell contrast N it implies.
+  # k = df1 + 1 groups; N_omnibus = df1 + df2 + 1; contrast N = 2 * N/k.
+  # Where several omnibus tests share an error df, keep the largest implied
+  # contrast N (the most conservative shrink away from df + 2).
+  omni_df2 <- parsed$df2[is_omni]
+  omni_k <- parsed$df1[is_omni] + 1
+  omni_ntot <- parsed$df1[is_omni] + parsed$df2[is_omni] + 1
+  omni_contrast <- round(2 * omni_ntot / omni_k)
+  cand <- tapply(omni_contrast, as.character(omni_df2), max)
+
+  is_t <- !is.na(parsed$test_type) & parsed$test_type == "t" &
+    !is.na(parsed$df1) & parsed$df1 > 0
+  # Explicit per-group sizes are an OBSERVATION about this test and outrank any
+  # df-derived hypothesis -- the guard that spares the reviewer's legitimate
+  # `n1 = 500, n2 = 500` two-group t(998).
+  if ("n1" %in% names(parsed)) is_t <- is_t & is.na(parsed$n1)
+  if ("n2" %in% names(parsed)) is_t <- is_t & is.na(parsed$n2)
+
+  idx <- which(is_t & as.character(parsed$df1) %in% names(cand))
+  if (length(idx) > 0) {
+    hit <- cand[as.character(parsed$df1[idx])]
+    # Only a candidate SMALLER than the naive df + 2 says anything; an
+    # equal-or-larger one carries no information.
+    keep <- !is.na(hit) & hit < (parsed$df1[idx] + 2)
+    if (any(keep)) {
+      parsed$omnibus_contrast_N[idx[keep]] <- as.numeric(hit[keep])
+    }
+  }
+
+  # A post-hoc declaration governs a RUN of sibling contrasts, not one row.
+  # collabra.90203 announces "post-hoc comparisons ... with Bonferroni
+  # correction" once and then reports three t(998) contrasts in sequence; only
+  # the FIRST row's context window still contains the announcement, so a
+  # per-row text test fixed row 1 and left rows 2-3 wrong -- caught by
+  # re-rendering the real paper after the guard was added. Propagate the
+  # declaration across rows that share the same omnibus-derived candidate,
+  # which is exactly the set of siblings the announcement covers.
+  parsed$omnibus_posthoc_ctx <- FALSE
+  ph_re <- paste0("\\b(post[- ]?hoc|pairwise|tukey|bonferroni|scheffe|",
+                  "holm|sidak|games[- ]howell|dunnett|",
+                  "multiple\\s+comparisons?|follow[- ]up\\s+(test|comparison))\\b")
+  has_cand <- which(!is.na(parsed$omnibus_contrast_N))
+  if (length(has_cand) > 0) {
+    txt_of <- function(i) {
+      paste(
+        if ("raw_text" %in% names(parsed)) as.character(parsed$raw_text[i]) else "",
+        if ("context_window" %in% names(parsed)) as.character(parsed$context_window[i]) else ""
+      )
+    }
+    for (dfv in unique(parsed$df1[has_cand])) {
+      grp <- has_cand[parsed$df1[has_cand] == dfv]
+      if (any(grepl(ph_re, vapply(grp, txt_of, character(1)),
+                    ignore.case = TRUE, perl = TRUE))) {
+        parsed$omnibus_posthoc_ctx[grp] <- TRUE
+      }
+    }
+  }
+  parsed
+}
+
 #' Drop docpluck table rows that duplicate a text-parsed (prose) row
 #'
 #' v0.6.4: a table cell often restates a result already reported inline in the
@@ -1110,8 +1213,45 @@ compute_and_compare_one <- function(row,
     # SAMPLE SIZE VALIDATION AND INFERENCE (Enhanced Phase 2B)
     # ========================================================================
 
+    # v0.6.18: track whether the published N is an INFERENCE from df rather
+    # than an observation from the text, so the output can label it
+    # (N_source = "df_inferred") instead of leaving NA / "not_found" beside a
+    # populated N -- a self-contradiction the 2026-08-04 canary audits flagged
+    # on collabra.57785 (table rows) and pci.rr.100726 (prose row). Set in
+    # every branch below that derives N from df (guard replacements and the
+    # design-based inference); read at output assembly.
+    #
+    # Both flags are initialized unconditionally so a later `exists()` test can
+    # never read a value left behind by an earlier row.
+    N_from_df_inference <- FALSE
+    N_source_omnibus_adopted <- FALSE
+
     # Detect Welch's t-test (non-integer df indicates unequal variances)
-    is_welch <- !is.na(df1) && abs(df1 - round(df1)) > 0.01
+    # v0.6.18: a fractional df is EVIDENCE of a Welch test, not its definition.
+    # Authors round: collabra.77859 prints "Welch's t(223) = 8.11, d = 0.99"
+    # where the true df is 222.87, so the purely numeric test returned FALSE,
+    # the non-Welch path bound N = df + 2 = 225, and the recomputed d = 1.0813
+    # missed the reported 0.99 by 0.0913 -- a FALSE WARN plus an INCONSISTENT
+    # CI, when the paper's real cells (n1 = 131, n2 = 135, N = 266) give
+    # d = 0.9945. The row's own text said "Welch's" the entire time. Take the
+    # word as the direct evidence it is; the Welch path then back-computes N
+    # from the reported effect size instead of asserting df + 2, which for a
+    # Welch test is only a LOWER bound.
+    # Scope: the row's OWN clause (`raw_text`), never the context window.
+    # The window bleeds neighbouring sentences, and on collabra.77859 the very
+    # next paragraph's "Welch's t(198.52)" leaked onto an unrelated PAIRED
+    # t(131) row (dz = 0.60), pushing its N from 132 to 403. A design signal
+    # must come from the clause that states the statistic. (Same failure shape
+    # as the shared lesson `gate-decision-on-value-set-by-that-phase-not-a-
+    # later-one`: read the evidence at the scope that actually owns it.)
+    welch_stated_in_text <- {
+      own <- if ("raw_text" %in% names(row)) as.character(row$raw_text[1]) else ""
+      !is.na(own) &&
+        grepl("\\b(welch|satterthwaite|unequal\\s+variances?)\\b", own,
+              ignore.case = TRUE, perl = TRUE)
+    }
+    is_welch <- !is.na(df1) &&
+      (abs(df1 - round(df1)) > 0.01 || welch_stated_in_text)
 
     if (is_welch) {
       uncertainty <- c(
@@ -1143,13 +1283,33 @@ compute_and_compare_one <- function(row,
             sprintf("N=%d below Welch minimum (df+2=%d). Will re-estimate.",
                     as.integer(N_original), as.integer(min_N_welch)))
         } else if ("N_source" %in% names(row) && !is.na(row$N_source[1]) &&
-                    row$N_source[1] == "global_text" &&
+                    # v0.6.18 (cross-model review): this branch checked only
+                    # `global_text`, so a Welch row carrying a `local_context` /
+                    # `extended_context` / `subgroup_sum` N kept an implausible
+                    # value. That hole widened once v0.6.18 let the row's own
+                    # text set `is_welch` -- a stated-Welch row skips the
+                    # non-Welch `.SCRAPED_N_SOURCES` override entirely, so this
+                    # was its only remaining guard. Keyed on the same class.
+                    row$N_source[1] %in% .SCRAPED_N_SOURCES &&
                     N > 1.5 * min_N_welch &&
                     !is.na(effect_reported) && abs(effect_reported) > 0.001 &&
                     !is.na(canonical_type) && canonical_type %in% c("d", "g")) {
           # Global N is much larger than df+2 -- likely from a different study.
           # Cross-validate: back-compute N from reported d (equal-n assumption)
-          N_from_d <- round(4 * stat^2 / effect_reported^2)
+          #
+          # v0.6.18 (cross-model review): the back-computation N = 4t^2/d^2
+          # assumes a Cohen's d. Hedges' g = J * d with J = 1 - 3/(4*df - 1) < 1,
+          # so feeding g in unchanged inflates N -- materially at small df
+          # (J ~ 0.975 at df = 30, so N is over-estimated by ~5%). Convert g
+          # back to the d scale first rather than either mis-using it or
+          # refusing it (refusing is worse: it leaves the implausible scraped N
+          # in place on a row this branch exists to correct).
+          eff_as_d <- effect_reported
+          if (identical(canonical_type, "g") && !is.na(df1) && df1 > 1) {
+            J <- 1 - 3 / (4 * df1 - 1)
+            if (is.finite(J) && J > 0) eff_as_d <- effect_reported / J
+          }
+          N_from_d <- round(4 * stat^2 / eff_as_d^2)
           # The equal-groups back-computation UNDERestimates N (unequal Welch groups
           # need more total N for the same df), so a SMALL effect can push N_from_d a
           # little below the Welch floor df+2 -- but the global N is still confirmed
@@ -1199,6 +1359,7 @@ compute_and_compare_one <- function(row,
           } else {
             df1 + 2
           }
+          N_from_df_inference <- TRUE
           assumptions <- c(
             assumptions,
             sprintf(
@@ -1209,25 +1370,37 @@ compute_and_compare_one <- function(row,
         } else if (N > max_expected_N + 10 ||
                    (N > max_expected_N + 0.5 &&
                     "N_source" %in% names(row) && !is.na(row$N_source[1]) &&
-                    row$N_source[1] == "global_text")) {
+                    row$N_source[1] %in% .SCRAPED_N_SOURCES)) {
           # N is larger than the df allows.
           #
           # v0.6.17: the `+ 10` slack applies only to a TRUSTED (inline /
           # adjacent) N, where a modest mismatch may reflect reporting rounding
-          # or a subgroup the clause names. For a `global_text` N -- a
-          # last-resort document-level scrape with no tie to this statistic --
-          # ANY value above df+2 is incompatible, and df is structurally
-          # authoritative. The old threshold let a global N in [df+1, df+12]
-          # clear both this check and the minimum-N guard and be kept:
-          # 10.1016/j.jesp.2009.12.010's Study 1 t(32) rows bound the paper's
-          # global N of 38 where df fixes N at 34 (confirmed by gold
+          # or a subgroup the clause names. For a SCRAPED N -- one harvested
+          # from surrounding prose rather than stated by the statistic's own
+          # clause -- ANY value above df+2 is incompatible, and df is
+          # structurally authoritative. The old threshold let such an N in
+          # [df+1, df+12] clear both this check and the minimum-N guard and be
+          # kept: 10.1016/j.jesp.2009.12.010's Study 1 t(32) rows bound the
+          # paper's global N of 38 where df fixes N at 34 (confirmed by gold
           # n_total = 34), computing g_ind = 1.0482 instead of 1.1052.
+          #
+          # v0.6.18: widened from `global_text` alone to every scraped source
+          # (`.SCRAPED_N_SOURCES`). The v0.6.17 fix was keyed on the ONE source
+          # its reproduction happened to use, but `local_context` /
+          # `extended_context` are the same kind of evidence -- a number the
+          # statistic's own clause never claimed -- and carried the identical
+          # defect. Reproduced 2026-08-04c: "Participants (N = 1001) ... t(667)
+          # = 3.67, d = 0.28 [0.13, 0.44]" bound N = 1001 (local_context) where
+          # df fixes N at 669, computing d = 0.2320 vs the reported 0.28 and
+          # firing a FALSE WARN plus a false CI mismatch -- while the row's own
+          # uncertainty text already said "Reported N (1001) is larger than
+          # expected (668-669) for df=667" and used 1001 regardless.
           n_source_val <- if ("N_source" %in% names(row) && !is.na(row$N_source[1])) {
             row$N_source[1]
           } else {
             NA_character_
           }
-          if (!is.na(n_source_val) && n_source_val == "global_text") {
+          if (!is.na(n_source_val) && n_source_val %in% .SCRAPED_N_SOURCES) {
             # A global-text N this far above df+2 cannot be the N for this t-test:
             # the df is structurally authoritative (independent N = df+2, paired
             # N = df+1). Override with the df-based N, mirroring the Welch-branch
@@ -1252,6 +1425,7 @@ compute_and_compare_one <- function(row,
             } else {
               NA_real_
             }
+            if (!is.na(N)) N_from_df_inference <- TRUE
             assumptions <- c(
               assumptions,
               if (is.na(N)) {
@@ -1323,17 +1497,20 @@ compute_and_compare_one <- function(row,
         if (!is.na(canonical_type) && canonical_type %in% c("dz", "dav", "drm")) {
           # Paired/within-subjects effect size
           N <- df1 + 1
+          N_from_df_inference <- TRUE
           assumptions <- c(assumptions, "Inferred N = df + 1 (paired t-test based on reported effect type)")
           design_inferred <- "paired"
         } else if (!is.na(canonical_type) && canonical_type %in% c("d", "g")) {
           # Between-subjects effect size
           N <- df1 + 2
+          N_from_df_inference <- TRUE
           assumptions <- c(assumptions, "Inferred N = df + 2 (independent t-test based on reported effect type)")
           design_inferred <- "independent"
         } else {
           # AMBIGUOUS - must compute both
           N <- df1 + 2 # Use for independent calculations
           N_paired <- df1 + 1 # Store for paired calculations
+          N_from_df_inference <- TRUE
           design_inferred <- "ambiguous"
           assumptions <- c(
             assumptions,
@@ -1382,6 +1559,91 @@ compute_and_compare_one <- function(row,
         uncertainty <- c(
           uncertainty,
           "Sample size may not apply to this specific comparison - found distant from statistic"
+        )
+      }
+    }
+
+    # v0.6.18: adopt the omnibus-contrast N candidate ONLY on evidence.
+    #
+    # `.attach_omnibus_contrast_candidate()` flags a t-row whose df equals a
+    # 3+-group omnibus F's error df -- a hypothesis that the stats package
+    # reprinted the omnibus df on a pairwise contrast. Same-document df
+    # equality alone is NOT sufficient (a cross-model review supplied, and
+    # local reproduction confirmed, a legitimate two-group t with the same df),
+    # so the row's OWN reported effect size arbitrates: adopt the candidate
+    # only when it explains the reported effect materially better than df + 2.
+    #
+    # A row whose reported effect matches NEITHER N keeps its full delta and
+    # stays flagged -- the check must not launder a genuine reporting error
+    # into a clean verdict just because an omnibus df happened to match.
+    omni_N <- if ("omnibus_contrast_N" %in% names(row)) {
+      suppressWarnings(as.numeric(row$omnibus_contrast_N[1]))
+    } else {
+      NA_real_
+    }
+    if (!is.na(omni_N) && omni_N >= 4 && !is.na(N) && !is.na(stat) &&
+        !is.na(df1) && df1 > 0 && is.na(n1) && is.na(n2) &&
+        !is.na(effect_reported) && !is.na(canonical_type) &&
+        canonical_type %in% c("d", "g")) {
+      d_at <- function(nn) abs(stat) * sqrt(4 / nn)
+      delta_current <- abs(d_at(N) - abs(effect_reported))
+      delta_omni <- abs(d_at(omni_N) - abs(effect_reported))
+      # Require a decisive win, not a coin flip: the candidate must both beat
+      # the incumbent by a clear margin AND land inside the tolerance band the
+      # verdict itself uses. Otherwise the incumbent stands.
+      #
+      # v0.6.18 (cross-model review, reproduced): "the reported d fits better"
+      # is NOT sufficient on its own, because an UNEQUAL-GROUPS full-sample t
+      # also produces a d larger than the equal-n df+2 estimate -- and the
+      # contrast candidate can fit that coincidentally. Worked counterexample:
+      # a document with F(2, 98) yields candidate N = 67; a genuine full-sample
+      # t(98) = 2.00 with unprinted cells n1 = 20, n2 = 80 has true d = 0.500,
+      # where df+2 = 100 estimates 0.400 (delta 0.100) and the candidate
+      # estimates 0.489 (delta 0.011) -- so the candidate would be adopted and
+      # publish N = 67 against a true 100.
+      #
+      # Effect-size fit CANNOT be the only gate, and CI width cannot rescue it:
+      # an unequal-groups full-sample t inflates the point estimate AND the CI
+      # width in the same direction as a smaller N does, so both tests fire
+      # identically on the counterexample (verified numerically, not assumed).
+      # The two cases are mathematically indistinguishable from df alone --
+      # `contrast_N / (df + 2)` is 2/k in BOTH.
+      #
+      # So the row must SAY it is a post-hoc contrast. That is the discriminator
+      # the first cross-model review recommended and this implementation
+      # initially omitted; the reproduction above is what forced it back in. A
+      # paper reporting a genuine full-sample two-group t does not describe it
+      # as a post-hoc/pairwise comparison, and a stats package reprinting the
+      # omnibus df is, by construction, printing a post-hoc contrast.
+      # Computed at document scope by .attach_omnibus_contrast_candidate(): the
+      # declaration is shared across the run of sibling contrasts that carry the
+      # same omnibus-derived candidate, because a paper announces "post-hoc
+      # comparisons with Bonferroni correction" ONCE and then reports several.
+      posthoc_stated <- "omnibus_posthoc_ctx" %in% names(row) &&
+        isTRUE(row$omnibus_posthoc_ctx[1])
+      if (posthoc_stated && delta_omni < delta_current - 0.005 &&
+          delta_omni <= 0.02) {
+        N_original <- N
+        N <- omni_N
+        N_independent <- omni_N
+        N_source_omnibus_adopted <- TRUE
+        assumptions <- c(
+          assumptions,
+          sprintf(
+            paste0("df=%.0f matches an omnibus ANOVA error df in this document; ",
+                   "scored as a pairwise contrast with N~%.0f (balanced cells) ",
+                   "rather than N=%.0f, which the reported effect size does not support"),
+            df1, omni_N, N_original
+          )
+        )
+        uncertainty <- c(
+          uncertainty,
+          sprintf(
+            paste0("Sample size inferred from an omnibus ANOVA df (post-hoc contrast ",
+                   "N~%.0f assuming balanced cells); the reported df=%.0f appears to be ",
+                   "the omnibus error df, not this contrast's"),
+            omni_N, df1
+          )
         )
       }
     }
@@ -2432,7 +2694,11 @@ compute_and_compare_one <- function(row,
       }
 
       if (design == "unclear") {
-        uncertainty <- c(uncertainty, "ANOVA design unclear (between/within/mixed) \u2014 computed all variants")
+        # v0.6.18: ASCII hyphen, not \u2014. The escaped em-dash survived the
+        # source-file ASCII check but rendered as mojibake in the emitted
+        # message (seen as "unclear (between/within/mixed) <?> computed" in a
+        # canary render), so the user-visible string was corrupted.
+        uncertainty <- c(uncertainty, "ANOVA design unclear (between/within/mixed) -- computed all variants")
       }
     }
   } else if (tt == "chisq" && !is.na(chisq_subtype) &&
@@ -2792,8 +3058,18 @@ compute_and_compare_one <- function(row,
     # Values in `all_variants` reach the user regardless of the row's status, so
     # this message is the only thing standing between a scraped N and a
     # confident-looking effect size.
+    # v0.6.18: keyed on the SOURCE CLASS, not one member of it. The v0.6.17
+    # version tested `== "global_text"` -- the one provenance its reproduction
+    # exercised -- leaving `local_context` / `extended_context` / `subgroup_sum`
+    # silent, which is the identical defect this release fixed on the t branch.
+    # Found by a cross-model review of the v0.6.18 diff and reproduced verbatim:
+    # "The calibration sample (N = 100) was used first. In the target subsample
+    # (n = 25), z = 2.00, p = .046, r = .20." bound N = 100 (local_context) and
+    # published status OK with an EMPTY uncertainty_reasons, computing
+    # r = 2/sqrt(4 + 100) = 0.196 against the reported .20 -- an apparent match,
+    # where the clause's own n = 25 gives 0.371.
     if ("N_source" %in% names(row) && !is.na(row$N_source[1]) &&
-        row$N_source[1] == "global_text" && !is.na(N)) {
+        row$N_source[1] %in% .SCRAPED_N_SOURCES && !is.na(N)) {
       assumptions <- c(
         assumptions,
         "Sample size N inferred from elsewhere in the document (verify it applies to this z-test)"
@@ -6101,12 +6377,60 @@ compute_and_compare_one <- function(row,
       p_diff <- abs(p_reported - p_computed)
       p_directions_match <- (p_reported < alpha) == (p_computed < alpha)
 
+      # v0.6.18: an ABSOLUTE tolerance is the wrong scale for a p-value, and it
+      # is blindest exactly where p-values matter. |.006 - .00269| = 0.0033
+      # passes a 0.005 absolute test while being a 2.23x discrepancy (at
+      # t(868), p = .006 implies t = 2.755, not the reported 3.01); |.005 -
+      # .00002| = 0.005 passes while being 250x. Judge SMALL p on the ratio and
+      # keep the absolute tolerance for the large-p region, where a ratio is
+      # meaninglessly volatile (.9 vs .8 is 1.1x and uninteresting).
+      # Surfaced by the pci.rr.100726 canary finding, 2026-08-04.
+      # v0.6.18 (cross-model review, reproduced): a bare ratio test falsely
+      # flags legitimate ROUNDING. A p reported to 2 decimals as `.01` can
+      # honestly represent a computed .0051 (ratio 1.96); `.001` at 3 decimals
+      # can represent .0006 (ratio 1.67). Both are correct reporting at the
+      # precision shown. So the ratio only applies OUTSIDE the rounding band
+      # the reported precision itself implies: a value printed to k decimals
+      # asserts nothing finer than +/- half a unit in the last place.
+      p_ratio_ok <- TRUE
+      if (!p_is_inequality && p_reported > 0 && p_computed > 0 &&
+          min(p_reported, p_computed) < 0.01) {
+        p_dec <- if ("p_reported_decimals" %in% names(row) &&
+                     !is.na(row$p_reported_decimals[1])) {
+          as.integer(row$p_reported_decimals[1])
+        } else {
+          # Recover the printed precision from the value itself when the parse
+          # did not record it (e.g. .006 -> 3).
+          s <- sub("^0+", "", format(p_reported, scientific = FALSE, trim = TRUE))
+          if (grepl("[.]", s)) nchar(sub("^.*[.]", "", sub("0+$", "", s))) else 0L
+        }
+        round_halfwidth <- if (!is.na(p_dec) && p_dec > 0) 0.5 * 10^(-p_dec) else 0
+        within_rounding <- abs(p_reported - p_computed) <= round_halfwidth
+        p_ratio_ok <- within_rounding ||
+          (max(p_reported, p_computed) / min(p_reported, p_computed)) <= 1.5
+      }
+
       # Case 1: p reported as inequality (< .001) and computed also satisfies it
       if (p_is_inequality && p_reported <= 0.001 && p_computed < 0.001) {
         status <- "OK"
-      # Case 2: p-values very close (within rounding)
-      } else if (p_diff < 0.005) {
+      # Case 2: p-values very close -- small in absolute terms AND, when either
+      # is small enough for the ratio to be meaningful, close in relative terms.
+      } else if (p_diff < 0.005 && p_ratio_ok) {
         status <- "OK"
+      # Case 2b: absolutely close but RELATIVELY far apart at small p. Not a
+      # rounding artifact; report it rather than passing it silently.
+      } else if (p_diff < 0.005 && !p_ratio_ok) {
+        status <- "NOTE"
+        uncertainty <- c(
+          uncertainty,
+          sprintf(
+            paste0("Reported p = %s and computed p = %s differ by a factor of %.1f; ",
+                   "the absolute gap is small only because both are small"),
+            format(p_reported, trim = TRUE),
+            format(signif(p_computed, 3), trim = TRUE),
+            max(p_reported, p_computed) / min(p_reported, p_computed)
+          )
+        )
       # Case 3: p-value inequality with consistent direction
       } else if (p_is_inequality && p_directions_match) {
         status <- "OK"
@@ -6514,11 +6838,80 @@ compute_and_compare_one <- function(row,
       design_inferred %in% c("paired", "one-sample") &&
       abs(N - (df1 + 2)) < 1e-9) {
     N <- df1 + 1
+    # After this reconciliation the published N IS a df-derivation, whatever
+    # its provenance was before (v0.6.18 -- see N_from_df_inference above).
+    N_from_df_inference <- TRUE
     assumptions <- c(
       assumptions,
       sprintf("N reconciled to df + 1 = %.0f for the %s design detected from the surrounding text",
               N, design_inferred)
     )
+  }
+
+  # v0.6.18: when the FINAL label is still "ambiguous" and the published N is
+  # the df + 2 independent inference, say so out loud. The internal variable
+  # holds df + 2 "for independent calculations" (check.R ambiguous branch);
+  # publishing it bare asserted a design the row itself disclaims. The value
+  # is kept (effectcheck's convention is publish-the-estimate-with-its-
+  # assumption, like the Welch df+2 lower bound), but the uncertainty names
+  # BOTH candidates so the N reads as the labeled assumption it is.
+  # (collabra.57785 Table-8 t(742): published N = 744 bare, gold n_total = 743;
+  # pci.rr.100726 t(868): published N = 870 with N_source = "not_found".)
+  if (!is.na(tt) && tt == "t" && !is.na(df1) && df1 > 0 &&
+      !is.na(N) && is.na(n1) && is.na(n2) &&
+      exists("N_from_df_inference") && isTRUE(N_from_df_inference) &&
+      exists("design_inferred") && !is.na(design_inferred) &&
+      design_inferred == "ambiguous" &&
+      abs(N - (df1 + 2)) < 1e-9) {
+    uncertainty <- c(
+      uncertainty,
+      sprintf(
+        paste0("Published N assumes the independent design (N = df + 2 = %.0f); ",
+               "if the design is paired/one-sample, N = df + 1 = %.0f"),
+        N, df1 + 1
+      )
+    )
+  }
+
+  # v0.6.18: a populated N whose value came from df must not publish beside
+  # N_source = NA / "not_found" -- the N WAS found, by inference, and the
+  # label should say so.
+  # v0.6.18 (2026-08-05 canary audit of collabra.90203): a row that carries a
+  # reported CI but NO parseable effect size silently narrows to a p-value-only
+  # check and can still publish `status = OK` with `ci_check_status = MATCH`.
+  # A reader sees a green row and cannot tell that the paper reported an effect
+  # size the tool never checked. On this paper the eta-squared glyph has no
+  # ToUnicode mapping in the source PDF (a documented, WON'T-FIX extraction-side
+  # limit -- the value survives only as a nameless "= .008"), so the body-text
+  # value genuinely cannot be typed; the honest response is to SAY SO on the
+  # row rather than to imply a complete check. A CI cannot exist without an
+  # estimate, so its presence is proof an effect size was reported.
+  if (!is.na(ciL_rep) && !is.na(ciU_rep) && is.na(effect_reported)) {
+    uncertainty <- c(
+      uncertainty,
+      paste0("A confidence interval is reported but its effect-size estimate ",
+             "could not be parsed from this row, so only the p-value was ",
+             "checked -- the reported effect size itself was NOT verified")
+    )
+  }
+
+  N_source_out <- if ("N_source" %in% names(row)) row$N_source else NA_character_
+  # v0.6.18 (cross-model review): this originally relabelled only NA /
+  # "not_found", so a row whose SCRAPED N had been discarded and replaced by the
+  # df-derived value kept advertising `global_text` / `local_context` -- naming
+  # a provenance the published number no longer has. Any N that is in fact a df
+  # derivation is labelled as one, whatever it started as.
+  if (!is.na(N) &&
+      exists("N_from_df_inference") && isTRUE(N_from_df_inference) &&
+      (is.na(N_source_out[1]) ||
+       as.character(N_source_out[1]) %in% c("not_found", .SCRAPED_N_SOURCES))) {
+    N_source_out <- "df_inferred"
+  }
+  # v0.6.18: an adopted omnibus-contrast N is its own provenance -- it is
+  # neither observed in the text nor a plain df+2 derivation, and a consumer
+  # must be able to tell it apart from both.
+  if (exists("N_source_omnibus_adopted") && isTRUE(N_source_omnibus_adopted)) {
+    N_source_out <- "omnibus_df_contrast"
   }
 
   tibble::tibble(
@@ -6555,7 +6948,7 @@ compute_and_compare_one <- function(row,
     p_valid = if ("p_valid" %in% names(row)) row$p_valid else NA,
     p_ns = if ("p_ns" %in% names(row)) row$p_ns else FALSE,
     p_out_of_range = if ("p_out_of_range" %in% names(row)) row$p_out_of_range else NA,
-    N_source = if ("N_source" %in% names(row)) row$N_source else NA_character_,
+    N_source = N_source_out,
     effect_fallback = if ("effect_fallback" %in% names(row)) row$effect_fallback else NA,
     ci_level_source = if ("ci_level_source" %in% names(row)) row$ci_level_source else NA_character_,
 
@@ -6726,9 +7119,19 @@ compute_and_compare_one <- function(row,
             sprintf("%s <- %.6f # the value this row's verdict was graded against",
                     matched_variant, as.numeric(matched_value))
           } else NULL
+          # v0.6.18: an ambiguous-design row's repro must not assert the
+          # independent split as the only reading -- emit the paired
+          # alternative alongside, mirroring the both-candidates uncertainty
+          # message on the row itself.
+          .amb_alt <- if (exists("design_inferred") && !is.na(design_inferred) &&
+                          design_inferred == "ambiguous" && !is.na(df1) && df1 > 0) {
+            sprintf("dz_if_paired <- stat / sqrt(%.0f) # if the design is paired/one-sample (N = df + 1)",
+                    df1 + 1)
+          } else NULL
           c(
             .graded,
-            if (!is.na(N)) sprintf("d_exact <- stat * sqrt(1/%.1f + 1/%.1f) # Assuming equal n", N / 2, N / 2) else NULL,
+            if (!is.na(N)) sprintf("d_exact <- stat * sqrt(1/%.1f + 1/%.1f) # Assuming equal n (independent reading)", N / 2, N / 2) else NULL,
+            .amb_alt,
             "d_ind_approx <- 2 * stat / sqrt(df1) # approximation only - NOT the graded value"
           )
         }
@@ -7028,6 +7431,11 @@ check_text <- function(text,
   )
 
   parsed <- parse_text(text)
+  # v0.6.18: the document-level N, computed by the same shared helper
+  # parse_text() uses internally (an attribute on parse_text()'s return was
+  # tried first and silently vanished on the zero-statistics early-return
+  # paths). Offered below ONLY to df-compatible table t-rows.
+  doc_global_N <- .doc_global_n(normalize_text(paste(text, collapse = "\n")))
 
   # Resource Limit Check: Number of statistics
   if (nrow(parsed) > max_stats_per_text) {
@@ -7053,11 +7461,43 @@ check_text <- function(text,
   if (!is.null(table_parsed) && nrow(table_parsed) > 0) {
     parsed <- dplyr::bind_rows(parsed, table_parsed)
     parsed <- .dedup_table_vs_prose(parsed)
+
+    # v0.6.18: offer the document-level N to table t-rows that carry no
+    # printed n -- but ONLY when it is df-COMPATIBLE, i.e. exactly df + 1
+    # (paired / one-sample) or df + 2 (independent). The exact-match window is
+    # the evidence gate: two independently-sourced numbers agreeing to the
+    # unit is real information, while a scraped document N that matches
+    # neither candidate (the jesp.2009 global-N class) cannot slip in. This is
+    # deliberately NOT the general global-N fallback prose rows get -- table
+    # rows are farther from any N statement, so an unconditional binding
+    # would inject document Ns into rows they may not describe.
+    # (collabra.57785 Table 8: t(742) rows published N = 744 = df + 2 while
+    # the paper states N = 743 = df + 1; gold n_total = 743.)
+    if (!is.na(doc_global_N) && "from_table" %in% names(parsed)) {
+      idx_tbl_t <- which(
+        !is.na(parsed$from_table) & parsed$from_table &
+          !is.na(parsed$test_type) & parsed$test_type == "t" &
+          is.na(parsed$N) & !is.na(parsed$df1) & parsed$df1 > 0 &
+          (abs(doc_global_N - (parsed$df1 + 1)) < 1e-9 |
+             abs(doc_global_N - (parsed$df1 + 2)) < 1e-9)
+      )
+      if (length(idx_tbl_t) > 0) {
+        parsed$N[idx_tbl_t] <- doc_global_N
+        if (!"N_source" %in% names(parsed)) parsed$N_source <- NA_character_
+        parsed$N_source[idx_tbl_t] <- "global_text"
+      }
+    }
   }
 
   if (nrow(parsed) == 0) {
     return(new_effectcheck(tibble::tibble(), call = match.call(), settings = settings))
   }
+
+  # v0.6.18: propose a contrast-N candidate for post-hoc t-rows that reprint an
+  # omnibus ANOVA's error df. See `.omnibus_contrast_candidates()` -- this only
+  # ATTACHES a hypothesis; compute_and_compare_one() adopts it solely when the
+  # row's own reported effect size is better explained by it than by df + 2.
+  parsed <- .attach_omnibus_contrast_candidate(parsed)
 
   rows <- split(parsed, seq_len(nrow(parsed)))
   res <- purrr::map_dfr(seq_along(rows), function(i) {

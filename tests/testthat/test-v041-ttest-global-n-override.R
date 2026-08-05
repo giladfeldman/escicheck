@@ -47,9 +47,15 @@ test_that("v0.4.1: global-text N incompatible with t-test df is overridden (Chen
     r <- check_text(make_global_n_text(cs$s))
     row <- r[r$test_type == "t" & !is.na(r$stat_value), ]
     expect_equal(nrow(row), 1)
-    # N was sourced from the document-wide statement, not local context
-    expect_identical(row$N_source[1], "global_text")
-    # ... and is replaced by the df-based N (df + 2), not the global N = 608
+    # N was sourced from the document-wide statement, then REPLACED by the
+    # df-based N (df + 2), not the global N = 608.
+    #
+    # v0.6.18: this assertion previously demanded `N_source == "global_text"`
+    # while its own next line asserts the value was replaced by a df
+    # derivation -- i.e. it pinned a row that advertised a provenance its
+    # published number no longer had. A cross-model review flagged exactly that
+    # self-contradiction, so the label now follows the value.
+    expect_identical(row$N_source[1], "df_inferred")
     expect_lt(abs(row$N[1] - (cs$df + 2)), 1.5)
     # with the structurally-correct N the reported d is consistent -> PASS
     expect_identical(row$status[1], "PASS")

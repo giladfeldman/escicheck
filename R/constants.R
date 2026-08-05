@@ -4,6 +4,26 @@
 #'
 #' @keywords internal
 
+# v0.6.18: N_source values that represent a SCRAPED sample size -- a number
+# harvested from surrounding prose or the document at large, which the
+# statistic's own clause never claimed for itself. For these, a stated df is
+# structurally authoritative (independent N = df + 2, paired N = df + 1) and
+# overrides the scraped value; see the df-authority branch in check.R.
+#
+# NOT in this set (deliberately): `own_clause`, `own_clause_arms`,
+# `own_clause_denominator`, `arm_totals_sum`, `chi_inline`, `chi_bare_n` --
+# each is stated BY the statistic's own clause, i.e. an observation about this
+# test rather than a guess harvested near it. An explicitly reported N that
+# disagrees with df is a finding to surface, not a value to silently overwrite.
+#
+# `subgroup_sum` IS in the set (cross-model review 2026-08-05, verified against
+# parse.R): despite the name suggesting a clause-local reading, it is matched
+# over the wider `context`, not the statistic's own sub-chunk -- so it is
+# adjoining evidence like `local_context`, and a subgroup pair landing in
+# [df+3, df+12] would otherwise bypass the df-authority override entirely.
+.SCRAPED_N_SOURCES <- c("global_text", "local_context", "extended_context",
+                        "subgroup_sum")
+
 # Effect Size Tolerances (Defaults)
 DEFAULT_TOL_EFFECT <- list(
     d = 0.02,
@@ -44,10 +64,10 @@ DEFAULT_TOL_P <- 0.001
 DEFAULT_ALPHA <- 0.05
 DEFAULT_CI_LEVEL <- 0.95
 
-# Extreme Delta Threshold — deltas above this are flagged as likely extraction errors
+# Extreme Delta Threshold -- deltas above this are flagged as likely extraction errors
 EXTREME_DELTA_THRESHOLD <- 1.0
 
-# Plausibility Bounds — effect sizes above these are flagged as likely extraction errors
+# Plausibility Bounds -- effect sizes above these are flagged as likely extraction errors
 EFFECT_PLAUSIBILITY <- list(
     d = 5, g = 5, dz = 5, dav = 5, drm = 5,
     r = 1, phi = 1, V = 1,
@@ -60,10 +80,10 @@ EFFECT_PLAUSIBILITY <- list(
     cohens_w = 10
 )
 
-# Default cross-type action — status when no same-type variant can be computed
+# Default cross-type action -- status when no same-type variant can be computed
 DEFAULT_CROSS_TYPE_ACTION <- "NOTE"
 
-# Default design-ambiguous action — status when t-test (or F(1,df)) effect size
+# Default design-ambiguous action -- status when t-test (or F(1,df)) effect size
 # ERROR occurs with ambiguous design. d-from-t systematically differs from
 # d-from-raw-data when groups are unequal or different SD pooling is used.
 DEFAULT_DESIGN_AMBIGUOUS_ACTION <- "WARN"
