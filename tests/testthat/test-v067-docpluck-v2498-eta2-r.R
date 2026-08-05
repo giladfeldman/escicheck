@@ -1,8 +1,10 @@
 # v0.6.7: consume docpluck v2.4.98 typed table fields.
 #
 #   DP-3: docpluck now TYPES the partial-eta^2 column as `fields.eta2` on a
-#   structurally-identified F-test/ANOVA table (the body-text glyph stays
-#   stripped -- no ToUnicode CMap -- so the table is the only recoverable source).
+#   structurally-identified F-test/ANOVA table (the body-text symbol stays
+#   stripped -- it is drawn as filled vector curves with no char object, NOT a
+#   missing ToUnicode CMap; mechanism corrected 2026-08-05 -- so the table is
+#   the only recoverable source).
 #   The consumer binds it as `etap2`: verified from F+df1+df2 when present, else
 #   surfaced as an honest NOTE carrying the eta2 + CI.
 #

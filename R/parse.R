@@ -3063,9 +3063,19 @@ parse_text <- function(text, context_window_size = 2) {
   match_len <- attr(mm, "match.length")
 
   # Effect / test tokens that mark a co-located frequentist result (guard 2). The
-  # "= .0NN" alternative catches a docpluck-stripped eta glyph ("F(2,998)=..., =
-  # .008") whose eta symbol has no ToUnicode mapping and prints as a nameless
-  # "= .0NN". Case-insensitive.
+  # "= .NN" alternative catches a docpluck-stripped eta symbol ("F(2,998)=..., =
+  # .008") that prints as a nameless "= .NN". Case-insensitive.
+  #
+  # MECHANISM CORRECTED 2026-08-05 (triple-verification audit): this comment used
+  # to attribute the stripping to "no ToUnicode mapping". REFUTED -- on
+  # collabra.90203 the symbol is drawn as filled vector curves with no char
+  # object, not a badly-encoded font glyph. The regex is unaffected and correct
+  # either way: it keys on the OBSERVABLE token stream (a bare "= .NN" beside a
+  # test statistic), not on why the symbol is missing -- which is the right way
+  # to write it, since the same nameless form arises from vector ink, OCR loss,
+  # and genuine encoding faults alike. Note the class is `\\.[0-9]`, i.e. ANY
+  # decimal (".12", ".34"), not only ".0NN" -- do not narrow it to the one
+  # observed ".008" case.
   effect_tok <- paste0(
     "F\\s*[\\(\\[]", "|\\bt\\s*\\(", "|\\bt\\s*=", "|\\br\\s*=",
     "|\\bd\\s*=", "|eta", "|chi", "|\\bOR\\s*=", "|=\\s*\\.[0-9]"
@@ -3387,8 +3397,21 @@ flattened_rows_to_parsed <- function(table_rows) {
       # partial_eta2 verification path: with df1+df2 it is recomputed from F and
       # compared; without df it routes to an honest NOTE that still surfaces the
       # reported eta2 + CI. (Previously left unbound: docpluck emitted it
-      # untyped, so the value was discarded. The body-text glyph stays stripped
-      # -- WON'T-FIX, no ToUnicode CMap -- so the table is the ONLY source.)
+      # untyped, so the value was discarded. The body-text symbol stays absent
+      # from the delivered text -- so the table is the ONLY source.)
+      #
+      # MECHANISM CORRECTED 2026-08-05 (triple-verification audit). This comment
+      # used to read "WON'T-FIX, no ToUnicode CMap". That stated cause is
+      # REFUTED: on collabra.90203 the symbol is not a font glyph at all -- it is
+      # 4 filled bezier curves (fill=TRUE, no fontname) with NO char object in
+      # its x-range, i.e. drawn ink, not badly-encoded text. Measured across all
+      # 21 pages: ZERO Greek-eta char objects anywhere in the text layer, while
+      # glyph-sized filled curves cluster on exactly the affected pages. The
+      # WON'T-FIX verdict for body prose stands (OCR / shape-recognition tier);
+      # only its reason was wrong. Practical consequence: do NOT invest in
+      # font/CMap/ToUnicode recovery for this class -- it targets the ordinary
+      # space before `=` and can never recover drawn curves. The viable non-OCR
+      # route is a vector-path recogniser. See docs/REPLY_FROM_DOCPLUCK_2026-06-25.md.
       if (has(f, "eta2")) {
         ern <- "etap2"
         er <- num1(f$eta2)

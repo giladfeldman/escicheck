@@ -4057,6 +4057,11 @@ compute_and_compare_one <- function(row,
   # reported as the effect size of a plain t-test. A beta from a multi-predictor
   # / mediation model is not recoverable from the t-statistic alone, so it is
   # left unmatched rather than cross-matched to a Cohen's d variant.
+  # (Scope note, 2026-08-05 audit: this sentence is accurate BECAUSE it is
+  # qualified to multi-predictor / mediation models. A SIMPLE-regression beta
+  # equals r = t/sqrt(t^2 + df) and IS recoverable -- the flag fires anyway
+  # because a bare t clause does not establish the predictor count. See the
+  # guard site below for the full reasoning.)
   beta_t_unverifiable <- FALSE
 
   # Build list of same-type variants for comparison
@@ -4280,19 +4285,34 @@ compute_and_compare_one <- function(row,
       }
     } else if (canonical_type == "h" && tt == "chisq") {
       # Stage 1 Gap 3: Cohen's h was reported as the effect size of a
-      # one-proportion / goodness-of-fit chi-square. h is a function of two
-      # specific proportions and is NOT recoverable from the chi-square
-      # statistic (which aggregates all categories against expected
-      # frequencies). Matching the reported h against the contingency
-      # phi/V/w would be a meaningless cross-family comparison, so leave it
-      # unmatched and report an honest "cannot verify" instead.
+      # one-proportion / goodness-of-fit chi-square. In general h is a function
+      # of two specific proportions that the chi-square statistic does not
+      # determine (it aggregates all categories against expected frequencies).
+      # Matching the reported h against the contingency phi/V/w would be a
+      # meaningless cross-family comparison, so leave it unmatched and report
+      # an honest "cannot verify" instead.
+      #
+      # WORDING CORRECTED 2026-08-05 (triple-verification audit). The message
+      # used to assert h "is not recoverable from the chi-square statistic
+      # alone" as a flat impossibility. That is OVERBROAD: for the special case
+      # of df = 1 against an explicit 50-50 null with N known,
+      # chi2 = N*(2*phat - 1)^2, so |phat - 0.5| = sqrt(chi2/N)/2 and h is
+      # determined UP TO SIGN (e.g. chi2 = 6.4, N = 100 -> phat = .6265,
+      # h = .2558). The claim holds for k > 2 categories, for a non-.5 null, and
+      # whenever N is unknown. Behaviour is deliberately UNCHANGED -- a
+      # conservative NOTE is right when the null proportion and category count
+      # are not established from the text, and a sign-ambiguous recovery is not
+      # something to publish -- but the message no longer claims impossibility
+      # in principle. Both reviewers concurred (codex, sonnet).
       ambiguity_level <- "clear"
       h_chisq_unverifiable <- TRUE
       uncertainty <- c(uncertainty,
         paste("Cohen's h reported as the effect size of a one-proportion /",
-              "goodness-of-fit chi-square - h is not recoverable from the",
-              "chi-square statistic alone (it requires the two underlying",
-              "proportions), so it cannot be independently verified"))
+              "goodness-of-fit chi-square - h depends on the two underlying",
+              "proportions, which this chi-square does not pin down (it",
+              "aggregates all categories, and the null proportion is not",
+              "established from the text), so it is not independently verified",
+              "here"))
     } else if (!is.na(canonical_type) && canonical_type == "beta" &&
                !is.na(tt) && tt == "t") {
       # Cycle 3 (T4): a standardized regression coefficient (beta) reported as
@@ -4301,13 +4321,28 @@ compute_and_compare_one <- function(row,
       # beta, and matching the reported beta against the t-test's Cohen's d
       # variants is a meaningless cross-family comparison. Leave it unmatched
       # and report an honest "cannot verify" instead.
+      #
+      # WORDING CORRECTED 2026-08-05 (triple-verification audit). The message
+      # used to say a beta "is not recoverable from the t-statistic alone" flat
+      # out. That is OVERBROAD: for SIMPLE (single-predictor) regression the
+      # standardized beta equals r = t/sqrt(t^2 + df) exactly -- which this
+      # package itself computes (standardized_beta_from_t, compute.R) and uses
+      # on rows typed `regression`. The claim is true only for multi-predictor /
+      # mediation models. Behaviour is deliberately UNCHANGED: at a bare `t`
+      # clause there is no reliable signal for the predictor count, and
+      # assuming k = 1 would silently publish a wrong beta for every mediation
+      # path -- exactly the failure class this guard exists to prevent. So the
+      # conservative NOTE stands; only the stated reason is corrected, from
+      # "impossible in principle" to "the model is not identifiable from a bare
+      # t clause". Both reviewers concurred (codex, sonnet).
       ambiguity_level <- "clear"
       beta_t_unverifiable <- TRUE
       uncertainty <- c(uncertainty,
         paste("Standardized regression coefficient (beta) reported as the",
-              "effect size of a t-test - a beta is not recoverable from the",
-              "t-statistic alone (a multi-predictor / mediation beta depends",
-              "on the model), so it cannot be independently verified"))
+              "effect size of a t-test - this clause does not establish how",
+              "many predictors the model has, and a multi-predictor /",
+              "mediation beta is not a function of the t-statistic, so the",
+              "beta is not independently verified here"))
     } else {
       # No same-type variants computed - fall back to all variants.
       # Category B (cross-family fallback): the reported ES type cannot be
@@ -6880,9 +6915,12 @@ compute_and_compare_one <- function(row,
   # reported CI but NO parseable effect size silently narrows to a p-value-only
   # check and can still publish `status = OK` with `ci_check_status = MATCH`.
   # A reader sees a green row and cannot tell that the paper reported an effect
-  # size the tool never checked. On this paper the eta-squared glyph has no
-  # ToUnicode mapping in the source PDF (a documented, WON'T-FIX extraction-side
-  # limit -- the value survives only as a nameless "= .008"), so the body-text
+  # size the tool never checked. On this paper the eta-squared symbol is not
+  # encoded as text at all -- it is drawn as filled vector curves with no char
+  # object (mechanism corrected 2026-08-05 by triple-verification re-audit; the
+  # earlier "no ToUnicode mapping" note here was wrong). It remains a documented
+  # WON'T-FIX extraction-side limit at the text layer -- the value survives only
+  # as a nameless "= .008" -- so the body-text
   # value genuinely cannot be typed; the honest response is to SAY SO on the
   # row rather than to imply a complete check. A CI cannot exist without an
   # estimate, so its presence is proof an effect size was reported.
