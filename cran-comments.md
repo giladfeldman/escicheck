@@ -1,7 +1,7 @@
 ## Submission
 
 This is an update of 'effectcheck' from 0.2.3 (the current CRAN release) to
-0.6.14. Development has been active across 0.2.4-0.6.14 -- new test types,
+0.6.19. Development has been active across 0.2.4-0.6.19 -- new test types,
 nonparametric and regression support, confidence-interval computation, and
 many parser and consistency fixes -- and the most significant change is
 structural, in 0.4.0 (see "Breaking change" below). Every intervening version
@@ -9,43 +9,33 @@ is documented in NEWS.md.
 
 ## Test environments
 
+* win-builder, R-devel (2026-08-05 r90355) -- Status: OK
+* Ubuntu 24.04 (GitHub Actions), R release, `R CMD check --as-cran
+  --no-manual` with `error_on = "warning"`
 * Windows 11, R 4.4.0 (local)
-* win-builder, R-devel (R Under development (unstable), 2026-05-15 r90061)
 
 ## R CMD check results
 
-Local `R CMD check --as-cran` (Windows, R 4.4.0): 0 errors | 0 warnings | 1 note.
-win-builder R-devel: 0 errors | 0 warnings | 1 note.
+0 errors | 0 warnings | 0 notes on win-builder R-devel.
 
-The local NOTE is "checking for future file timestamps ... unable to verify
-current time" -- a transient failure to reach a time server from the local
-check machine, not a package problem.
-
-The win-builder NOTE has two parts, both benign:
-
-* "Possibly misspelled words in DESCRIPTION: docpluck (18:12)". 'docpluck' is
-  the name of the companion text-extraction service the package directs users
-  to; its URL is given in the Description field. It is spelled correctly.
-
-* "Found the following (possibly) invalid URLs: https://escimate.app (From:
-  README.md), SSL connect error, Recv failure: Connection was reset".
-  https://escimate.app is the package's live companion web application; it
-  currently responds with HTTP 200 and a valid TLS certificate. The flagged
-  error is a transient network failure on the check machine, not a broken link.
+The only local result not reproduced there is an ERROR and a WARNING from
+"checking PDF version of manual", caused by this machine having no LaTeX
+installation ("pdflatex is not available"). win-builder reports "checking PDF
+version of manual ... OK", confirming a local toolchain gap rather than an Rd
+defect.
 
 ## Test suite
 
-1054 test_that blocks are present. The final CRAN check result is recorded only
-after the release gate runs on the submission candidate.
+1054 test_that blocks across 128 test files; all pass with 0 failures,
+0 errors, and 0 warnings (approx. 15 minutes under `R CMD check`).
 
 ## Breaking change since 0.2.3: file extraction removed in 0.4.0
 
 Reviewers should note that version 0.4.0 removed the file-input layer. The
 functions read_any_text(), check_file(), check_dir(), check_files(),
-checkPDF(), checkPDFdir(), checkHTML(), checkHTMLdir(), checkDOCXdir(), the
-extract_text_*() helpers, and compare_file_with_statcheck() are now defunct:
-still exported, but they call .Defunct() and emit an error naming the
-replacement workflow.
+checkPDF(), checkPDFdir(), checkHTML(), checkHTMLdir(), checkDOCXdir(), and
+compare_file_with_statcheck() are now defunct: still exported, but they call
+.Defunct() and emit an error naming the replacement workflow.
 
 effectcheck is now a pure text-analysis package -- callers extract document
 text with an external tool and pass the text to check_text(). The
