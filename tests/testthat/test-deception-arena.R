@@ -6,7 +6,7 @@
 # pins that contract: every row corresponding to a deceptive stat in the
 # tier-5 inputs MUST be flagged by at least one of those signals.
 #
-# Source spec: C:/Users/filin/Dropbox/Vibe/MetaScienceProjects/ScienceArena/
+# Source spec: $VIBE_ROOT/MetaScienceProjects/ScienceArena/
 #              docs/deception-detection-spec-for-escimate.md
 # ============================================================================
 
