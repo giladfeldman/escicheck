@@ -418,7 +418,9 @@ VARIANT_METADATA <- list(
     closest_method = NA_character_,
     delta_effect_abs = NA_real_, ci_match = as.logical(NA),
     ci_delta_lower = NA_real_, ci_delta_upper = NA_real_,
-    ci_check_status = NA_character_, ci_method_match = NA_character_,
+    ci_check_status = NA_character_, ci_method_match = NA_character_, ci_referent = NA_character_,
+    effect_guard_rejected = isTRUE(g1("effect_guard_rejected", FALSE)),
+    effect_guard_reason = as.character(g1("effect_guard_reason", NA_character_)),
     ci_width_ratio = NA_real_, ci_symmetry = NA_character_,
     ci_level_mismatch   = NA_character_,
     ci_clipped_to_bound = NA_character_,
@@ -835,6 +837,22 @@ compute_and_compare_one <- function(row,
     FALSE
   }
 
+  # v0.6.20 (MetaESCI O-1 request 2): the parse-time plausibility guard reports
+  # what it suppressed. Read here so the row can say so out loud -- see the
+  # uncertainty/extraction_suspect wiring in Phase 2 below.
+  effect_guard_rejected <- if ("effect_guard_rejected" %in% names(row) &&
+                               length(row$effect_guard_rejected) > 0) {
+    isTRUE(row$effect_guard_rejected[1])
+  } else {
+    FALSE
+  }
+  effect_guard_reason <- if ("effect_guard_reason" %in% names(row) &&
+                             length(row$effect_guard_reason) > 0) {
+    as.character(row$effect_guard_reason[1])
+  } else {
+    NA_character_
+  }
+
   ciL_rep <- if (length(row$ciL_reported) > 0) as.numeric(row$ciL_reported[1]) else NA_real_
   ciU_rep <- if (length(row$ciU_reported) > 0) as.numeric(row$ciU_reported[1]) else NA_real_
 
@@ -873,9 +891,17 @@ compute_and_compare_one <- function(row,
                           length(row$two_tailed_detected) > 0)
     isTRUE(row$two_tailed_detected[1]) else FALSE
 
-  # Add uncertainty if p-value was out of range
+  # Add uncertainty if p-value was out of range.
+  # v0.6.20: worded as a statement about the row's TEXT, not about its result.
+  # The flag now also covers a p-clause the p pattern declined outright ("p = 10"),
+  # and the detector can only see the whole chunk, so asserting "this result's
+  # p-value is invalid" would over-claim when the offending clause belongs to
+  # neighbouring prose. No p-value is adopted either way, which is the part that
+  # matters and is what the message states.
   if ("p_out_of_range" %in% names(row) && isTRUE(row$p_out_of_range[1])) {
-    uncertainty <- c(uncertainty, "Reported p-value could not be parsed or is out of valid range [0,1]")
+    uncertainty <- c(uncertainty, paste0(
+      "A p-clause in this result's text is not a valid probability (outside [0,1] ",
+      "or unparseable); no p-value was adopted for this row"))
   }
 
   # Use CI level from parsed data if available
@@ -962,7 +988,9 @@ compute_and_compare_one <- function(row,
       closest_method = NA_character_,
       delta_effect_abs = NA_real_, ci_match = as.logical(NA),
       ci_delta_lower = NA_real_, ci_delta_upper = NA_real_,
-      ci_check_status = NA_character_, ci_method_match = NA_character_,
+      ci_check_status = NA_character_, ci_method_match = NA_character_, ci_referent = NA_character_,
+      effect_guard_rejected = effect_guard_rejected,
+      effect_guard_reason = effect_guard_reason,
       ci_width_ratio = NA_real_, ci_symmetry = NA_character_,
       ci_level_mismatch   = NA_character_,
       ci_clipped_to_bound = NA_character_,
@@ -1123,6 +1151,15 @@ compute_and_compare_one <- function(row,
     }
   }
 
+  # v0.6.20 (MetaESCI O-1 request 2): say so when the parse-time plausibility
+  # guard suppressed a reported effect size. Without this the row is
+  # indistinguishable from a statistic that legitimately reported no effect
+  # size -- a false all-clear, and by MetaESCI's count the majority (27 of 42)
+  # of the O-1 corruptions took exactly this silent-loss path.
+  if (effect_guard_rejected) {
+    uncertainty <- c(uncertainty, effect_guard_reason)
+  }
+
   # Add uncertainty if effect size matched via fallback pattern (Phase 2F)
   if ("effect_fallback" %in% names(row) && isTRUE(row$effect_fallback[1])) {
     uncertainty <- c(
@@ -1151,7 +1188,21 @@ compute_and_compare_one <- function(row,
     F = c("eta2", "etap2", "omega2", "cohens_f", "R2", "f2"), # F-tests: ANOVA effects
     r = c("r", "R2"), # Correlation tests
     chisq = c("phi", "V", "h"), # Chi-square tests (h: one-proportion / GOF chi-square)
-    z = c("r", "d", "g", "beta", "h"), # z-tests: various, incl. two-proportion h
+    # v0.6.20 (MetaESCI O-5) -- RULING: a z-test reporting an odds ratio is NOT
+    # anomalous, and the WARN it used to raise was a false positive.
+    #
+    # The two commonest z-tests in this literature both take the OR as their
+    # natural effect size:
+    #   * the Wald z of a logistic-regression coefficient, where by construction
+    #     z = ln(OR) / SE(ln OR) -- the OR is not merely compatible with the z,
+    #     it is the same quantity on the odds scale;
+    #   * the z-test of a pooled log-OR in a meta-analysis.
+    # Reporting "z = 2.45, p = .014, OR = 1.83" is textbook practice, so the old
+    # message ("Reported effect size 'OR' is unusual for z-test") asserted a
+    # methodological problem that does not exist. MetaESCI measured it driving
+    # 56.5% of z rows into an anomaly category versus 11.2% for t-tests; that gap
+    # was this list, not the literature.
+    z = c("r", "d", "g", "beta", "h", "OR"), # z-tests: various, incl. two-proportion h and logistic/meta OR
     regression = c("beta", "partial_r", "R2", "f2", "d", "r"), # Regression coefficients
     U = c("rank_biserial_r", "cliffs_delta"), # Mann-Whitney U
     W = c("rank_biserial_r"), # Wilcoxon W
@@ -1193,6 +1244,12 @@ compute_and_compare_one <- function(row,
   # truth. Set in the "no explicit group sizes" branch below; read at the Phase-6 CI
   # verdict to cap the status at UNVERIFIABLE. See collabra.57785 loc 170.
   paired_ci_independent_approx_only <- FALSE
+
+  # v0.6.20 (MetaESCI O-3): which estimate the reported CI is centred on --
+  # "b_coeff", "standardized_beta", "effect_reported",
+  # "ambiguous_b_equals_effect" or "unknown". Set in the regression branch;
+  # stays NA for every other test type, where the question does not arise.
+  ci_referent <- NA_character_
 
   # Note: uncertainty and assumptions already initialized at top of function (line 275-276)
   # Do NOT reset them here or earlier messages will be lost
@@ -2178,16 +2235,44 @@ compute_and_compare_one <- function(row,
         }
       }
 
-      # Add r\u00b2 as alternative
-      alternatives$r_squared <- list(
-        value = r_value^2,
-        metadata = list(
-          name = "R-squared (from r)",
-          assumptions = "Squared correlation",
-          when_to_use = "Proportion of variance explained"
-        ),
-        why_consider = "Variance explained interpretation"
-      )
+      # r\u00b2 -- the variance explained by a bivariate correlation.
+      #
+      # v0.6.20 (MetaESCI O-4): PROMOTE this to a computed variant when the paper
+      # actually reported an R2, exactly as cohens_f2 is promoted for a reported
+      # f2 and d_from_r for a reported d/g just below. It used to be an
+      # `alternatives` entry unconditionally, so a reported R2 had no same-type
+      # computed counterpart to match against and the matcher fell through to
+      # Cohen's f2 = r2/(1-r2) -- a DIFFERENT SCALE. "r(1526) = .32, R2 = 0.10"
+      # (r2 = .1024, a correct APA-rounded report) was matched to f2 = .1141 and
+      # shipped WARN, and a hand-perfect "R2 = 0.1024" WARNed too. MetaESCI's
+      # note attributes this to the `r = c("r", "R2")` validity list at the
+      # effect/test compatibility check; that list is right -- R2 IS a legitimate
+      # thing to report for a correlation -- the defect was the missing variant.
+      # Named `R2` (not `r_squared`) when promoted: the R2 family's `variants`
+      # list is c("R2", "adjusted_R2"), and the same-type filter matches on that
+      # list, so a variant named `r_squared` would be built and then silently
+      # ignored by the matcher.
+      r_squared_val <- r_value^2
+      if (!is.na(canonical_type) && canonical_type == "R2") {
+        computed_variants$R2 <- list(
+          value = r_squared_val,
+          metadata = list(
+            name = "R-squared (from r)",
+            assumptions = "Squared correlation; exact for a bivariate correlation (R2 = r^2)",
+            when_to_use = "Proportion of variance explained"
+          )
+        )
+      } else {
+        alternatives$r_squared <- list(
+          value = r_squared_val,
+          metadata = list(
+            name = "R-squared (from r)",
+            assumptions = "Squared correlation",
+            when_to_use = "Proportion of variance explained"
+          ),
+          why_consider = "Variance explained interpretation"
+        )
+      }
 
       # Add Cohen's f\u00b2 as alternative (f\u00b2 = r\u00b2 / (1 - r\u00b2))
       r_sq <- r_value^2
@@ -3109,6 +3194,65 @@ compute_and_compare_one <- function(row,
         }
         computed_variants$h <- h_entry
       }
+    }
+
+    # v0.6.20 (MetaESCI O-5): an odds ratio reported with a z is VERIFIABLE when
+    # the OR carries its own confidence interval, and only then.
+    #
+    # The OR alone tells us nothing about z: OR = exp(b) fixes b, but z = b/SE
+    # needs SE too. The interval supplies exactly that missing quantity. A Wald
+    # interval on the log scale is ln(OR) +/- z_level * SE, so
+    #
+    #     SE(ln OR) = (ln(U) - ln(L)) / (2 * z_level)
+    #     z_implied = ln(OR) / SE(ln OR)
+    #
+    # and the reported z can be checked against it. This is the same reported-vs-
+    # recomputed pattern the clinical-trial RR branch uses (v0.6.0). Requires a
+    # strictly positive OR and interval (the log is otherwise undefined) and an
+    # interval that actually brackets the estimate -- an interval that does not
+    # contain its own point estimate is a reporting defect of a different kind,
+    # already surfaced by the CI checks, and back-deriving an SE from it would
+    # manufacture a number from known-broken inputs.
+    if (!is.na(canonical_type) && canonical_type == "OR" &&
+        !is.na(effect_reported) && effect_reported > 0 &&
+        !is.na(ciL_rep) && !is.na(ciU_rep) &&
+        ciL_rep > 0 && ciU_rep > 0 && ciU_rep > ciL_rep &&
+        effect_reported >= ciL_rep && effect_reported <= ciU_rep &&
+        !is.na(stat)) {
+      z_level <- stats::qnorm(1 - (1 - ci_level_used) / 2)
+      se_log_or <- (log(ciU_rep) - log(ciL_rep)) / (2 * z_level)
+      if (is.finite(se_log_or) && se_log_or > 0) {
+        z_implied <- log(effect_reported) / se_log_or
+        # NOT added to `computed_variants`. That list is the effect-size
+        # matcher's candidate pool, and when a row has no same-type variant the
+        # matcher falls back to ANY computed variant -- so an entry here was
+        # matched against the reported ODDS RATIO and published
+        # `matched_value = 2.460` (a z) with `delta_effect = 0.630` (an odds
+        # ratio minus a z-statistic). Meaningless, and it moved with the CI
+        # level: the same row at a 90% CI gave 0.234. Caught by /ship review;
+        # `delta_effect` is precisely the field MetaESCI's pipeline reads.
+        #
+        # The variant also carries no CI of its own, so it contributed nothing
+        # to the CI-candidate collector either -- it was pure liability. The
+        # comparison is reported in the uncertainty message below, which is
+        # where a diagnostic that is not an effect size belongs.
+        z_delta <- abs(abs(z_implied) - abs(stat))
+        uncertainty <- c(uncertainty, sprintf(
+          paste0("Odds ratio verified against the z-statistic via its own interval: ",
+                 "OR = %.4g, %d%% CI [%.4g, %.4g] implies z = %.3f; reported z = %.3f ",
+                 "(absolute difference %.3f)."),
+          effect_reported, as.integer(round(ci_level_used * 100)),
+          ciL_rep, ciU_rep, z_implied, stat, z_delta))
+      }
+    } else if (!is.na(canonical_type) && canonical_type == "OR") {
+      # No interval: say plainly that the OR is not recoverable, rather than
+      # calling it "unusual" (the pre-v0.6.20 message, which was simply wrong --
+      # see the O-5 ruling at the valid_effects_for_test list above).
+      uncertainty <- c(uncertainty, paste0(
+        "Odds ratio reported with a z-test is standard (logistic regression / ",
+        "meta-analytic z), but it cannot be verified from the z alone: z = b/SE ",
+        "fixes only the ratio, while OR = exp(b) needs b itself. Report the OR's ",
+        "confidence interval and the two become mutually checkable."))
     }
 
     if (!is.na(df1)) {
@@ -4447,7 +4591,111 @@ compute_and_compare_one <- function(row,
     candidates
   }
 
-  if (!is.na(ciL_rep) && !is.na(ciU_rep) && !h_chisq_unverifiable && !beta_t_unverifiable) {
+  # ==========================================================================
+  # v0.6.20 (MetaESCI O-3): CI REFERENT DETECTION
+  #
+  # A row carrying a regression coefficient can print an interval on either of
+  # two different scales:
+  #
+  #   b = 0.45, SE = 0.12, t(200) = 3.75, p < .001, 95% CI [0.21, 0.69]
+  #                                     -> interval on the UNSTANDARDIZED b
+  #   beta = 0.26, t(200) = 3.78, p < .001, 95% CI [0.12, 0.40]
+  #                                     -> interval on the STANDARDIZED beta
+  #
+  # Nothing in the APA string says which. Before this, the CI check compared the
+  # reported interval against the computed STANDARDIZED-beta (or Cohen's d)
+  # interval in both cases, so every b-referenced row was graded across scales
+  # and failed for a reason that had nothing to do with the paper. MetaESCI
+  # measured 601/1,048 regression rows mis-dispatched this way, with correctly
+  # referenced rows agreeing at 68.1% against a 5.9% pooled headline.
+  #
+  # The interval itself settles it: a Wald interval is symmetric about its own
+  # estimate, so its MIDPOINT identifies the referent. Matching that midpoint
+  # against the candidate estimates (tolerance 5e-3, per MetaESCI's spec)
+  # classifies the row without guessing. When the referent is the b, the correct
+  # comparison interval is the Wald-t interval on b itself,
+  # b +/- t_{1-alpha/2, df} * SE, added as a computed variant so the existing CI
+  # machinery grades like against like.
+  #
+  # Deliberately NOT scoped to test_type == "regression": the parser types a
+  # "b = .., t(df) = .., CI" row with no SE as a plain t-test, and that row hit
+  # the identical cross-scale defect -- its b-scale interval was graded against
+  # a Cohen's d interval and returned INCONSISTENT. The classification keys on
+  # the presence of a b coefficient, which is what actually matters.
+  #
+  # `ci_referent` is reported so the classification is auditable, and stays
+  # "unknown" when the midpoint matches neither candidate -- an honest
+  # abstention beats a coin flip, and downstream can filter on it.
+  # ==========================================================================
+  b_val_ci <- if ("b_coeff" %in% names(row) && length(row$b_coeff) > 0) {
+    as.numeric(row$b_coeff[1])
+  } else {
+    NA_real_
+  }
+  SE_val_ci <- if ("SE_coeff" %in% names(row) && length(row$SE_coeff) > 0) {
+    as.numeric(row$SE_coeff[1])
+  } else {
+    NA_real_
+  }
+  ci_referent_is_b <- FALSE
+  if (!is.na(b_val_ci) && !is.na(ciL_rep) && !is.na(ciU_rep) &&
+      is.finite(ciL_rep) && is.finite(ciU_rep)) {
+    ci_mid <- (ciL_rep + ciU_rep) / 2
+    .CI_REFERENT_TOL <- 5e-3
+    matches_b <- abs(ci_mid - b_val_ci) <= .CI_REFERENT_TOL
+    matches_eff <- !is.na(effect_reported) &&
+      abs(ci_mid - effect_reported) <= .CI_REFERENT_TOL
+    # When b and the reported effect are the SAME number the row is unambiguous
+    # in value but not in referent, so it is labelled as such rather than
+    # arbitrarily assigned; the existing b_is_unstandardized path already covers
+    # the comparison consequences of that case.
+    ci_referent <- if (matches_b && !matches_eff) {
+      "b_coeff"
+    } else if (matches_eff && !matches_b) {
+      if (!is.na(canonical_type) && canonical_type == "beta") {
+        "standardized_beta"
+      } else {
+        "effect_reported"
+      }
+    } else if (matches_b && matches_eff) {
+      "ambiguous_b_equals_effect"
+    } else {
+      "unknown"
+    }
+
+    if (identical(ci_referent, "b_coeff")) {
+      ci_referent_is_b <- TRUE
+      uncertainty <- c(uncertainty, sprintf(
+        paste0("Reported CI [%s, %s] is centred on the UNSTANDARDIZED coefficient ",
+               "b = %s (midpoint %.4f), not on a standardized effect size."),
+        format(ciL_rep), format(ciU_rep), format(b_val_ci), ci_mid))
+      if (!is.na(SE_val_ci) && SE_val_ci > 0 && !is.na(df1) && df1 > 0) {
+        t_crit <- stats::qt(1 - (1 - ci_level_used) / 2, df = df1)
+        computed_variants$b_coeff <- list(
+          value = b_val_ci,
+          ci = c(b_val_ci - t_crit * SE_val_ci, b_val_ci + t_crit * SE_val_ci),
+          metadata = list(
+            name = "Unstandardized coefficient b",
+            assumptions = sprintf("Wald t interval: b +/- t(%.0f) * SE", df1),
+            when_to_use = "Row whose reported interval is on the b scale"
+          )
+        )
+      } else {
+        # No SE (or no df) means the b-scale interval cannot be recomputed. Say
+        # so and suppress the comparison rather than grading the b interval
+        # against a standardized one -- that produced a false INCONSISTENT.
+        uncertainty <- c(uncertainty, paste0(
+          "The b-scale interval cannot be recomputed (that needs both SE and df, ",
+          "and at least one is absent), and comparing it against a standardized ",
+          "interval would be a cross-scale comparison, so the CI check is skipped."))
+      }
+    }
+  }
+  ci_referent_unverifiable <- ci_referent_is_b &&
+    !("b_coeff" %in% names(computed_variants))
+
+  if (!is.na(ciL_rep) && !is.na(ciU_rep) && !h_chisq_unverifiable &&
+      !beta_t_unverifiable && !ci_referent_unverifiable) {
     # Gather all CI candidates from matched variant and all same-type variants
     # (skipped for Stage 1 Gap 3: a reported Cohen's h CI on a chi-square row
     # has no h CI to compare against - only contingency phi/V/w CIs, which
@@ -5070,6 +5318,14 @@ compute_and_compare_one <- function(row,
 
   # Extreme delta flag (Issue 5): flag likely extraction errors
   extraction_suspect <- FALSE
+  # v0.6.20 (MetaESCI O-1 request 2): a value the parse-time plausibility guard
+  # threw away IS an extraction suspicion -- that is precisely what the guard
+  # concluded. Surfacing it here means a downstream consumer filtering on
+  # extraction_suspect sees the row, instead of reading the empty
+  # effect_reported as "no effect size was reported".
+  if (effect_guard_rejected) {
+    extraction_suspect <- TRUE
+  }
   if (!is.na(delta_effect_abs) && delta_effect_abs > EXTREME_DELTA_THRESHOLD) {
     extraction_suspect <- TRUE
     uncertainty <- c(uncertainty,
@@ -7063,6 +7319,13 @@ compute_and_compare_one <- function(row,
     ci_delta_upper = ci_delta_upper,
     ci_check_status = ci_check_status,
     ci_method_match = ci_method_match,
+    # v0.6.20 (MetaESCI O-3 and O-1 request 2). These MUST reach the output
+    # tibble, not just the internal uncertainty message: request 2 was
+    # explicitly so a consumer can DISTINGUISH a suppressed effect size from
+    # an absent one, which needs a column to filter on.
+    ci_referent = ci_referent,
+    effect_guard_rejected = effect_guard_rejected,
+    effect_guard_reason = effect_guard_reason,
     ci_width_ratio = ci_width_ratio,
     ci_symmetry = ci_symmetry,
     # v0.3.5 (MetaESCI 2C/2D/2E)
@@ -7664,7 +7927,8 @@ check_text <- function(text,
           closest_method = NA_character_,
           delta_effect_abs = NA_real_, ci_match = as.logical(NA),
           ci_delta_lower = NA_real_, ci_delta_upper = NA_real_,
-          ci_check_status = NA_character_, ci_method_match = NA_character_,
+          ci_check_status = NA_character_, ci_method_match = NA_character_, ci_referent = NA_character_,
+          effect_guard_rejected = FALSE, effect_guard_reason = NA_character_,
           ci_width_ratio = NA_real_, ci_symmetry = NA_character_,
           # v0.3.5 (MetaESCI 2C/2D/2E)
           ci_level_mismatch   = NA_character_,

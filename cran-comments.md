@@ -1,7 +1,7 @@
 ## Submission
 
 This is an update of 'effectcheck' from 0.2.3 (the current CRAN release) to
-0.6.19. Development has been active across 0.2.4-0.6.19 -- new test types,
+0.6.20. Development has been active across 0.2.4-0.6.20 -- new test types,
 nonparametric and regression support, confidence-interval computation, and
 many parser and consistency fixes -- and the most significant change is
 structural, in 0.4.0 (see "Breaking change" below). Every intervening version
@@ -26,7 +26,7 @@ defect.
 
 ## Test suite
 
-1054 test_that blocks across 128 test files; all pass with 0 failures,
+1084 test_that blocks across 130 test files; all pass with 0 failures,
 0 errors, and 0 warnings (approx. 15 minutes under `R CMD check`).
 
 ## Breaking change since 0.2.3: file extraction removed in 0.4.0
