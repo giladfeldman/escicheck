@@ -24,7 +24,15 @@ critical_columns <- c(
   "ci_level_mismatch", "ci_clipped_to_bound",
   "ci_symmetry_class",
   ## v0.3.6 addition (ScienceArena tier-5 deception detection)
-  "df_arity_mismatch"
+  "df_arity_mismatch",
+  ## v0.6.20 additions (MetaESCI O-1 request 2 and O-3). Additive, so no major
+  ## bump -- but they are documented API surface in API.md now, and a consumer
+  ## filtering on extraction_suspect or ci_referent depends on them existing.
+  ## `effect_guard_rejected` in particular is the ONLY way to distinguish a row
+  ## whose effect size was suppressed at parse time from one where the paper
+  ## reported none; losing it silently restores exactly the false all-clear
+  ## this release removed.
+  "effect_guard_rejected", "effect_guard_reason", "ci_referent"
 )
 
 sample_text <- paste(

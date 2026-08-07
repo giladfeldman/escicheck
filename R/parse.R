@@ -310,8 +310,62 @@ normalize_text <- function(x) {
   x <- gsub("-\\s*\\n\\s*([a-z])", "\\1", x, perl = TRUE)
 
   # Strip section numbers at start of lines (e.g., "3.3." or "3.3.1.") to prevent
-  # them from being captured as p-values when joined across line breaks
-  x <- gsub("(^|\\n)([ \\t]*)\\d+(\\.\\d+)+\\.?[ \\t]+", "\\1\\2", x, perl = TRUE)
+  # them from being captured as p-values when joined across line breaks.
+  #
+  # v0.6.20 (MetaESCI O-1, class A): the old pattern was `\d+(\.\d+)+\.?[ \t]+`,
+  # which also matches a LINE-WRAPPED REPORTED VALUE -- "d =\n0.86 in the
+  # treatment group" had "0.86 " stripped, so the row shipped
+  # effect_reported = NA with status OK (a false all-clear), and
+  # "p =\n0.037 for the interaction" lost its p-value. A section number is
+  # distinguishable from a wrapped value by SHAPE: it carries either two or more
+  # decimal groups ("3.3.1") or an explicit trailing period ("3.3."), whereas a
+  # reported value is a single group with no trailing dot ("0.86", "0.037").
+  # Requiring one of those two forms keeps every intended strip and stops the
+  # rule from ever destroying a number. The genuinely ambiguous "3.3 Results"
+  # form (single group, no trailing dot) is now KEPT: preferring a possible
+  # section number over a possible reported value is the wrong trade on a
+  # verification tool, and a p-value taking a section number is caught
+  # downstream by the [0, 1] validation at the p_reported extraction.
+  #
+  # The leading `(?<![=<>])(?<![=<>][ \t])` is the second half of the fix, for a
+  # case neither MetaESCI nor the cross-model review raised: a wrapped value that
+  # ENDS A SENTENCE is shaped exactly like a section number, because the sentence
+  # period supplies the trailing dot.
+  #
+  #   "..., d =\n0.86. In Study 2 we replicated it"
+  #        -> "0.86. " matched `\d+(\.\d+)+\.[ \t]+` and was stripped, so the row
+  #           shipped effect_reported = NA with status OK -- the silent-loss
+  #           class again, from the opposite direction.
+  #
+  # A dangling assignment operator at the end of the previous line settles it:
+  # nothing legitimately numbers a section immediately after "d =", and a value
+  # is the only thing that can follow. Two fixed-width lookbehinds (PCRE allows
+  # alternatives of differing fixed width) cover "d =" and "d = " alike; at
+  # position 0 a lookbehind has nothing to match and correctly succeeds.
+  x <- gsub("(?<![=<>])(?<![=<>][ \\t])(^|\\n)([ \\t]*)\\d+(?:\\.\\d+){2,}\\.?[ \\t]+",
+            "\\1\\2", x, perl = TRUE)
+  x <- gsub("(?<![=<>])(?<![=<>][ \\t])(^|\\n)([ \\t]*)\\d+(?:\\.\\d+)+\\.[ \\t]+",
+            "\\1\\2", x, perl = TRUE)
+  # Third form: a SINGLE-group number followed by a CAPITALISED word ("3.3
+  # Discussion", "4.2 Results", "1.0 Method"). Shape alone cannot separate this
+  # from a wrapped value -- "0.86" and "3.3" are the same shape -- so the
+  # discriminator is what FOLLOWS. A section number introduces a heading, which
+  # is capitalised; a wrapped value continues its sentence in lower case
+  # ("0.86 in the treatment group") or terminates it with a period first
+  # ("0.86. In Study 2"), and the required `[ \t]+` before the capital excludes
+  # that second case because the period intervenes.
+  #
+  # Deliberately WITHOUT the dangling-operator lookbehind used above: this rule
+  # exists precisely for the "d =\n3.3 Discussion" case, where the previous line
+  # DOES end in an operator. Found by a cross-model adversarial review of the
+  # first version of this fix, and reproduced at HEAD before being acted on --
+  # the surviving path shipped d = 3.3, which check.R's decimal-recovery step
+  # then silently rewrote to 0.33 and framed as a rounding discrepancy. Two
+  # fabricated values in sequence, neither of them in the paper.
+  #
+  # It also settles the "p =\n1.0 Results" case raised independently by the
+  # other reviewer, which the earlier draft had accepted as a residual.
+  x <- gsub("(^|\\n)([ \\t]*)\\d+\\.\\d+[ \\t]+(?=[A-Z])", "\\1\\2", x, perl = TRUE)
 
   # v0.3.0f: Remove standalone page/section numbers BEFORE line-break joining.
   # Must run here (not later at line ~317) because the joiner below would
@@ -338,7 +392,16 @@ normalize_text <- function(x) {
   # Fix uses [ \t]*+ (possessive horizontal whitespace) after [<=>] to prevent two bugs:
   # 1. Backtracking: \s* would backtrack past space, lookahead sees space not digit, fires
   # 2. Newline eating: \s*+ would consume \n, leaving nothing for the \n literal in pattern
-  x <- gsub("(p\\s*[<=>][ \\t]*+)(?!\\d|[.]\\d)([^\\n]{0,50})\\n\\s*([.\\d]+)", "\\1\\3", x, perl = TRUE)
+  # v0.6.20 (MetaESCI O-1/O-2, class A): the skipped span is DIGIT-FREE
+  # ([^\n\d]), so this rule can never discard a number that is already present.
+  # It previously skipped `[^\n]{0,50}`, which happily swallowed real reported
+  # statistics -- "p < ns although F(1,20) = 3.1\n2 participants" collapsed to
+  # "p < 2", deleting the F-test. See the shared rationale block at the
+  # `[a-z]+ =` bridge below.
+  # The adopted number must carry a DECIMAL POINT -- see the second invariant in
+  # the `[a-z]+ =` block below. A bare integer opening a line after a dangling
+  # "p =" is a page or section number, never a p-value.
+  x <- gsub("(p\\s*[<=>][ \\t]*+)(?!\\d|[.]\\d)([^\\n\\d]{0,50})\\n\\s*(\\d*\\.\\d+)", "\\1\\3", x, perl = TRUE)
 
   # Fix line breaks between test statistic and p-value
   # Pattern: "t(df) = value,\n p = value" -> "t(df) = value, p = value"
@@ -350,17 +413,74 @@ normalize_text <- function(x) {
 
   # Fix line breaks in effect size assignments
   # Pattern: "f = \n0.01" or "d = \n0.80" -> "f = 0.01" or "d = 0.80"
-  # Allow optional text between = and number (up to 30 chars)
-  x <- gsub("([a-z]+\\s*=\\s*)[^\\n]{0,30}\\n\\s*([-+]?[.\\d]+)", "\\1\\2", x, perl = TRUE)
+  # Allow optional non-numeric text between = and number (up to 30 chars)
+  #
+  # ==========================================================================
+  # v0.6.20 (MetaESCI O-1/O-2) -- THE INVARIANT FOR EVERY LINE-WRAP BRIDGE:
+  #
+  #   A bridging rule may JOIN a wrapped number to its label. It must NEVER
+  #   DELETE a number that is already present.
+  #
+  # The skipped span must therefore be digit-free. `[^\n\d]{0,30}` also encodes
+  # the precondition directly: if every character between the `=` and the line
+  # break is a non-digit, then this assignment genuinely has no value on its own
+  # line, which is the only situation the rule exists to repair.
+  #
+  # The old class was `[^\n]{0,30}`, with no guard of any kind, and it was the
+  # single root cause of BOTH MetaESCI O-1 and O-2 (they were filed as separate
+  # defects with separate diagnoses; both traced here):
+  #
+  #   "etap2 = .86, and Experiment\n1b"      -> "partial eta-squared = 1"
+  #        (the eta rewrite above turns this into "...squared = ", whereupon
+  #         `[a-z]+` matches "squared" and ".86, and Experiment" is discarded)
+  #   "d = 0.74 (see Table\n2)"              -> "p = 2)"
+  #   "chi2 (4, n = 211) = 12.74, p = .013\n\n10 items" -> "chi2 (4, n = 10 items"
+  #        (this one destroys the chi-square token itself, hence "0 rows")
+  #   "t(48) = 2.31, p = .025, d = 0.65\n\n10 items"    -> "t(48) = 2.31, p = 10"
+  #   "r(351) = .164, p = .050\n\n10 items"             -> "r(351) = .164, p = 10"
+  #
+  # Note what the last two show: the t and r cases were filed as *controls* that
+  # "parse fine" because they still return one row. They do -- carrying a
+  # fabricated p-value. Row count is not a sufficient probe for this class.
+  #
+  # Note also that the label vocabulary (Table / Figure / Study / Experiment)
+  # reported alongside O-1 is incidental. The rule keys on `[a-z]+ =` and a
+  # wrapped digit; ANY intervening prose triggers it.
+  #
+  # SECOND INVARIANT (added after a cross-model review of the first fix found
+  # three surviving paths, all reproduced locally before being acted on):
+  #
+  #   When prose is skipped, the adopted number must carry a DECIMAL POINT.
+  #
+  # Digit-freeness alone still let the rule reach ACROSS prose and adopt a bare
+  # integer that opens the next line -- which is a page number, a list marker or
+  # a section number, essentially never a statistic:
+  #
+  #   "d = see Table\n1 for means"  -> "d = 1"   (shipped effect_reported = 1)
+  #   "p = ns\n1 Results"           -> "p = 1"   (shipped p_reported = 1, p_valid TRUE)
+  #
+  # Values in APA prose are written with a decimal point (.80, 0.037, -0.34), so
+  # requiring one costs nothing real. The genuinely BARE case -- "d =" at the very
+  # end of a line, where an integer continuation such as "n =\n120" IS legitimate
+  # -- is unaffected: it is already joined upstream by the `([=<>])\s*\n\s*` rule,
+  # which only removes whitespace and can never discard text.
+  # ==========================================================================
+  x <- gsub("([a-z]+\\s*=\\s*)[^\\n\\d]{0,30}\\n\\s*([-+]?\\d*\\.\\d+)", "\\1\\2", x, perl = TRUE)
 
   # Fix cases where p-value pattern got broken: "p = text" followed by number on next line
   # More aggressive: look for "p = " followed by non-numeric text, then newline, then number
-  x <- gsub("(p\\s*=\\s*)[a-zA-Z][^\\n]*\\n\\s*([.\\d]+)", "\\1\\2", x, perl = TRUE)
+  # v0.6.20 (MetaESCI O-1/O-2, class A): digit-free skip span per the invariant
+  # above, and BOUNDED. The old `[^\n]*` was unbounded, so a single match could
+  # discard an entire line of statistics -- "p = ns, t(20) = 2.51, d = 0.55, 95%
+  # CI [0.1, 1.0]\n10 items" collapsed to "p = 10", taking the t-test, the effect
+  # size and the interval with it.
+  x <- gsub("(p\\s*=\\s*)[a-zA-Z][^\\n\\d]{0,100}\\n\\s*(\\d*\\.\\d+)", "\\1\\2", x, perl = TRUE)
 
   # Fix orphaned p-values: Look for "p = [text]" followed by newline and a number
   # Replace the text with the number: "p = on social distance\n0.837" -> "p = 0.837"
   # This is more aggressive and handles OCR errors where p-value got separated
-  x <- gsub("(p\\s*=\\s*)[^\\d\\n]{1,100}\\n\\s*([.\\d]+)(?=\\s*[,;]|\\s*$)", "\\1\\2", x, perl = TRUE)
+  # v0.6.20: decimal point required, per the second invariant above.
+  x <- gsub("(p\\s*=\\s*)[^\\d\\n]{1,100}\\n\\s*(\\d*\\.\\d+)(?=\\s*[,;]|\\s*$)", "\\1\\2", x, perl = TRUE)
 
   # General mid-sentence line-break joining (lowercase to lowercase across newlines)
   # Runs after stat-specific joins so those get priority
@@ -639,6 +759,8 @@ parse_text <- function(text, context_window_size = 2) {
       SE_coeff = numeric(0),
       adj_R2 = numeric(0),
       df_arity_mismatch = logical(0),
+      effect_guard_rejected = logical(0),
+      effect_guard_reason = character(0),
       arm1_events = numeric(0),
       arm1_total  = numeric(0),
       arm2_events = numeric(0),
@@ -795,6 +917,8 @@ parse_text <- function(text, context_window_size = 2) {
       SE_coeff = numeric(0),
       adj_R2 = numeric(0),
       df_arity_mismatch = logical(0),
+      effect_guard_rejected = logical(0),
+      effect_guard_reason = character(0),
       arm1_events = numeric(0),
       arm1_total  = numeric(0),
       arm2_events = numeric(0),
@@ -1065,7 +1189,29 @@ parse_text <- function(text, context_window_size = 2) {
   # follows (lookahead), so a normal "p = .40" still captures "=" as the operator
   # and "p <= .05" still captures "<=". collabra.126266 H5 punishment mediation:
   # docpluck delivers "Sobel Z = 4.87, p = <.001" (the PDF prints "p < .001").
-  pat_p <- "\\b[pP]\\s*(?:=\\s*(?=[<>]))?([<=>]{1,2})\\s*(0?\\.[0-9]+|[01]\\.[0-9]+|[01])"
+  # v0.6.20 (MetaESCI O-1 sweep, class B): the bare `[01]` alternative had no
+  # right-hand boundary, so it matched the LEADING DIGIT of a longer number and
+  # the rest was silently dropped -- "p = 10" was published as p_reported = 1,
+  # with p_valid = TRUE and p_out_of_range = FALSE. The [0, 1] validation at the
+  # p_reported extraction never saw the offending value because the regex had
+  # already truncated it to something in range. That is a fabricated number
+  # shipped with a clean flag, so the alternative now requires that no digit or
+  # decimal point follows. A malformed p is instead detected by pat_p_malformed
+  # below and reported honestly via p_out_of_range.
+  # The lookahead rejects a following DIGIT ("p = 10" -> not a p) and a following
+  # decimal point THAT INTRODUCES MORE DIGITS ("p = 1.05" is handled by the
+  # `[01]\.[0-9]+` alternative above and then rejected by the [0, 1] check). It
+  # must NOT reject a bare sentence-terminating period: "p = 1." is a legitimate
+  # in-range p at the end of a sentence, and a first draft using `(?![0-9.])`
+  # turned it into a false "out of valid range" claim (found by cross-model
+  # review, reproduced before fixing).
+  pat_p <- "\\b[pP]\\s*(?:=\\s*(?=[<>]))?([<=>]{1,2})\\s*(0?\\.[0-9]+|[01]\\.[0-9]+|[01](?![0-9])(?!\\.[0-9]))"
+  # Detection-only companion to pat_p: any numeric p-clause, in range or not.
+  # Used SOLELY to set p_out_of_range when pat_p declined the value, so an
+  # impossible p ("p = 10", "p = 3.3") surfaces as a flagged extraction rather
+  # than as a silently absent p-value. Deliberately NOT used for the `has_p`
+  # gating that pat_p drives, so row selection is unchanged.
+  pat_p_malformed <- "\\b[pP]\\s*(?:=\\s*(?=[<>]))?[<=>]{1,2}\\s*[-+]?\\d*\\.?\\d+"
   # Scientific notation p-values: p < 10^-15, p < 10-12 (PDF strips ^ in exponent)
   pat_p_sci <- "\\b[pP]\\s*(?:=\\s*(?=[<>]))?([<=>]{1,2})\\s*10\\s*\\^?\\s*[-\u2212](\\d+)"
   # v0.5.3: scientific E-notation p-values -- p = 2.572e-08, p = 1.2e-3 (the
@@ -1645,6 +1791,11 @@ parse_text <- function(text, context_window_size = 2) {
     stat_value_decimals <- NA_integer_
     chi_inline_N <- NA_real_
     df_arity_mismatch <- FALSE
+    # v0.6.20 (MetaESCI O-1 request 2): set by the parse-time plausibility guard
+    # when it suppresses a reported effect size, so the suppression is visible
+    # downstream instead of reading as "no effect size was reported".
+    effect_guard_rejected <- FALSE
+    effect_guard_reason <- NA_character_
     # v0.6.10 (E-mediation): set when this sub-chunk is a Sobel-Z mediation indirect
     # effect, so the effect-detection block binds the indirect effect (not the
     # sensitivity-analysis rho) and suppresses the fallback-ES rho grab.
@@ -2352,12 +2503,32 @@ parse_text <- function(text, context_window_size = 2) {
     # Reject mathematically impossible or highly implausible effect sizes
     # before they enter the pipeline. This prevents false ERRORs from
     # garbled PDF extractions like R2=52.2, V=173.5, d=8.
+    #
+    # v0.6.20 (MetaESCI O-1 request 2): every rejection below is now RECORDED.
+    # The guard used to null the value and say nothing, which made the row
+    # indistinguishable downstream from "this statistic reported no effect
+    # size" -- a false all-clear, and the more dangerous of the two O-1 failure
+    # modes (27 of MetaESCI's 42 corrupted rows were silent losses of this
+    # shape, shipped as OK / SKIP / NOTE). `effect_guard_rejected` and
+    # `effect_guard_reason` travel with the row; check.R turns them into an
+    # uncertainty message and sets extraction_suspect, so a suppressed value is
+    # always visible as suppressed.
     # ========================================================================
     if (!is.na(effect_reported) && !is.na(effect_name)) {
+      # Record the value/name BEFORE any rejection so the reason can quote it.
+      .guard_reject <- function(rule) {
+        effect_guard_rejected <<- TRUE
+        effect_guard_reason <<- sprintf(
+          "Reported effect size '%s = %s' was suppressed at parse time (%s); it is NOT absent from the source text.",
+          effect_name, format(effect_reported, trim = TRUE), rule)
+      }
+
       # Hard-bounded effect sizes: reject values outside mathematical bounds [0, 1]
       bounded_at_one <- c("R2", "r", "phi", "V", "eta2", "etap2", "omega2",
                           "rank_biserial_r", "cliffs_delta", "epsilon_squared", "kendalls_W")
       if (effect_name %in% bounded_at_one && abs(effect_reported) > 1.0) {
+        .guard_reject(sprintf("|%s| > 1 is outside the mathematical bounds of %s",
+                              format(effect_reported, trim = TRUE), effect_name))
         effect_name <- NA_character_
         effect_reported <- NA_real_
         effect_reported_decimals <- NA_integer_
@@ -2369,6 +2540,8 @@ parse_text <- function(text, context_window_size = 2) {
       d_family <- c("d", "g", "dz", "dav", "drm")
       if (!is.na(effect_reported) && !is.na(effect_name) &&
           effect_name %in% d_family && abs(effect_reported) > 10) {
+        .guard_reject(sprintf("|%s| > 10 is implausible for the %s family",
+                              format(effect_reported, trim = TRUE), effect_name))
         effect_name <- NA_character_
         effect_reported <- NA_real_
         effect_reported_decimals <- NA_integer_
@@ -2383,6 +2556,9 @@ parse_text <- function(text, context_window_size = 2) {
           abs(effect_reported) > 2) {
         if (abs(effect_reported) > 5) {
           # d=6, d=8 etc. -- virtually never a real effect size
+          .guard_reject(sprintf(
+            "round integer |%s| > 5 for the %s family (page/line-number artifact)",
+            format(effect_reported, trim = TRUE), effect_name))
           effect_name <- NA_character_
           effect_reported <- NA_real_
           effect_reported_decimals <- NA_integer_
@@ -2414,6 +2590,9 @@ parse_text <- function(text, context_window_size = 2) {
             }
           }
           if (reject) {
+            .guard_reject(sprintf(
+              "round integer %s for the %s family with a spurious-context or t-implausibility signal",
+              format(effect_reported, trim = TRUE), effect_name))
             effect_name <- NA_character_
             effect_reported <- NA_real_
             effect_reported_decimals <- NA_integer_
@@ -2573,8 +2752,15 @@ parse_text <- function(text, context_window_size = 2) {
       }
     }
 
-    # Guard: CI level < 0.50 is implausible (likely parsing artifact)
-    if (!is.na(ci_level) && ci_level < 0.50) {
+    # Guard: a confidence level outside [0.50, 1.00) is implausible (parsing
+    # artifact). v0.6.20 (MetaESCI): this test was one-sided (`< 0.50` only), so
+    # a level ABOVE 1 sailed through untouched -- "263.95% CI [0.11, 0.47]"
+    # yielded ci_level = 2.6395, ci_level_mismatch = NA and status PASS. A
+    # coverage probability of 1 or more is not merely implausible, it is
+    # impossible: a 100% interval is the whole support, and anything beyond that
+    # is undefined. A plausibility guard on a two-sided quantity has to be
+    # two-sided, so the upper bound is now enforced with the lower one.
+    if (!is.na(ci_level) && (ci_level < 0.50 || ci_level >= 1.00)) {
       ci_level_source <- "implausible_level"
       ci_level <- 0.95
     }
@@ -2710,7 +2896,23 @@ parse_text <- function(text, context_window_size = 2) {
       },
       p_out_of_range = {
         p_char <- if (!all(is.na(m_p))) m_p[3] else NA_character_
-        !is.na(p_char) && is.na(p_reported)
+        # v0.6.20 (class B): a p-clause that pat_p declined entirely (because the
+        # value is not in [0, 1] at all -- "p = 10", "p = 3.3") is just as
+        # out-of-range as one pat_p captured and the [0, 1] validation rejected.
+        # Before this, only the second kind was flagged, so an impossible p read
+        # downstream as "this result reported no p-value".
+        #
+        # The malformed detector is suppressed when the row reports an explicit
+        # "ns": that row's p is legitimately non-numeric, so a stray impossible
+        # p-clause elsewhere in the same chunk must not be attributed to it.
+        # (Cross-model review, reproduced before fixing: "The reaction time on
+        # trial p = 10 was recorded, and separately t(48) = 2.31, ns, d = 0.74."
+        # flagged the t row as having an out-of-range p.) The detector is
+        # necessarily chunk-scoped -- `s` IS the row's text, and there is no
+        # finer granularity available -- so check.R's message is worded as a
+        # statement about the row's text rather than about its result.
+        is.na(p_reported) && !isTRUE(p_ns_flag) &&
+          (!is.na(p_char) || grepl(pat_p_malformed, s, perl = TRUE))
       },
       p_decimal_corrected = p_decimal_corrected,
       p_ns = p_ns_flag,
@@ -2742,6 +2944,9 @@ parse_text <- function(text, context_window_size = 2) {
       SE_coeff = SE_coeff,
       adj_R2 = adj_R2_val,
       df_arity_mismatch = df_arity_mismatch,
+      # v0.6.20 (MetaESCI O-1 request 2)
+      effect_guard_rejected = effect_guard_rejected,
+      effect_guard_reason = effect_guard_reason,
       # v0.6.0: clinical-trial per-arm cells (events / totals) extracted from
       # pat_two_props_slash when a "<n1>/<N1> ... versus <n2>/<N2>" clause is
       # in the same chunk as an RR or risk-difference report. Used by check.R
@@ -2811,6 +3016,8 @@ parse_text <- function(text, context_window_size = 2) {
       SE_coeff = numeric(0),
       adj_R2 = numeric(0),
       df_arity_mismatch = logical(0),
+      effect_guard_rejected = logical(0),
+      effect_guard_reason = character(0),
       arm1_events = numeric(0),
       arm1_total  = numeric(0),
       arm2_events = numeric(0),
@@ -3187,6 +3394,8 @@ parse_text <- function(text, context_window_size = 2) {
     SE_coeff = NA_real_,
     adj_R2 = NA_real_,
     df_arity_mismatch = FALSE,
+    effect_guard_rejected = FALSE,
+    effect_guard_reason = NA_character_,
     arm1_events = NA_real_,
     arm1_total  = NA_real_,
     arm2_events = NA_real_,

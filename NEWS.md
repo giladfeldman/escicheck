@@ -1,3 +1,182 @@
+# effectcheck 0.6.20
+
+**A normalization rule was deleting reported statistics.** MetaESCI filed two
+apparently unrelated defects (O-1, O-2) with two different diagnoses. Both traced to
+one line in `normalize_text()`, and neither diagnosis was right. The sweep that
+followed found four more defects of the same class — one of them destroying a real
+effect size in a paper already in the regression corpus.
+
+## The defect class: normalization that deletes source text
+
+`normalize_text()` repairs PDF text-layer artifacts before anything is parsed. Several
+of its rules "bridge" a line wrap by skipping a span and adopting a number from the
+next line — the repair for `d =\n0.80`. None of the three that skipped a *bounded*
+span checked whether that span contained a value, so a **reported statistic was
+destroyed and replaced by whatever number happened to open the next line**:
+
+```
+"etap2 = .86, and Experiment\n1b"                 -> "partial eta-squared = 1"
+"d = 0.74 (see Table\n2)"                         -> "p = 2)"
+"chi2 (4, n = 211) = 12.74, p = .013\n\n10 items" -> "chi2 (4, n = 10 items"
+"t(48) = 2.31, p = .025, d = 0.65\n\n10 items"    -> "t(48) = 2.31, p = 10"
+"r(351) = .164, p = .050\n\n10 items"             -> "r(351) = .164, p = 10"
+```
+
+Two invariants now govern every bridging rule:
+
+1. **The skipped span must be digit-free.** A bridge may never discard a number that
+   is already present. (One sibling rule already did this and was correct; the
+   difference had gone unnoticed for eleven releases.)
+2. **When prose is skipped, the adopted number must carry a decimal point.** A bare
+   integer opening a line is a page or section number, not a statistic. The genuinely
+   bare case — an assignment whose line simply ends at the `=`, where a wrapped
+   integer `n =\n120` is legitimate — is handled by the whitespace-only joiner, which
+   deletes nothing.
+
+Corrections to the filed diagnoses, since MetaESCI is writing this up:
+
+- **O-1 is not a capture bleed.** No effect-size capture pattern is involved; every
+  one already terminates at its own value. `normalize_text` deletes the value before
+  the parser ever sees it.
+- **The label vocabulary is incidental.** The rule keys on `[a-z]+ =` plus a wrapped
+  digit. `Table`/`Figure`/`Study`/`Experiment` are not special, and any intervening
+  prose triggers it — so 42 rows is a floor set by the search vocabulary, not a census.
+- **O-2 is the same defect, not a chi-square continuation guard.** The rule matched
+  `n = ` inside the chi-square's own parentheses and deleted `211) = 12.74, p = .013`,
+  destroying the chi-square token itself — hence zero rows.
+- **The t and r rows filed as O-2 controls were not controls.** They return one row,
+  which is why they looked clean, but that row carries a **fabricated p-value of 10**.
+  Row count is not a sufficient probe for this class.
+
+## Four more defects of the same class, found by the sweep
+
+- **The section-number stripper deleted line-wrapped values.** `\d+(\.\d+)+\.?[ \t]+`
+  at line start matches `0.86 ` exactly as it matches `3.3.1 `, so
+  `"d =\n0.86 in the treatment group"` shipped `effect_reported = NA` with status
+  **OK** — a false all-clear from a rule nobody had looked at. A section number is now
+  distinguished by shape (two or more decimal groups, or an explicit trailing dot) or,
+  for the single-group form, by being followed by a **capitalised word** — a heading
+  introduces one, a wrapped value continues its sentence in lower case or terminates
+  it with a period first.
+- **A wrapped value that ends a sentence was stripped too**, because the sentence
+  period supplies the trailing dot: `"d =\n0.86. In Study 2"` lost the 0.86. A
+  dangling assignment operator on the previous line now exempts it.
+- **`p = 10` was published as `p_reported = 1`**, with `p_valid = TRUE` and
+  `p_out_of_range = FALSE`. `pat_p`'s bare `[01]` alternative had no right-hand
+  boundary, so it matched the leading digit of a longer number; the `[0, 1]`
+  validation never saw the offending value because the regex had already truncated it
+  into range. A malformed p is now detected and reported honestly.
+- **The parse-time plausibility guard nulled values silently.** A suppressed effect
+  size was indistinguishable downstream from a statistic that reported none — the
+  more dangerous of the two O-1 failure modes, and by MetaESCI's count the majority
+  (27 of 42) of the corrupted rows. The guard now records
+  `effect_guard_rejected` / `effect_guard_reason`, surfaced as an uncertainty message
+  with `extraction_suspect = TRUE` (MetaESCI O-1 request 2).
+
+## MetaESCI O-3, O-4, O-5
+
+- **O-3 — `ci_referent`** (new column). A row carrying a regression coefficient can
+  print its interval on the unstandardized `b` scale or the standardized `beta` scale,
+  and nothing in the APA string says which; the interval was graded against the
+  standardized computation either way. A Wald interval is symmetric about its own
+  estimate, so its **midpoint** identifies the referent (tolerance 5e-3). When the
+  referent is `b`, the comparison target is now the Wald-t interval on `b` itself,
+  `b +/- t(df) * SE`, added as a computed variant. Not scoped to
+  `test_type == "regression"`: a `b = ..., t(df) = ..., CI` row with no SE is typed as
+  a plain t-test and hit the identical cross-scale defect, returning a false
+  INCONSISTENT; it is now `UNVERIFIABLE`. The column stays `"unknown"` when the
+  midpoint matches neither candidate — an honest abstention beats a coin flip.
+- **O-4 — R-squared on a correlation.** `r_squared` was only ever an `alternatives`
+  entry, so a reported `R2` had no same-type computed counterpart and the matcher fell
+  through to Cohen's `f2 = r^2/(1-r^2)`, a different scale. `r(1526) = .32, R2 = 0.10`
+  (r^2 = .1024, a correct APA-rounded report) shipped WARN, and a hand-perfect
+  `R2 = 0.1024` WARNed too. Now promoted to a computed variant when an `R2` is
+  reported, and both PASS. MetaESCI attributes this to the `r = c("r", "R2")` validity
+  list; that list is right — R-squared is a legitimate thing to report for a
+  correlation — the defect was the missing variant.
+- **O-5 — RULING: a z-test reporting an odds ratio is not anomalous**, and the WARN
+  was a false positive. The Wald z of a logistic coefficient is by construction
+  `z = ln(OR)/SE(ln OR)`, and a meta-analytic z tests a pooled log-OR; the OR is the
+  natural effect size in both. `OR` joins the valid z-test effects. Better than
+  silencing it: when the OR carries its own interval the z **is** recoverable, since
+  `SE(ln OR) = (ln U - ln L)/(2*z_level)`, so the reported z is now verified against
+  `ln(OR)/SE` and the difference reported. Without an interval the row says plainly
+  that the OR is not recoverable from the z alone, rather than calling it unusual.
+  The implied z is reported **in the uncertainty message only** — deliberately not as
+  a computed variant. See the release-review finding below.
+
+## Also
+
+- **`ci_level` is now bounded at both ends.** The guard tested only `< 0.50`, so
+  `263.95% CI` yielded `ci_level = 2.6395`, `ci_level_mismatch = NA` and status PASS.
+  A coverage probability of 1 or more is not implausible but impossible. A plausibility
+  guard on a two-sided quantity has to be two-sided.
+- **Two deferred MetaESCI E9 items re-verified at 0.6.20.** Pipe-delimited table rows
+  parse to one clean PASS row (confirms MetaESCI's finding that this closed silently).
+  The trailing `BF10 > 100)` dedup produces no duplicate across four constructed
+  shapes; the original input was never filed, so this is as far as it can be taken
+  from this side.
+
+## Two defects in this release's own diff, caught by the release pipeline
+
+Recorded because both would have shipped an inaccuracy, and both were found *after*
+the change was otherwise green (suite passing, CRAN check clean, corpus diff clean,
+two cross-model reviews complete).
+
+- **QA — `effect_guard_rejected` / `effect_guard_reason` were write-only columns.**
+  The parser produced them and `check.R` consumed them internally (uncertainty message
+  and `extraction_suspect`), but they never reached `check_text()`'s output — while
+  `API.md` documented them as columns. That is MetaESCI's O-1 request 2 only
+  half-delivered: the point was to let a consumer *filter* on suppression, which needs
+  a column to filter on. Now emitted at every output constructor, carrying the real
+  values wherever they are in scope, and added to the E3 schema contract so a future
+  removal fails loudly.
+- **Review — the implied z polluted the effect-size matcher.** The OR/CI check
+  initially registered `z_from_OR_ci` as a computed variant. That list is the matcher's
+  candidate pool, and with no same-type variant available the matcher falls back to any
+  computed variant — so it matched the implied z against the reported **odds ratio**
+  and published `matched_value = 2.460` with `delta_effect = 0.630`: an odds ratio
+  minus a z-statistic. It also moved with the confidence level (0.234 at a 90% CI),
+  which no effect-size delta can do, and `delta_effect` is exactly the field MetaESCI's
+  pipeline reads. The variant carried no CI of its own, so it contributed nothing to
+  the CI-candidate collector either — pure liability. The diagnostic now lives only in
+  the uncertainty message. The sibling `b_coeff` variant was tested for the same
+  hazard and is safe: it belongs to no effect-size family, so the family filter keeps
+  it out of the matcher while the CI collector still reaches it — pinned by a test
+  constructed so it would win on numbers alone (reported effect equal to `b` exactly).
+
+## Verification
+
+- **Test suite: 2849 passing, 0 failures** (was 2751 / 1054 blocks; now 1084 blocks).
+  30 new `test_that` blocks in `test-v0620-normalizer-value-deletion.R` and
+  `test-v0620-metaesci-o3-o4-o5.R`, **every one authored against the unfixed code and
+  watched to fail first** (26, 27 and 6 failures across the three rounds).
+- **Cross-model review of the diff**, both reviewers instructed to find wrong numbers
+  rather than to approve. Codex raised three surviving paths and Sonnet three more;
+  **all six were reproduced locally before any was acted on**, and two of them were
+  regressions introduced by the first version of this fix (a decimal-shaped section
+  number surviving into a fabricated `d = 3.3`, which the decimal-recovery step then
+  silently rewrote to `0.33`; and sentence-final `p = 1.` being rejected as
+  out-of-range). Both are fixed and pinned.
+- **Whole-corpus row-count delta** (11 cached real-article texts, 215 rows): **0 rows
+  gained, 0 lost, 1 verdict change** — reinstating the per-release practice MetaESCI
+  notes lapsed after 0.3.1. The single change is the defect caught in the wild:
+  `spps.txt` loc 216 is a two-column merge where 0.6.19's bridging rule deleted the
+  article's stated `d = 0.33, 95% CI [0.09, 0.57]` and manufactured
+  `d = 0.75, 95% CI = [0.54, 0.95], t = 7.47` — **a sentence that does not appear in
+  the paper**, while the article's actual overall meta-analytic effect vanished from
+  the output entirely. The row now reports the stated 0.33 and the garbled merge is
+  visible in `raw_text`. Not found by the label-vocabulary search that produced the
+  42-row estimate.
+
+## Known limitation (new, deliberate)
+
+The sentence splitter does not break on a paragraph boundary, so a two-column merge
+like the `spps.txt` case above still yields one row pairing an effect from one column
+with a test statistic from another. Splitting on a blank line would separate them (and
+the bare-d-with-CI pattern would pick up the orphaned effect), but it changes chunking
+for every document and belongs in its own release with its own corpus validation.
+
 # effectcheck 0.6.19
 
 **Two shipped "cannot verify" messages claimed mathematical impossibility that does
