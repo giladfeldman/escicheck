@@ -1680,3 +1680,73 @@ ci_cohens_w <- function(chisq, df, N, level = 0.95) {
   bounds <- sqrt(pmax(0, lambdas) / N)
   ci_result(bounds = sort(bounds), method = "ncchisq_inversion", success = TRUE)
 }
+
+# ============================================================================
+# v0.6.22: minimum attainable p-values for a resampling test.
+#
+# These are the checks that remain valid when the p-value itself cannot be
+# recomputed (see v0.6.21). Both are HARD arithmetic bounds requiring no raw
+# data -- only the resample count, or the two group sizes.
+#
+# They must never drive a hard ERROR. Legitimate practice reaches below the
+# counting floor: GPD tail approximation (Knijnenburg et al. 2009), sequential
+# Monte Carlo (Besag & Clifford 1991), combining per-stratum p-values, and
+# mid-p (0.5/M) or randomized p-values (no positive floor at all). The bounds
+# support a NOTE, not an accusation.
+# ============================================================================
+
+#' Minimum attainable Monte Carlo permutation p-value
+#'
+#' With B randomly drawn permutations the defensible estimator is
+#' `(r + 1) / (B + 1)` where `r` counts resamples at least as extreme as the
+#' observed statistic (Phipson & Smyth 2010, "Permutation P-values Should Never
+#' Be Zero"). The smallest value that estimator can take is `1 / (B + 1)`.
+#'
+#' @param B Number of resamples. NA or non-positive returns NA.
+#' @return The floor, or NA_real_ when B is unusable.
+#' @noRd
+perm_min_p_mc <- function(B) {
+  if (length(B) != 1L || is.na(B) || !is.finite(B) || B <= 0) return(NA_real_)
+  1 / (B + 1)
+}
+
+#' Minimum attainable EXACT permutation p-value for two independent samples
+#'
+#' The exact reference set enumerates every way of splitting `n1 + n2`
+#' observations into groups of `n1` and `n2`, so it has `choose(n1 + n2, n1)`
+#' members and no p-value below `1 / M` is reachable.
+#'
+#' Deliberately conservative. Enumeration (2026-08-07) puts the true two-sided
+#' absolute-tail floor at `2 / M` for every `n1, n2` tried -- including unequal
+#' n, because the mirror is achieved by the smallest-values-vs-largest-values
+#' split rather than by complementation -- and ties raise it further. Shipping
+#' `1 / M` therefore flags only the genuinely unreachable, whatever the
+#' statistic, tie structure, or two-sided convention.
+#'
+#' @param n1,n2 Group sizes.
+#' @return The floor, or NA_real_ when the sizes are unusable.
+#' @noRd
+perm_min_p_exact <- function(n1, n2) {
+  if (length(n1) != 1L || length(n2) != 1L) return(NA_real_)
+  if (is.na(n1) || is.na(n2) || !is.finite(n1) || !is.finite(n2)) return(NA_real_)
+  if (n1 < 1 || n2 < 1) return(NA_real_)
+  M <- suppressWarnings(choose(n1 + n2, n1))
+  if (!is.finite(M) || M < 1) return(NA_real_)
+  1 / M
+}
+
+#' Monte Carlo standard error of a resampling p-value
+#'
+#' `SE(p_hat) = sqrt(p (1 - p) / B)`. Used to say whether a significance
+#' decision is stable at the stated resample count, never to contest the value.
+#'
+#' @param p Reported p-value.
+#' @param B Number of resamples.
+#' @return The standard error, or NA_real_ when inputs are unusable.
+#' @noRd
+perm_mc_se <- function(p, B) {
+  if (length(p) != 1L || length(B) != 1L) return(NA_real_)
+  if (is.na(p) || is.na(B) || !is.finite(p) || !is.finite(B)) return(NA_real_)
+  if (B <= 0 || p < 0 || p > 1) return(NA_real_)
+  sqrt(p * (1 - p) / B)
+}

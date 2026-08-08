@@ -1,3 +1,361 @@
+# effectcheck 0.7.3
+
+**A comma between digits means at least four different things, and the code only
+knew two.** v0.7.2 replaced the thousands/decimal whitelist with a shared spec. Testing
+that against the real 38-paper validation corpus — **2,984 comma occurrences**, which the
+`tmp/` corpus used until then contained *none* of — showed the remaining classes were
+larger than the ones already fixed.
+
+**Contextual signals, measured rather than assumed.** A space after the comma is strong
+evidence against a thousands separator: 68% of no-space occurrences are the thousands
+shape versus 22% of spaced ones. The spaced+3-digit class is overwhelmingly reference-list
+furniture (`Psychol. Methods 3, 424-453`, `Nature genetics 54, 437-449`) and RGB triples.
+An earlier draft admitted a space to repair `N = 1, 234`, and on real strings that fused
+volume into page (`3424-453`), collapsed `RGB = 120, 120, 120` into `120120120`, and
+turned the table row `All places 403,669 107,081` into `403.669107.081`. The general rule
+now refuses a space; a narrow `N =`/`nobs =` rule repairs the count case, where the
+spacing genuinely is extraction damage.
+
+**Chains resolved by group width.** Of 35 bare comma chains in the corpus, "every group
+after the first is exactly three digits" classifies **34 correctly**: `1,000,000` and
+`1,054,908` are numbers; `Figures 6,7,8`, `10,14,19`, `Ye1,2,3,4` and `2017,10,39` (a year
+followed by citation superscripts) are lists. Previously the decimal rule converted only
+the first pair, producing `1.2,3,4,5` — worse than either answer.
+
+**Structural spans are lifted out before any numeric rule runs**: head-noun lists, tuples
+of any length, bracketed indices, coded variables, DOIs. Self-identifying full notation
+(`1.234,56`, `1,234.56`, apostrophe and NBSP variants) is resolved without locale
+knowledge. Terminator whitelists are replaced by a negative `(?!\d)` boundary — that
+whitelist had been patched for `/`, then `%`, then `-`, each after a silent failure.
+
+**Document-level locale inference** (`infer_numeric_locale`) resolves the one shape
+structure cannot: `1,234`. The two conventions are mutually exclusive, so a single
+unambiguous token settles a document. Markers are operator-guarded — a bare `0,1`/`0.1`
+misfires on coded variables, version numbers, ratios and lists (5 of 10 realistic
+strings); requiring a comparison operator fixes all five. Conflicting evidence is reported
+as `conflict`, never majority-voted.
+
+**Impossible values can no longer exit as OK.** Cramér's V, |r|, |rank-biserial|,
+|Cliff's δ|, η², ω², R² are bounded by construction, and U/W are integers by construction.
+A violation is now WARN + `extraction_suspect`, with the value kept visible so a reader
+can recognise the failure. This catches the whole class independently of cause: it would
+have caught all three separator defects on its own.
+
+**Dual-p reporting.** `resampling_inference` is a CLAUSE-level fact; whether the BOUND p
+is resampling-derived is a VALUE-level fact. Conflating them shipped a false claim — for
+the real sentence `t(2037) = -3.26, P = 0.001, P-permutation = 0.002` the bound p is the
+parametric 0.001 (verified: `2*pt(-3.26, 2037)` = 0.001132), yet the row asserted "this
+p-value is not reproducible even with the raw data" about it. New
+`p_reported_is_resampling` keys every claim about the bound value. The safety condition is
+**provability**: only a GLUED qualifier (`P-permutation`) is invisible to `pat_p`, so the
+bound value is provably parametric and is verified normally; a SPACED qualifier
+(`permutation p = .062`) may itself have been bound, so the row stays conservative.
+Corpus evidence: 13 real dual-p instances, all verified against `pt()`, of which
+**2 (15%) disagree about significance at α = .05** — routine, not a corner case. Magnitude
+thresholds remain refused, now empirically: agreeing pairs range from nearly identical to
+**29× apart**, and discordant pairs are not magnitude outliers.
+
+Also: a permutation result no longer *worsens* a verdict. Five rows in a PNAS paper
+reporting both p-values went OK → WARN purely for containing the word "permutation",
+because the p-consistency block is also the WARN → OK rescue.
+
+Suite **3319 passing / 0 failures** across 135 files; conformance corpus 61/61. Validation
+corpus (25 papers, 550 rows): **0 rows lost, 0 value changes**, 10 new extractions,
+2 verdict changes. Two corrected values are the defect caught in published work —
+`U = 55,890` and `U = 84,716` in an RSOS paper were being read as 55.89 and 84.716.
+
+# effectcheck 0.7.2
+
+**A normalization rule was turning thousands separators into decimal points.**
+`normalize_text()` resolved the decimal-comma / thousands-separator ambiguity with a
+whitelist of four syntactic contexts. Everything outside that list was corrupted:
+
+| input | produced | consequence |
+|---|---|---|
+| `U = 12,345` | `12.345` | rank-biserial **0.99938** published where the truth is 0.38275 — status `OK` |
+| `nobs = 1,182` | `1.182` → N = 1 | Cramér's V = **3.5355** published — V is bounded in [0,1], so that value is impossible — status `OK` |
+| `BF10 = 1,234,567.89` | `1.234,567.89` | unparseable; a degraded BF flips "decisive" to "negligible" |
+| `1,234/5,678` | arm counts NA | risk-ratio verification silently skipped |
+| `M = 1,234.56`, `SE = 1,234.5`, `AIC = 12,345.6`, `H(2) = 1,234.56` | two decimal points | unparseable |
+
+The whitelist had already failed three times — MetaESCI E8 (47 rows lost in one
+article), the `N =` case, and a resample-count case in v0.6.22 — each fix adding one
+more entry. It was an enumeration, not a rule, and `nobs` (a *documented* sample-size
+token since v0.5.5) was never in it.
+
+**Root cause.** Two decimal rules allowed unlimited digits before the comma
+(`(\d{1,3}),` and `([-+]?\d+),`). A European decimal has exactly **one** integer digit
+(`0,05`, `1,5`, `9,81`); two or more digits before a comma is a thousands group. That
+single constraint is the whole fix.
+
+**The rules now live in one place.** `inst/normalization-spec/` holds a versioned
+`SPEC.md` and a language-neutral `conformance.json` that **both** effectcheck and
+docpluck must satisfy. docpluck had already solved this correctly — its A3a rule
+handles every case above, and its source still carries the comment "ESCImate Request
+1.1" recording that *we asked for the fix and then never retired our own broken copy*.
+Two implementations with no shared test cannot stay in sync; the corpus is that test.
+`normalization_spec_version()` is recorded so a published number carries the provenance
+of the rules that produced it.
+
+**We also found a case where docpluck is wrong**, and filed it back
+(`REQUEST_TO_DOCPLUCK_normalization_spec.md`): its lookahead omits `,`, so
+`t(28) = 2,21, d = 0,45` leaves `2,21` unconverted and a parser reads **2** — the same
+class of silent error, in the other direction. A European decimal is routinely followed
+by the list comma. Both divergence cases are tagged in the corpus.
+
+**Deliberately kept as a separate layer:** `t(1,197)` and `F(7,140)` are the same shape
+with opposite answers — a *t*-test takes one df (so 1197 is a thousands separator), an
+F-test takes two (so 7,140 is a genuine pair). That depends on **test arity**, which is
+statistics-aware, so the shared spec protects all `X(…)` brackets and effectcheck strips
+the single-df ones afterwards. docpluck cannot make that call and should not try.
+
+Three defects surfaced during verification that the unit tests alone would have missed:
+the corpus caught **my own** wrong expectation about `t(1,197)`; the end-to-end check
+caught `/` missing from the boundary set, which silently truncated a clinical arm count
+from 1234 to 234; and the corpus-diff harness was picking up this session's scratch
+prompt files and reporting them as regressions.
+
+Suite **3181 passing / 0 failures** across 135 files. Whole-corpus render diff over 8
+real articles / 169 rows: **byte-identical**. Note the corpus contains **zero**
+thousands-separated numbers, so it is structurally blind to this defect class — the
+conformance corpus exists precisely because the render diff cannot see it.
+
+# effectcheck 0.7.1
+
+**A rank test's estimand, stated.** The methodological point underlying the whole
+0.6.21–0.7.1 line of work: switching from a t-test to Mann-Whitney when normality looks
+doubtful is not a like-for-like substitution. MWU targets **stochastic superiority**,
+`P(X>Y) + 0.5·P(X=Y)` — not a difference in means, and not generally a difference in
+*medians* either, since that reading requires a location-shift / equal-shape assumption
+papers rarely state.
+
+The claim is exact, not rhetorical, and the test pins the arithmetic: X uniform on
+{1, 5, 6} and Y uniform on {4, 5, 9} have **identical medians** (5), yet
+`P(X<Y) + 0.5·P(X=Y) = 11/18 = .611` — far from the .5 null, so the procedure has power
+against distributions whose medians coincide. (Fay & Proschan 2010, *Statistics Surveys*
+4:1–39; Divine, Norton, Baron & Juarez-Colunga 2018, *The American Statistician*
+72:278–286, "The Wilcoxon-Mann-Whitney Procedure Fails as a Test of Medians".)
+
+A NOTE, never an error, on `U` and `W` rows only. We deliberately do **not** scan
+surrounding prose for mean/median language: an interpretation sentence cannot be reliably
+linked to a specific test, and a false accusation there would be worse than silence.
+
+Implementation note: written as a standalone block rather than a branch of the
+computation chain. Folding it in as `} else if (tt %in% c("U","W"))` terminated that chain
+early, which would have let its trailing clauses fire for unrelated test types.
+
+## Second cross-model review round (v0.6.22 / v0.7.0 / v0.7.1)
+
+Eight further defects raised against the new material, **all eight reproduced locally
+before being acted on**. Four wrote a *wrong number* rather than merely a wrong flag:
+
+- **B scraped from the wrong clause.** *"Across 500 samples, a permutation test with
+  10,000 permutations …"* bound `B = 500` and then **false-flagged** the p as below
+  "1/(B+1) = 0.002" — a wrong accusation built on a neighbouring count. A bare
+  `<n> samples/draws/iterations` no longer counts without a resampling qualifier.
+- **The exact floor was applied to a bootstrap.** A bootstrap resamples *with
+  replacement* and has no `choose(n1+n2, n1)` reference set, so a legitimate bootstrap p
+  was flagged against a bound that never constrained it. The exact floor is now gated on
+  a permutation-type method (`resampling_is_permutation`).
+- **Two robust statistics in one sentence.** `"WTS(2) = 12.34, p = .002; ATS(1.87, Inf) =
+  3.45, p = .061"` stayed a single chunk: the ATS row published **the WTS's p**, and the
+  WTS row was dropped. WTS/ATS starts added to the sub-chunk splitter.
+- **Brunner-Munzel claimed another test's statistic.** *"The Brunner-Munzel alternative
+  was considered, but the reported Wilcoxon result was W = 123"* typed the row
+  `brunner_munzel` with the Wilcoxon's W as its statistic. A competing test name inside
+  the gap now refuses the match instead of guessing.
+
+Plus: `B = 10,000` with no unit noun was missed; a strict inequality *at* the floor
+(`p < .001` with 999 permutations) was not flagged because `.001 < .001` is false, now
+compared with `<=`; a Monte Carlo SE and 95% interval were printed around an
+**inequality** p (`p < .05` → "SE = 0.00218, interval 0.0457 to 0.0543"), attaching
+concrete numbers to a value the paper never reported; and — the commonest reporting form
+of all — **Yuen and Brunner-Munzel written with a plain `t(df)`** were claimed by the
+generic t branch and had ordinary Cohen's d variants computed for them.
+
+Suite **3024 passing / 0 failures** across 134 files. Whole-corpus render diff:
+**byte-identical** at every stage of this work.
+
+# effectcheck 0.7.0
+
+**The modern nonparametric / robust family: Brunner-Munzel, ATS, WTS, Yuen.** The
+reviewer asked whether the permutation work was "extendable to other tests (e.g.
+Brunner-Munzel, ATS, WTS etc)", assuming that without raw data none could be reproduced.
+It is extendable, and further than the question supposed: **all four report a statistic
+against a known reference distribution, so the reported p IS independently verifiable**
+from the statistic and df alone. It is the effect size that is not recoverable — the same
+shape as the existing `cochran_q` branch (v0.5.15).
+
+| new `test_type` | reference distribution | p verification |
+|---|---|---|
+| `wts` | chi-square(df), df = rank of contrast matrix | `pchisq(WTS, df, lower=FALSE)` |
+| `ats` | F(df1, df2), df1 typically **non-integer**, df2 may be `Inf` | `pf(ATS, df1, df2, lower=FALSE)` |
+| `brunner_munzel` | t(Satterthwaite df) | `2*pt(-abs(W), df)` |
+| `yuen` | t(trimmed df) | `2*pt(-abs(t), df)` |
+
+`pf(F, df1, Inf)` reduces exactly to `pchisq(df1*F, df1)`; the identity is asserted in the
+test rather than assumed. Brunner-Munzel and Yuen require their **name** in the clause —
+their statistics are written `W` / `W_BF` / `t`, which collide with Wilcoxon and with an
+ordinary t-test, so the dispatch uses the same discipline `chisq_subtype` applies to
+McNemar/Friedman. All four branches sit before the generic ones, and a regression test
+pins that ordinary t / F / W rows are unaffected.
+
+Each is exempted by the v0.6.21 resampling machinery when its own clause says
+permuted/bootstrapped — GFD reports both an asymptotic and a permuted WTS precisely
+because the asymptotic one is liberal in small samples, and bootstrap Yuen is standard in
+WRS2. Grading those against the parametric reference would be the v0.6.21 defect
+reintroduced through a new door.
+
+**Orientation warning, recorded because we got it wrong first.** Brunner-Munzel's estimand
+`p̂ = P(X<Y) + 0.5·P(X=Y)` is the **complement** of Vargha-Delaney's `A_XY` (they sum to
+exactly 1), so **`δ = 1 − 2p̂`**, not `2p̂ − 1`. Our design document had it backwards; a
+third verification pass caught it, and direct computation over three cases (including one
+with a tie) confirmed the sign flip. Shipping the original would have published every
+Brunner-Munzel effect with the wrong sign. No cross-check against a reported Cliff's δ or
+Vargha-Delaney A is performed until the reporting orientation can be pinned.
+
+**Pre-existing defect fixed in the same run**: `.friendly_test_name()` covered only 12 of
+the 25 shipped test types, so `spearman`, `kendall`, `cochran_q`, `RR`, `rdpct`, `md_hl`,
+`binomial`, `interaction_p`, `mediation_indirect`, `mcnemar_or`, `bayes_factor`,
+`hazard_ratio` and `d_reported_only` fell through to their raw slug in every report. All
+filled in, and a test now asserts every type in the default `stats` vector has a display
+name — so the next new type cannot silently regress it.
+
+# effectcheck 0.6.22
+
+**What CAN be checked on a resampling p-value without the raw data.** 0.6.21 stopped
+grading a permutation p against the parametric reference. That left the reviewer's actual
+question open: if it cannot be recomputed, can anything be verified? Three things can,
+none of which need the data.
+
+**1. The minimum attainable p.** A Monte Carlo permutation p sits on the lattice
+`(r+1)/(B+1)` (Phipson & Smyth 2010), so with B stated the smallest value the procedure
+can produce by counting is `1/(B+1)`. `"1,000 permutations, p < .0001"` is below that
+floor. New `resampling_B` column parses the resample count.
+
+**2. The exact-permutation floor.** With n1 and n2 known the reference set has
+`choose(n1+n2, n1)` members, so no exact p below `1/M` is reachable — at n1 = n2 = 5,
+M = 252 and nothing under `1/252` exists.
+
+**3. Monte Carlo fragility.** `SE(p̂) = sqrt(p(1−p)/B)`, so `p = .048` with B = 1,000 has
+SE ≈ .0068 and an approximate 95% interval straddling .05 — the significance decision is
+not stable at that resample count. Reported only when the interval actually crosses alpha.
+
+Plus a reporting-completeness note: a resampling result that never states B is not
+reproducible **even with the raw data**.
+
+**None of these is a hard ERROR, deliberately.** Legitimate practice reaches below the
+counting floor — GPD tail approximation, sequential Monte Carlo, combining per-stratum
+p-values, mid-p (`0.5/M`), randomized p (no positive floor at all). They state an
+arithmetic fact and let the reader judge.
+
+Two calibration findings, both from enumeration rather than assertion:
+
+- A cross-model reviewer argued the two-sided floor is provably `2/M` when n1 = n2 (the
+  complement of an n1-subset being another n1-subset) and that `1/M` becomes reachable
+  when n1 ≠ n2. **Enumeration refutes it**: the floor is `2/M` for every configuration
+  tried — 5,5 → 2/252; 4,6 → 2/210; 3,7 → 2/120; 2,8 → 2/45; 5,7 → 2/792 — because the
+  mirror comes from the smallest-values-vs-largest-values split, which exists at any
+  n1, n2. So no special case is needed, and the shipped bound is the conservative `1/M`,
+  which cannot false-flag whatever the statistic, tie structure, or two-sided convention.
+  (Ties only raise the true floor: a tied x gave .0317 against .0079 untied.)
+- **`normalize_text()` turns "10,000 permutations" into "10.000", and
+  `numify_int("10.000")` is 10.** Taking that at face value would have set B = 10, a floor
+  of `1/11 ≈ .09`, and false-flagged essentially every permutation p in the corpus. A
+  resample count is always an integer, so every `.` and `,` in it is a thousands
+  separator and is stripped rather than parsed.
+
+New columns: `resampling_B`, `resampling_p_below_floor`. 8 `test_that` blocks, watched to
+FAIL first (11 failures + 2 errors before implementation). Suite **2947 passing /
+0 failures** across 132 files. Whole-corpus render diff: **byte-identical**, 0 rows
+gained, 0 lost, 0 verdict changes.
+
+# effectcheck 0.6.21
+
+**A resampling-derived p-value was being graded against a parametric reference.**
+Raised by a methodologist reviewing ESCImate, who asked whether a "perm Welch t" could
+be approximately checked. Investigating it surfaced two defects, both reproduced at
+0.6.20 before any fix was written.
+
+**The false flag.** `"A permutation Welch t-test with 10,000 permutations showed no
+significant difference, t(58) = 2.31, p = .062"` returned `decision_error = TRUE`,
+`reason = reported_ns_computed_sig`. The paper is correct: the parametric p for
+t(58) = 2.31 is .0245, but the reported .062 came from the permutation distribution.
+The pre-existing `method_context_in_chunk` cap did **not** rescue it — "permutation"
+was absent from `method_kw`, and that cap only fires on `status == "ERROR"`, not WARN.
+
+**The wrong published interval.** `ci_OR_all()` back-derives a CI from the reported p
+via `SE = |log(OR)| / qnorm(1 - p/2)`, an inversion that assumes a **normal** reference
+distribution. Fed a permutation p, a McNemar row reporting `OR = 2.50, 95% CI
+[1.05, 5.95], p = .062` produced a computed interval of **[0.9551, 6.5441]** — crossing
+1 where the paper's does not — and then declared the paper's own correct CI
+`INCONSISTENT`. Reachable from four test types (`mcnemar_or`, `chisq`, `regression`,
+`z`); it requires a *reported* CI for the comparison to fire, which is why a first
+probe without one returned NA and looked clean.
+
+**The fix is scoped to the p-value, not the row.** A permutation changes only the
+reference distribution — the statistic itself is computed identically, so
+`d = 2t/sqrt(df)` remains exactly as valid and is still checked. Blanket-capping the
+row at NOTE would have discarded a real, correct check. New parse columns
+`resampling_inference` / `resampling_method` read the row's **own clause** (the v0.6.18
+Welch precedent — reading `context_window` leaked a modifier onto a neighbouring row,
+N 132 → 403). When set: the p-consistency comparison and `decision_error` are
+suppressed, the p-back-derivation is gated off, and an honest note names the parametric
+comparator without asserting an error.
+
+Deliberately **not** a numeric `|p_perm − p_param|` threshold. Under the very conditions
+that motivate permuting, the two legitimately differ, so any magnitude threshold would
+manufacture false flags; only decision discordance is reported, and only as a note.
+Verified by simulation (1,000 sims, equal means, nominal α = .05): permuting the raw
+mean difference gives **26.6%** type-I error at n₁=10 (sd 3) vs n₂=40 (sd 1), while
+permuting the Welch t itself gives 7.2% against the parametric 6.4% — so a reported
+"permutation Welch t" must mean the *studentized* form (Janssen 1997), and its p sits
+close to, but not on, the parametric p.
+
+Two deliberate exclusions in the keyword set: `"randomization"` must be qualified by
+`"test"` (a bare `randomi[sz]ed` would match every randomized controlled trial), and
+`"exact test"` is absent entirely — Fisher's exact is a closed-form conditional test
+whose p **is** computable, so matching it would suppress a legitimate check. Both are
+pinned by tests, as are `"randomly assigned"` and `"randomized controlled trial"`.
+
+Also: `"bootstrap"` belongs to both `method_kw` and the resampling set, so a
+bootstrapped **result** used to be explained as a methods-section artifact ("power
+analysis, meta-analysis, etc.") — a false statement about the row. The method-context
+message is now suppressed when the row is recognised as resampling-based.
+
+**Cross-model review raised eight further paths against the first draft, and all eight
+reproduced locally before being acted on** — three over-suppression, four
+under-application, one regex gap:
+
+- A **bootstrapped CI** ("`p = .50, d = 0.61, bootstrapped 95% CI [0.10, 1.10]`") marked
+  the whole row resampling-based and hid a genuine decision error. A resampling word
+  now counts for the p-value only when at least one occurrence is *not* immediately
+  followed by interval language.
+- An **`n.s.` label** bypassed the guard entirely — that branch keys on `p_ns`, not
+  `p_reported` — so `"permutation Welch t-test, t(58) = 2.31, n.s."` still returned
+  `ns_label_vs_computed_sig`.
+- The **correlation N-candidate selector** picked N by minimising
+  `|p_try − p_reported|` with `p_try` computed *parametrically*; with candidates 42 and
+  380 a permutation `r = .30, p = .001` moved N to 380 (df 378), and N drives the
+  effect size and its CI. The most consequential of the eight.
+- The **p > .5 extraction-artifact rule** is a magnitude comparison, so a correct
+  `p = .62` permutation row was marked `extraction_suspect`.
+- The **`md_hl` p-vs-CI invariant** assumes p and interval share a reference
+  distribution; a bootstrap p with a percentile interval need not agree, so the
+  disagreement is now a caveat rather than an "inconsistency".
+- **`randomization inference`** (standard econometrics phrasing) was not matched, only
+  `randomization test`. `permutation-based` and `nonparametric bootstrap` did match.
+- Releasing the method-context ERROR cap whenever a row was resampling-based was **too
+  broad**: `"A Monte Carlo simulation power analysis showed ..."` is a genuine method
+  artifact and must keep its cap. The cap is now released only when the clause carries
+  no method keyword beyond the resampling vocabulary.
+
+14 `test_that` blocks, every defect-targeting one watched to FAIL against the unfixed
+code first (23 failures + 1 error at clean HEAD). Two blocks are green at HEAD by
+design — they guard against this fix over-reaching. Suite **2911 passing / 0 failures**
+across 131 files (baseline at HEAD 2849). Whole-corpus render diff over 9 real-article
+texts, 192 rows: **byte-identical**, 0 rows gained, 0 lost, 0 verdict changes.
+
 # effectcheck 0.6.20
 
 **A normalization rule was deleting reported statistics.** MetaESCI filed two

@@ -1,0 +1,134 @@
+# Numeric separator normalization spec
+
+**Spec version:** `1.0.0`
+**Derived from:** docpluck `normalize.py` steps A3a + A3, as of docpluck v2.4.126
+**Status:** proposed to docpluck as the canonical definition (see
+`REQUEST_TO_DOCPLUCK_normalization_spec.md`). Until docpluck adopts it, this
+document records the semantics effectcheck implements and tests against.
+
+## Why this exists
+
+Academic text uses the comma for two incompatible purposes:
+
+- **European decimal separator** — `d = 0,80` means zero point eight.
+- **English thousands separator** — `U = 12,345` means twelve thousand.
+
+Resolving one breaks the other. Two implementations of that resolution existed
+independently — docpluck's (Python) and effectcheck's (R) — and they diverged.
+effectcheck's was provably wrong: `U = 12,345` became `12.345`, which published a
+rank-biserial correlation of `0.99938` where the truth was `0.38275`, with status
+`OK`. docpluck's handled the same input correctly.
+
+The divergence was not an accident of carelessness. effectcheck *asked* docpluck
+to fix this (the request is still cited in docpluck's source as "ESCImate
+Request 1.1"), docpluck implemented it more generally, and effectcheck never
+retired its own narrower copy. **Two implementations with no shared test cannot
+stay in sync.** This spec plus `conformance.json` is that shared test.
+
+## Design note: why the rules are documented, not executed, as data
+
+The conformance **corpus** is language-neutral data. The **rules** are specified
+here in prose plus reference regexes, and implemented natively in each language.
+
+Executing shared regex strings across PCRE (R, `perl = TRUE`) and Python `re`
+would be a false economy: the dialects differ in lookbehind support, character
+class semantics, and Unicode handling, so an identical pattern string is not a
+guarantee of identical behaviour — it merely *looks* like one. The corpus is what
+actually proves the two agree. This is the CLDR model: shared data and a shared
+conformance suite, native implementations.
+
+## Rule T1 — protect thousands separators (runs FIRST)
+
+Strip the comma from any integer that is unambiguously thousands-grouped, so the
+decimal rule below never sees it.
+
+```
+(?<![A-Z][(\[])\b([1-9]\d{0,2}(?:,\d{3})+)(?=[\s,;.)\]:]|$)
+```
+→ the captured integer with all `,` removed.
+
+Four independent guards, each load-bearing:
+
+1. **Must start `[1-9]`** — rejects `0,001`, which is a European decimal.
+2. **Structure `\d{1,3}(?:,\d{3})+`** — each comma must be followed by *exactly*
+   three digits. `0,05` (two) and `1,5` (one) cannot match. This is what carries
+   most of the discrimination.
+3. **Trailing boundary `[\s,;.)\]:]|$`** — avoids mid-token matches.
+4. **Negative lookbehind `(?<![A-Z][(\[])`** — leaves statistical brackets alone.
+   `F(7,140)` and `F[2,42]` are df *pairs*; stripping the comma destroys them.
+
+   T1 deliberately protects **all** `X(…)` brackets, because deciding which are
+   pairs requires knowing the test. See rule T2.
+
+## Rule T2 — single-df brackets (effectcheck layer, NOT part of the shared spec)
+
+`t(1,197)` and `F(7,140)` are the same shape and get **opposite** answers: a
+t-test takes exactly one df, so `1,197` is a thousands separator meaning 1197; an
+F-test takes two, so `7,140` is a genuine pair. The difference is **test arity**,
+which is statistics-aware and cannot be decided from the token's shape.
+
+So T1 (context-free, shared) protects every bracket, and effectcheck then strips
+the separator inside brackets belonging to **single-df tests only** — `t`, `H`,
+`r`, `Z` — leaving `F` and chi-square df pairs intact. This is the layer split in
+action: docpluck cannot make this call, and should not try.
+
+MetaESCI E8 (2026-04-11) is the incident: `t(2,758)` became `t(2.758)`, silently
+reinterpreted as a Welch df of 2.758, and one article dropped 47 rows.
+
+## Rule D1 — decimal comma (runs SECOND, on T1's output)
+
+```
+(?<![a-zA-Z,0-9\[(])(\d),(\d{1,3})(?=\s|[;)\]]|\.(?!\d)|$)
+```
+→ `\1.\2`
+
+**Exactly one digit before the comma.** This is the single most important
+constraint in the spec and the one effectcheck previously got wrong: its rule
+allowed `[-+]?\d+` before the comma, so `12,345` matched and was destroyed.
+A European decimal in real text has one integer digit (`0,05`, `1,5`, `9,81`);
+anything with two or more digits before a comma is a thousands group.
+
+Lookbehind exclusions, each with a known failure it prevents:
+
+- `a-zA-Z` — author affiliation superscripts (`Braunstein1,3`).
+- `,` — the middle of a multi-affiliation run (`Wagner1,3,4`).
+- `0-9` — CI pairs (`[0.45,0.89]`) and already-formed decimal lists.
+- `[` and `(` — tight df brackets (`F[2,42]`), which MetaESCI D2 (2026-04-11)
+  showed being corrupted into `F[2.42]`.
+
+The lookahead is deliberately restrictive. Broadening it to `[^0-9a-zA-Z]`
+(as effectcheck previously did) caused ordering regressions with CI parsing.
+The `\.(?!\d)` alternative admits a sentence-final decimal (`d = 0,87.`) while
+still refusing `1,234.567`.
+
+## Residual ambiguity — what neither rule can decide
+
+`M = 1,234` is genuinely undecidable from the token alone: a mean of 1234, or a
+European 1.234. T1 resolves it toward **thousands**, which is the right default
+for English-language APA output, but it *is* a guess.
+
+Ambiguity is a statistics-aware question — whether the token is a sample size, a
+Bayes factor, or a Cohen's d changes the answer — so it is **not** resolved in
+this spec. It belongs to the consumer. effectcheck's obligation is to record when
+a value was resolved under ambiguity rather than known, and never to present such
+a value as verified. A platform that reports a number as checked when it was
+guessed has manufactured exactly the false confidence these tools exist to remove.
+
+## Layer ownership
+
+| Concern | Owner | Why |
+|---|---|---|
+| Unicode, ligatures, glyph repair, spacing | docpluck | Context-free: a minus sign is a minus sign regardless of the surrounding statistics. |
+| Thousands vs decimal separator (T1, D1) | this spec, both implementations | Structural, decidable from the token's shape alone. |
+| Residual ambiguity (`M = 1,234`) | effectcheck | Requires knowing the statistical role of the token. |
+| Which statistic a number *is* | effectcheck | Not a text concern at all. |
+
+## Conformance
+
+`conformance.json` is the executable contract. Every case carries an `input`, an
+`expected` output, the governing `rule`, and a `note` explaining what breaks if
+the case regresses. Both implementations must pass every case.
+
+Cases marked `"ambiguous": true` document a deliberate default rather than a
+provable answer; changing one is a semantic decision requiring a spec version
+bump, not a bug fix.

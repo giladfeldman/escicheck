@@ -22,6 +22,9 @@
 # Friendly display name for test types
 .friendly_test_name <- function(type) {
   if (is.null(type) || is.na(type) || !nzchar(type)) return("")
+  # v0.7.0: this lookup covered only 12 of the 25 shipped test types, so the
+  # other 13 fell through to their raw slug in every report. Filled in while
+  # adding the robust family, per "leave nothing behind".
   lookup <- c(
     t = "t-test", F = "F-test (ANOVA)", r = "Correlation",
     chisq = "Chi-square", chi2 = "Chi-square", z = "z-test",
@@ -29,7 +32,24 @@
     kendall_w = "Kendall's W (concordance)",
     dscf = "DSCF post-hoc (Kruskal-Wallis)",
     regression = "Regression",
-    table_estimate = "Table estimate"
+    table_estimate = "Table estimate",
+    spearman = "Spearman correlation",
+    kendall = "Kendall correlation",
+    cochran_q = "Cochran Q (heterogeneity)",
+    RR = "Risk ratio",
+    rdpct = "Risk difference (%)",
+    md_hl = "Median difference (Hodges-Lehmann)",
+    binomial = "Exact binomial test",
+    interaction_p = "Interaction p-value",
+    mediation_indirect = "Mediation indirect effect",
+    mcnemar_or = "McNemar odds ratio",
+    bayes_factor = "Bayes factor",
+    hazard_ratio = "Hazard ratio",
+    d_reported_only = "Reported Cohen's d (no statistic)",
+    wts = "Wald-type statistic (WTS)",
+    ats = "ANOVA-type statistic (ATS)",
+    brunner_munzel = "Brunner-Munzel test",
+    yuen = "Yuen trimmed-mean t"
   )
   if (type %in% names(lookup)) return(lookup[type])
   type

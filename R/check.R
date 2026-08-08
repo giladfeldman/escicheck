@@ -400,6 +400,11 @@ VARIANT_METADATA <- list(
     decision_error_downgraded = FALSE,
     decision_error = FALSE,
     decision_error_reason = NA_character_,
+    resampling_inference = FALSE,
+    resampling_method = NA_character_,
+    p_reported_is_resampling = FALSE,
+    resampling_B = NA_real_,
+    resampling_p_below_floor = FALSE,
     p_reported = as.numeric(g1("p_reported", NA_real_)),
     ciL_reported = as.numeric(g1("ciL_reported", NA_real_)),
     ciU_reported = as.numeric(g1("ciU_reported", NA_real_)),
@@ -869,6 +874,56 @@ compute_and_compare_one <- function(row,
     NA_real_
   }
 
+  # v0.6.21: was this p-value produced by a RESAMPLING procedure (permutation /
+  # randomization / bootstrap / Monte Carlo)? Set in parse.R from the row's OWN
+  # clause. When TRUE the reported p came from a resampling reference
+  # distribution, so it is NOT recomputable from the test statistic -- but the
+  # effect size still is, because a permutation does not change how the
+  # statistic itself is computed. Every consequence below is therefore scoped to
+  # the p-value, never to the whole row.
+  resampling_inference <- if ("resampling_inference" %in% names(row) &&
+                              length(row$resampling_inference) > 0) {
+    isTRUE(row$resampling_inference[1])
+  } else {
+    FALSE
+  }
+  resampling_method <- if ("resampling_method" %in% names(row) &&
+                           length(row$resampling_method) > 0) {
+    as.character(row$resampling_method[1])
+  } else {
+    NA_character_
+  }
+  resampling_B <- if ("resampling_B" %in% names(row) &&
+                      length(row$resampling_B) > 0) {
+    as.numeric(row$resampling_B[1])
+  } else {
+    NA_real_
+  }
+  # v0.7.3: does the BOUND p come from the resampling distribution, or is it the
+  # parametric one sitting next to a permutation p? Every claim about
+  # p_reported must key on THIS, not on whether the clause mentions resampling.
+  # Reproduced: "t(2037) = -3.26, P = 0.001, P-permutation = 0.002" binds the
+  # parametric 0.001 (verified against pt()) and then asserted it was "not
+  # reproducible even with the raw data" -- a false statement about a number we
+  # had just checked.
+  p_reported_is_resampling <- if ("p_reported_is_resampling" %in% names(row) &&
+                                  length(row$p_reported_is_resampling) > 0) {
+    isTRUE(row$p_reported_is_resampling[1])
+  } else {
+    resampling_inference
+  }
+  # v0.6.22: set below when the reported p lies beneath the smallest value the
+  # stated procedure could produce by counting.
+  resampling_p_below_floor <- FALSE
+  # Only a PERMUTATION-type procedure has the choose(n1+n2, n1) reference set.
+  # A bootstrap resamples WITH replacement, so that floor does not bind it.
+  resampling_is_permutation <- if ("resampling_is_permutation" %in% names(row) &&
+                                   length(row$resampling_is_permutation) > 0) {
+    isTRUE(row$resampling_is_permutation[1])
+  } else {
+    FALSE
+  }
+
   # P-value symbol extraction for inequality handling (< vs = vs >)
   p_sym <- if ("p_symbol" %in% names(row) && length(row$p_symbol) > 0) {
     as.character(row$p_symbol[1])
@@ -972,6 +1027,11 @@ compute_and_compare_one <- function(row,
       decision_error_downgraded = FALSE,
       decision_error = FALSE,
       decision_error_reason = NA_character_,
+      resampling_inference = FALSE,
+      resampling_method = NA_character_,
+      p_reported_is_resampling = FALSE,
+      resampling_B = NA_real_,
+      resampling_p_below_floor = FALSE,
       p_reported = p_reported,
       p_computed = NA_real_,
       d_ind = NA_real_, d_ind_equalN = NA_real_, d_ind_min = NA_real_, d_ind_max = NA_real_,
@@ -2081,7 +2141,14 @@ compute_and_compare_one <- function(row,
     # Derive df from N for Pearson r (df = N - 2)
     # When multiple N values were found in context, try each to find best p-match
     if (is.na(df1) && !is.na(N) && N > 2) {
-      if (!is.na(p_reported) && "N_candidates_str" %in% names(row) &&
+      # v0.6.21: this loop picks N by minimising |p_try - p_reported| where
+      # p_try is computed PARAMETRICALLY. A resampling p is not on that scale,
+      # so using it to discriminate among sample sizes selects an N on bad
+      # evidence -- and N drives df, the effect size, and its CI. Reproduced:
+      # with candidates 42 and 380, a permutation "r = .30, p = .001" moved N
+      # to 380 (df 378) purely on a parametric inversion of a permutation p.
+      if (!resampling_inference &&
+          !is.na(p_reported) && "N_candidates_str" %in% names(row) &&
           !is.na(row$N_candidates_str[1])) {
         N_alts <- as.numeric(unlist(strsplit(as.character(row$N_candidates_str[1]), ";")))
         N_alts <- N_alts[!is.na(N_alts) & N_alts > 2]
@@ -3775,10 +3842,25 @@ compute_and_compare_one <- function(row,
           "CI is asymmetric around the point estimate (|below-above|/width=%.2f > 0.15)",
           asym))
       }
+      # v0.6.21: the p-vs-CI invariant assumes the p-value and the interval come
+      # from the SAME reference distribution. A resampling p paired with a
+      # percentile/BCa interval is computed by a different route and can
+      # legitimately straddle the boundary, so the disagreement is reported as a
+      # caveat rather than as an inconsistency. Reproduced: a bootstrap
+      # Hodges-Lehmann row ("median difference 1.2; 95% CI 0.1 to 2.3; p = .062")
+      # was flagged "p-CI inconsistency" on a defensible report.
       if (!is.na(p_reported)) {
         zero_in_ci <- (cl <= 0 && cu >= 0)
         sig_p <- p_reported < 0.05
-        if (sig_p && zero_in_ci) {
+        inconsistent <- (sig_p && zero_in_ci) || (!sig_p && !zero_in_ci)
+        if (inconsistent && resampling_inference) {
+          md_msg_parts <- c(md_msg_parts, sprintf(
+            paste("p and the 95%% CI disagree at alpha = .05 (p %s .05, 0 %s the",
+                  "interval), but both appear to be resampling-derived and need",
+                  "not agree exactly"),
+            if (sig_p) "<" else ">=",
+            if (zero_in_ci) "inside" else "outside"))
+        } else if (sig_p && zero_in_ci) {
           md_msg_parts <- c(md_msg_parts,
             "p < .05 but 0 lies inside the 95% CI (p-CI inconsistency)")
         } else if (!sig_p && !zero_in_ci) {
@@ -3843,6 +3925,52 @@ compute_and_compare_one <- function(row,
               "slash-count clause (<events1>/<total1> versus <events2>/<total2>)",
               "in scope."))
     }
+  } else if (tt %in% c("wts", "ats", "brunner_munzel", "yuen")) {
+    # ------ MODERN NONPARAMETRIC / ROBUST FAMILY (v0.7.0) ------
+    # These sit between the fully-verified types and the extraction-only ones.
+    # Their reference distributions are KNOWN, so the reported p is
+    # independently verifiable (wired into the p_computed dispatch above), but
+    # no standard effect size is recoverable from the statistic alone. The
+    # consistency check on these rows is therefore the p-value.
+    check_type <- "p_value"
+    matched_value <- NA_real_
+    matched_variant <- NA_character_
+    delta_effect_abs <- NA_real_
+
+    uncertainty <- c(uncertainty, switch(
+      tt,
+      wts = paste("Wald-type statistic (WTS) reported - asymptotically",
+                  "chi-square with df = rank of the contrast matrix, so the",
+                  "p-value is verified against pchisq(WTS, df); no standard",
+                  "effect size is recoverable from the statistic alone.",
+                  "Note the asymptotic WTS is liberal in small samples, which",
+                  "is why permuted variants (WTPS) exist."),
+      ats = paste("ANOVA-type statistic (ATS) reported - F-distributed with a",
+                  "typically non-integer numerator df, so the p-value is",
+                  "verified against pf(ATS, df1, df2); the estimands are",
+                  "nonparametric relative treatment effects, not mean",
+                  "differences, and are not recoverable from the statistic."),
+      brunner_munzel = paste(
+        "Brunner-Munzel test reported - a t-like statistic with a",
+        "Satterthwaite-type df, so the p-value is verified against",
+        "2*pt(-|W|, df). Its estimand is the relative effect",
+        "P(X<Y) + 0.5*P(X=Y), a stochastic-superiority quantity rather than a",
+        "mean difference; it is not recoverable from the statistic alone."),
+      yuen = paste("Yuen trimmed-mean t reported - t-distributed with the",
+                   "trimmed df, so the p-value is verified against",
+                   "2*pt(-|t|, df); the trimmed-mean effect size (and its",
+                   "winsorized variance) is not recoverable from the",
+                   "statistic alone.")
+    ))
+
+    # A participant N is not this family's estimand scale and nothing here
+    # consumes it, so a scraped N would be decoration at best and a fabricated
+    # provenance at worst -- the same reasoning as the cochran_q guard below.
+    if (!is.na(N) && !is.na(N_source) && N_source %in% .SCRAPED_N_SOURCES) {
+      N <- NA_real_
+      N_source <- NA_character_
+    }
+
   } else if (tt == "cochran_q") {
     # ------ COCHRAN Q HETEROGENEITY (meta-analysis) ------
     # v0.5.15: Q is chi-square(df) distributed under the homogeneity null.
@@ -4137,7 +4265,16 @@ compute_and_compare_one <- function(row,
       SE_logOR = NULL,
       level = ci_level_used,
       cells = NULL,
+      # v0.6.21: a resampling p must NEVER reach the Wald-on-log inversion.
+      # ci_OR_all()'s p-method back-derives SE = |log(OR)| / qnorm(1 - p/2),
+      # which assumes the p came from a NORMAL reference distribution. A
+      # permutation p did not, so the derived interval is simply wrong.
+      # Reproduced at v0.6.20: a permutation-worded McNemar row reporting
+      # "OR = 2.50, 95% CI [1.05, 5.95], p = .062" produced a computed CI of
+      # [0.9551, 6.5441] -- crossing 1 where the paper's interval does not --
+      # and then declared the paper's own correct CI INCONSISTENT.
       p_value = if (identical(canonical_type, "HR")) NULL
+                else if (resampling_inference) NULL
                 else if (!is.na(p_reported) && p_reported > 0 && p_reported < 1) p_reported
                 else NULL
     )
@@ -5395,6 +5532,58 @@ compute_and_compare_one <- function(row,
   }
 
   # v0.3.0f: d-vs-t cross-check for extraction artifacts
+  # ==========================================================================
+  # v0.7.3: MATHEMATICAL BOUNDS. Several effect sizes cannot leave a fixed
+  # range by construction, and a Mann-Whitney U / Wilcoxon W is an integer by
+  # construction. A value outside those bounds is not "surprising" -- it is
+  # IMPOSSIBLE, so whatever produced it is wrong regardless of cause.
+  #
+  # This is deliberately orthogonal to the cause. All three of the separator
+  # defects found this session would have been caught here independently:
+  # Cramer's V = 3.5355 (from nobs = 1,182 read as N = 1), rank-biserial
+  # 0.99938 and Cliff's delta -0.99938 (from U = 12,345 read as 12.345). Every
+  # one of them shipped with status OK.
+  #
+  # The value is FLAGGED, never suppressed -- v0.6.20 established that a
+  # suppressed value must stay distinguishable from an absent one, and a reader
+  # who can see 3.5355 can recognise the failure, whereas an NA hides it.
+  impossible_value <- FALSE
+  .bounded <- list(V = 1, phi = 1, r = 1, rank_biserial_r = 1,
+                   cliffs_delta = 1, epsilon_squared = 1, eta2 = 1,
+                   partial_eta2 = 1, omega2 = 1, R2 = 1, kendalls_W = 1)
+  for (.nm in names(.bounded)) {
+    if (!.nm %in% names(computed_variants)) next
+    .v <- suppressWarnings(as.numeric(computed_variants[[.nm]]$value))
+    if (length(.v) != 1L || is.na(.v) || !is.finite(.v)) next
+    if (abs(.v) > .bounded[[.nm]] + 1e-9) {
+      extraction_suspect <- TRUE
+      impossible_value <- TRUE
+      uncertainty <- c(uncertainty, sprintf(
+        paste("IMPOSSIBLE VALUE: computed %s = %s lies outside its",
+              "mathematical range [%s%s, %s]. The statistic cannot take this",
+              "value, so an input to it is wrong -- most often a sample size or",
+              "test statistic damaged during extraction. The value is shown",
+              "rather than hidden so it can be recognised."),
+        .nm, format(signif(.v, 6)),
+        if (.nm %in% c("r", "rank_biserial_r", "cliffs_delta")) "-" else "",
+        .bounded[[.nm]], .bounded[[.nm]]))
+    }
+  }
+  # U and W are counts of pairwise wins, hence integers. A fractional value is
+  # a shape anomaly detectable WITHOUT knowing the correct value -- "U = 12.345"
+  # announces itself.
+  if (!is.na(tt) && tt %in% c("U", "W") && !is.na(stat) &&
+      abs(stat - round(stat)) > 1e-9) {
+    extraction_suspect <- TRUE
+    impossible_value <- TRUE
+    uncertainty <- c(uncertainty, sprintf(
+      paste("IMPOSSIBLE VALUE: %s = %s is not an integer. A Mann-Whitney U /",
+            "Wilcoxon W counts pairwise comparisons and is an integer by",
+            "construction, so a fractional value indicates the statistic was",
+            "damaged in extraction (a thousands separator read as a decimal",
+            "point produces exactly this signature)."), tt, format(stat)))
+  }
+
   # For t-tests: expected d ~= t/sqrt(df+1) (paired) or 2t/sqrt(df+2) (ind).
   # When reported |d| > 3 AND > 3x the maximum plausible d, it's garbled
   # (typically from two-column PDF interleaving).
@@ -5518,6 +5707,36 @@ compute_and_compare_one <- function(row,
   method_in_chunk <- if ("method_context_in_chunk" %in% names(row) &&
                           length(row$method_context_in_chunk) > 0)
     isTRUE(row$method_context_in_chunk[1]) else FALSE
+
+  # v0.6.21: "bootstrap" is a member of BOTH method_kw and the resampling
+  # keyword set, so a bootstrapped RESULT used to be explained as though it were
+  # a methods-section artifact ("power analysis, meta-analysis, etc.") -- a
+  # false statement about the row, since a bootstrapped estimate is a genuine
+  # finding.
+  #
+  # But the suppression must be narrow. A first draft disabled the cap whenever
+  # resampling_inference was TRUE, which cross-model review caught (reproduced):
+  # "A Monte Carlo simulation power analysis showed t(58) = 2.31, p = .062,
+  # d = 0.10" IS a genuine method artifact and must keep its ERROR cap. So the
+  # cap is released only when the method-context match is attributable SOLELY to
+  # the resampling vocabulary -- i.e. the clause carries no other method keyword.
+  if (resampling_inference && method_in_chunk) {
+    own_clause_txt <- if ("raw_text" %in% names(row) && length(row$raw_text) > 0) {
+      as.character(row$raw_text[1])
+    } else {
+      ""
+    }
+    method_kw_non_resampling <- paste0(
+      "\\b(?:p[- ]?curve|equivalence test|TOST|power analysis|simulation|",
+      "meta-analy|sensitivity analy|applet|sample size calculation|",
+      "a priori power|post[- ]?hoc power)\\b"
+    )
+    if (!is.na(own_clause_txt) &&
+        !grepl(method_kw_non_resampling, own_clause_txt,
+               ignore.case = TRUE, perl = TRUE)) {
+      method_in_chunk <- FALSE
+    }
+  }
 
   if (method_in_chunk && status == "ERROR") {
     status <- method_context_action
@@ -6422,6 +6641,23 @@ compute_and_compare_one <- function(row,
           # v0.5.15: Cochran Q for heterogeneity is chi-square distributed
           # under the null of homogeneity, same dispatch as H.
           stats::pchisq(stat, df = df1, lower.tail = FALSE)
+        } else if (tt == "wts" && !is.na(df1)) {
+          # v0.7.0: the Wald-type statistic is asymptotically chi-square with
+          # df = rank of the contrast matrix -- same dispatch as Cochran Q.
+          stats::pchisq(stat, df = df1, lower.tail = FALSE)
+        } else if (tt == "ats" && !is.na(df1)) {
+          # v0.7.0: the ANOVA-type statistic is F-distributed with a
+          # (non-integer) df1. pf() handles df2 = Inf natively and is exactly
+          # equal to pchisq(df1*F, df1) there, so no special case is needed.
+          if (!is.na(df2)) {
+            stats::pf(stat, df1 = df1, df2 = df2, lower.tail = FALSE)
+          } else {
+            stats::pchisq(df1 * stat, df = df1, lower.tail = FALSE)
+          }
+        } else if (tt %in% c("brunner_munzel", "yuen") && !is.na(df1)) {
+          # v0.7.0: both are t-like statistics -- Brunner-Munzel against a
+          # Satterthwaite-type df, Yuen against the trimmed df.
+          2 * stats::pt(-abs(stat), df = df1)
         } else if (tt %in% c("U", "W")) {
           z_aux <- if ("z_auxiliary" %in% names(row) && length(row$z_auxiliary) > 0) {
             as.numeric(row$z_auxiliary[1])
@@ -6446,7 +6682,154 @@ compute_and_compare_one <- function(row,
     p_computed <- compute_p_for_tail(primary_one_tailed)
   }
 
-  if (!is.na(p_computed) && !is.na(p_reported)) {
+  # v0.6.21: a resampling p is not on the same scale as the parametric p, so a
+  # reported-vs-computed comparison cannot license a verdict. p_computed is
+  # still calculated above -- it is reported as a NAMED COMPARATOR so the reader
+  # can see the parametric reference -- but it must not drive decision_error or
+  # a p-consistency downgrade. Reproduced at v0.6.20: a correct
+  # "permutation Welch t-test ... t(58) = 2.31, p = .062" was flagged
+  # decision_error = TRUE, reason = reported_ns_computed_sig.
+  #
+  # Deliberately NOT a numeric-divergence check. Under the very conditions that
+  # motivate permuting (heteroscedasticity, skew) the two p-values legitimately
+  # differ, so any magnitude threshold would manufacture false flags. Only
+  # DECISION DISCORDANCE is reported, and only as a note.
+  # v0.7.1: state what a rank test actually estimates. A rank test is routinely
+  # adopted as a drop-in replacement for a t-test when normality looks
+  # doubtful, but it answers a DIFFERENT question: it targets stochastic
+  # superiority, not a mean difference, and not generally a median difference
+  # either -- that reading needs a location-shift / equal-shape assumption that
+  # papers rarely state. Exact counterexample: X ~ U{1,5,6} and Y ~ U{4,5,9}
+  # have identical medians (5) yet P(X<Y) + .5*P(X=Y) = 11/18 = .611.
+  # (Fay & Proschan 2010, Statistics Surveys 4:1-39; Divine, Norton, Baron &
+  # Juarez-Colunga 2018, The American Statistician 72:278-286.)
+  #
+  # A NOTE, never an error, and attached to the TEST ROW only -- we deliberately
+  # do not scan surrounding prose for mean/median language, because an
+  # interpretation sentence cannot be reliably linked to a specific test and a
+  # false accusation there would be worse than silence.
+  #
+  # Written as a standalone block rather than a branch of the computation
+  # chain above: folding it in would have terminated that chain early and let
+  # its trailing clauses fire for unrelated test types.
+  if (tt %in% c("U", "W")) {
+    uncertainty <- c(uncertainty, paste(
+      "Estimand note: this rank test targets stochastic superiority",
+      "P(X>Y) + 0.5*P(X=Y), not a difference in means and not generally a",
+      "difference in medians (that reading requires a location-shift /",
+      "equal-shape assumption). Two distributions with identical medians can",
+      "differ strongly on this quantity, so interpret the result on its own",
+      "scale rather than as a shifted t-test."))
+  }
+
+  # ==========================================================================
+  # v0.6.22: the checks that ARE valid on a resampling p without raw data.
+  # All are NOTE-level. Legitimate practice reaches below the counting floor
+  # (GPD tail approximation, sequential Monte Carlo, per-stratum p-combination,
+  # mid-p, randomized p), so these state an arithmetic fact and let the reader
+  # judge -- they never assert the paper is wrong.
+  # ==========================================================================
+  if (p_reported_is_resampling) {
+    floor_mc <- perm_min_p_mc(resampling_B)
+    # v0.7.1 (cross-model review, reproduced): the exact floor is a PERMUTATION
+    # bound. A bootstrap resamples with replacement and has no choose(n1+n2, n1)
+    # reference set, so applying it flagged a legitimate bootstrap p as
+    # "unreachable" against a bound that never constrained it.
+    floor_exact <- if (resampling_is_permutation) perm_min_p_exact(n1, n2) else NA_real_
+
+    # An INEQUALITY ("p < .001") asserts the value is strictly below the stated
+    # threshold, so a threshold equal to the floor is already unreachable --
+    # compare with <= rather than <. It also means the reported number is a
+    # bound, not an estimate, so it must not be treated as a point value for
+    # Monte Carlo error below.
+    below <- function(x, f) if (p_is_inequality) x <= f else x < f
+
+    if (!is.na(p_reported) && p_reported > 0) {
+      if (!is.na(floor_mc) && below(p_reported, floor_mc)) {
+        resampling_p_below_floor <- TRUE
+        uncertainty <- c(uncertainty, sprintf(
+          paste("Reported p (%s) is below the minimum attainable by counting %s",
+                "resamples: the smallest such p is 1/(B+1) = %s. This is not",
+                "necessarily an error -- tail approximation, sequential",
+                "sampling, mid-p, or combining p-values can all go lower -- but",
+                "a plain resample count cannot."),
+          format(p_reported, scientific = FALSE),
+          format(resampling_B, big.mark = ",", scientific = FALSE, trim = TRUE),
+          format(signif(floor_mc, 3), scientific = FALSE)))
+      }
+      if (!is.na(floor_exact) && below(p_reported, floor_exact)) {
+        resampling_p_below_floor <- TRUE
+        uncertainty <- c(uncertainty, sprintf(
+          paste("Reported p (%s) is below the minimum attainable by an EXACT",
+                "permutation test on groups of %s and %s: that reference set has",
+                "choose(%s, %s) members, so no p below %s is reachable."),
+          format(p_reported, scientific = FALSE),
+          format(n1, trim = TRUE), format(n2, trim = TRUE),
+          format(n1 + n2, trim = TRUE), format(n1, trim = TRUE),
+          format(signif(floor_exact, 3), scientific = FALSE)))
+      }
+
+      # Monte Carlo fragility: SE(p_hat) = sqrt(p(1-p)/B). Only worth saying
+      # when the resampling uncertainty actually straddles the decision
+      # boundary -- otherwise it is noise.
+      # Skipped for an inequality: "p < .05" is a bound, not an estimate, so
+      # computing SE around .05 and printing a 95% interval would attach a
+      # concrete number to a value the paper never reported (cross-model
+      # review, reproduced -- it emitted "SE = 0.00218, interval 0.0457 to
+      # 0.0543" for a p that could have been far below .05).
+      se_mc <- if (p_is_inequality) NA_real_ else perm_mc_se(p_reported, resampling_B)
+      if (!is.na(se_mc) && se_mc > 0) {
+        lo <- p_reported - 1.96 * se_mc
+        hi <- p_reported + 1.96 * se_mc
+        if (lo < alpha && hi > alpha) {
+          uncertainty <- c(uncertainty, sprintf(
+            paste("Monte Carlo uncertainty: with %s resamples the resampling",
+                  "error around p = %s is SE = %s (approx. 95%% interval %s to",
+                  "%s), which straddles alpha = %s -- the significance decision",
+                  "is not stable at this resample count."),
+            format(resampling_B, big.mark = ",", scientific = FALSE, trim = TRUE),
+            format(p_reported, scientific = FALSE),
+            format(signif(se_mc, 3), scientific = FALSE),
+            format(signif(max(0, lo), 3), scientific = FALSE),
+            format(signif(min(1, hi), 3), scientific = FALSE),
+            format(alpha)))
+        }
+      }
+    }
+
+    if (is.na(resampling_B)) {
+      uncertainty <- c(uncertainty,
+        paste("The number of permutations/resamples is not reported, so this",
+              "p-value is not reproducible even with the raw data; stating it",
+              "(and the seed) would make the result checkable."))
+    }
+  }
+
+  if (p_reported_is_resampling && !is.na(p_reported)) {
+    msg <- if (!is.na(resampling_method)) {
+      sprintf(paste("Reported p appears to come from a resampling reference",
+                    "distribution (%s), so it is not recomputable from the test",
+                    "statistic."), resampling_method)
+    } else {
+      paste("Reported p appears to come from a resampling reference",
+            "distribution, so it is not recomputable from the test statistic.")
+    }
+    if (!is.na(p_computed)) {
+      msg <- paste0(msg, sprintf(
+        paste(" For reference, the parametric p for this statistic is %s;",
+              "a difference is expected and is not evidence of an error."),
+        format(signif(p_computed, 4), scientific = FALSE)))
+      if ((p_reported < alpha) != (p_computed < alpha)) {
+        msg <- paste0(msg, sprintf(
+          paste(" Note the two disagree at alpha = %s, so the significance",
+                "decision depends on which reference distribution is used."),
+          format(alpha)))
+      }
+    }
+    uncertainty <- c(uncertainty, msg)
+  }
+
+  if (!p_reported_is_resampling && !is.na(p_computed) && !is.na(p_reported)) {
     reported_significant <- p_reported < alpha
     computed_significant <- p_computed < alpha
 
@@ -6629,9 +7012,19 @@ compute_and_compare_one <- function(row,
   # no effect to compare, evaluate p-value consistency for OK/NOTE upgrade.
   # ============================================================================
 
-  # Handle "ns" (not significant) p-value notation
+  # Handle "ns" (not significant) p-value notation.
+  # v0.6.21: an "n.s." LABEL is a significance claim about the resampling
+  # reference distribution just as a numeric p would be, and this branch is
+  # keyed on p_ns rather than p_reported, so it bypassed the guard above.
+  # Reproduced: "A permutation Welch t-test, t(58) = 2.31, n.s." returned
+  # decision_error = TRUE, reason = ns_label_vs_computed_sig.
   if (status == "WARN" && p_ns && !has_effect_reported && !is.na(p_computed)) {
-    if (p_computed > alpha) {
+    if (p_reported_is_resampling) {
+      uncertainty <- c(uncertainty, sprintf(
+        paste("Reported as 'not significant' against a resampling reference",
+              "distribution; the parametric p for this statistic is %.4f, which",
+              "cannot confirm or contradict it."), p_computed))
+    } else if (p_computed > alpha) {
       status <- "OK"
       uncertainty <- c(uncertainty,
         sprintf("Reported as 'not significant'; computed p=%.4f confirms (p > %.2f)", p_computed, alpha))
@@ -6663,8 +7056,24 @@ compute_and_compare_one <- function(row,
   }
 
   if (status == "WARN" && !has_effect_reported) {
-    # No effect size was reported - evaluate based on p-value consistency
-    if (!is.na(p_computed) && !is.na(p_reported)) {
+    # No effect size was reported - evaluate based on p-value consistency.
+    # v0.6.21: exempt a resampling p for the same reason as the decision-error
+    # block above -- the reported and computed p come from different reference
+    # distributions, so their difference carries no verdict.
+    #
+    # v0.7.3 (over-suppression fix, found on a REAL paper): this block is not
+    # only a check, it is also the WARN -> OK rescue. Skipping it for a
+    # resampling row left the row stuck at the punitive default. PNAS
+    # cognitive-memory 2024 reports "t(2037) = -3.26, P = 0.001,
+    # P-permutation = 0.002" -- exemplary practice, giving BOTH references --
+    # and five such rows went OK -> WARN purely for saying "permutation".
+    # Penalising a paper for reporting better is precisely the false-positive
+    # class this work exists to remove. A p that cannot be checked is a NOTE,
+    # never a WARN.
+    if (p_reported_is_resampling && !is.na(p_reported)) {
+      status <- "NOTE"
+    }
+    if (!p_reported_is_resampling && !is.na(p_computed) && !is.na(p_reported)) {
       p_diff <- abs(p_reported - p_computed)
       p_directions_match <- (p_reported < alpha) == (p_computed < alpha)
 
@@ -6789,8 +7198,26 @@ compute_and_compare_one <- function(row,
     status <- "SKIP"
   }
 
-  # v0.2.4: non-inequality p > 0.5 with large computed discrepancy
-  if (!p_is_inequality && !is.na(p_reported) && p_reported > 0.5 &&
+  # v0.7.3: escalate an IMPOSSIBLE value. The bounds are detected far earlier
+  # (Phase 7), but status is assigned and reassigned after that point, so the
+  # escalation has to be applied here -- a first version set status inside the
+  # detection block and was silently overwritten, leaving Cramer's V = 3.5355
+  # reported as OK with only a suspect flag to show for it.
+  #
+  # A value outside its mathematical range is not a matter of degree: no input
+  # can make it right. It must never present as a clean result.
+  if (isTRUE(impossible_value) && status %in% c("OK", "PASS", "SKIP")) {
+    status <- "WARN"
+  }
+
+  # v0.2.4: non-inequality p > 0.5 with large computed discrepancy.
+  # v0.6.21: this is a |p_reported - p_computed| MAGNITUDE test, which is
+  # exactly the comparison a resampling p cannot support -- the two come from
+  # different reference distributions, so a large gap is expected rather than
+  # evidence of a mis-extraction. Reproduced: a correct "permutation Welch
+  # t-test, t(58) = 2.31, p = .62, d = 0.61" was marked extraction_suspect.
+  if (!p_reported_is_resampling &&
+      !p_is_inequality && !is.na(p_reported) && p_reported > 0.5 &&
       !is.na(p_computed) && abs(p_reported - p_computed) > 0.3) {
     extraction_suspect <- TRUE
     uncertainty <- c(uncertainty,
@@ -7312,6 +7739,11 @@ compute_and_compare_one <- function(row,
     p_computed = p_computed,
     decision_error = decision_error,
     decision_error_reason = decision_error_reason,
+    resampling_inference = resampling_inference,
+    resampling_method = resampling_method,
+    p_reported_is_resampling = p_reported_is_resampling,
+    resampling_B = resampling_B,
+    resampling_p_below_floor = resampling_p_below_floor,
     ci_match = ci_match,
     ciL_computed = as.numeric(computed_ciL),
     ciU_computed = as.numeric(computed_ciU),
@@ -7677,7 +8109,11 @@ check_text <- function(text,
                                  "mcnemar_or", "bayes_factor", "hazard_ratio",
                                  # v0.6.16 (E11): bare Cohen's d + CI post-hoc
                                  # contrast (no test statistic of its own).
-                                 "d_reported_only"),
+                                 "d_reported_only",
+                                 # v0.7.0: modern nonparametric / robust family.
+                                 # p verifiable from statistic + df; no
+                                 # recoverable effect size.
+                                 "wts", "ats", "brunner_munzel", "yuen"),
                        ci_level = 0.95,
                        alpha = 0.05,
                        one_tailed = FALSE,
@@ -7911,6 +8347,11 @@ check_text <- function(text,
           decision_error_downgraded = FALSE,
           decision_error = FALSE,
           decision_error_reason = NA_character_,
+          resampling_inference = FALSE,
+          resampling_method = NA_character_,
+          p_reported_is_resampling = FALSE,
+          resampling_B = NA_real_,
+          resampling_p_below_floor = FALSE,
           p_reported = NA_real_,
           p_computed = NA_real_,
           d_ind = NA_real_, d_ind_equalN = NA_real_, d_ind_min = NA_real_, d_ind_max = NA_real_,

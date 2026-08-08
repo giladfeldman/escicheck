@@ -1,6 +1,322 @@
 # Suppress R CMD check NOTEs for NSE column references
 utils::globalVariables(c("p_reported", "test_type"))
 
+# ============================================================================
+# Numeric separator normalization -- shared spec (v0.7.2)
+#
+# The comma is a decimal separator in European papers ("d = 0,80") and a
+# thousands separator in English ones ("U = 12,345"). Resolving one breaks the
+# other. docpluck (Python) and effectcheck (R) each implemented that resolution
+# independently, nothing tested them against each other, and they diverged --
+# effectcheck's version turned "U = 12,345" into 12.345 and published a
+# rank-biserial correlation of 0.99938 where the truth was 0.38275, status OK.
+#
+# The semantics now live in one place: inst/normalization-spec/SPEC.md, with an
+# executable, language-neutral contract in conformance.json that BOTH
+# implementations must satisfy. Adding a case there is how a new requirement
+# enters both. Two implementations with no shared test cannot stay in sync.
+# ============================================================================
+
+#' Version of the numeric-separator normalization spec implemented here
+#'
+#' Recorded on every result row so a published number carries the provenance of
+#' the rules that produced it. Must match `spec_version` in
+#' `inst/normalization-spec/conformance.json` (pinned by a regression test).
+#'
+#' @return Character scalar, e.g. "1.0.0".
+#' @keywords internal
+normalization_spec_version <- function() "1.2.0"
+
+#' Spec rules S1-S4 -- spans where a comma between digits is a REAL comma
+#'
+#' A comma between digits has at least four meanings, not two: thousands
+#' separator, decimal separator, list/pair separator, and structural (an
+#' identifier). The numeric rules below can only reason about the first two, so
+#' the structural spans are lifted out of the text before they run and restored
+#' afterwards. Protecting by substitution rather than by lookbehind keeps the
+#' numeric patterns readable and avoids PCRE's fixed-width lookbehind limit.
+#'
+#' Every entry here corresponds to an observed corruption:
+#'   "Experiments 1,2"  -> "Experiments 1.2"   (a list read as a decimal)
+#'   "anchors 1,2,3,4,5" -> "anchors 1.2,3,4,5" (worse: partially converted)
+#'   "gender coded 0,1" -> "coded 0.1"         (and it poisons locale inference,
+#'                                              since "0,1" looks decisive)
+#'   "matrix[1,2]"      -> "matrix[1.2]"
+#'   "doi:...45,6"      -> "doi:...45.6"
+#' @keywords internal
+.NUM_STRUCTURAL_PATTERNS <- c(
+  # Identifiers first -- they may contain any of the shapes below.
+  "(?i)\\b(?:doi|https?|www)\\S*",
+  # Head noun + integer list: "Experiments 1,2", "items 1,5 and 7".
+  # Head noun + integer list. The noun must PRECEDE the numbers, so a genuine
+  # count written the other way round ("1,234 participants") is untouched.
+  # This is a SECONDARY signal: the primary discriminator is group width (see
+  # the bare-chain pattern below). An enumerated vocabulary cannot be complete
+  # -- that limitation is real and is why it is not the main mechanism -- but
+  # it resolves the one shape width cannot, where every group is 3 digits and
+  # a list is therefore indistinguishable from a grouped number
+  # ("excluded IDs 101,102,103" vs a genuine 101102103).
+  paste0("(?i)\\b(?:experiments?|stud(?:y|ies)|tables?|figures?|items?|",
+         "conditions?|sections?|appendi(?:x|ces)|models?|groups?|anchors?|",
+         "levels?|phases?|blocks?|waves?|panels?|steps?|ids?|trials?|",
+         "runs?|sites?|cohorts?|rounds?|sessions?|clusters?|chapters?|",
+         "equations?|refs?|references?|questions?|scales?)\\s+",
+         "\\d{1,3}(?:\\s*,\\s*\\d{1,3})+"),
+  # Coded / dummy variables: "coded 0,1", "dummy coded 0,1,2".
+  "(?i)\\b(?:coded|dummy[- ]coded|scored)\\s+\\d(?:\\s*,\\s*\\d)+",
+  # Integer-only bracket pair = an index, not a CI. A CI carries decimal points,
+  # so requiring NO period separates "[1,2]" from "[0.12, 0.45]". Two variants,
+  # because the bracket must NOT be a statistical one: "t(1,197)" and "H(1,024)"
+  # are single-df tests whose comma IS a thousands separator (rule T2), and a
+  # first draft protected those by mistake. A stat bracket is a short token
+  # glued to the bracket ("t(", "H(", "F["); an index is either preceded by a
+  # non-letter ("cell (1,2)") or by a longer identifier ("matrix[1,2]").
+  # `(?:,\s*\d{1,3})+` not a single pair: vectors and tuples of three or more
+  # ("(0,0,0)", "the state vector was (0,1,0,1)") occur in real papers in this
+  # repo's own validation corpus, and a pair-only pattern turned "(0,0,0)" into
+  # "(0.0, 0)". The sibling noun-list pattern above already used `+`; this one
+  # was simply written without it.
+  # A PAIR may be loosely spaced: "cell (1, 2)".
+  "(?<=[^A-Za-z])[\\[(]\\s*\\d{1,3}\\s*,\\s*\\d{1,3}\\s*[\\])]",
+  "(?<=[A-Za-z]{4})[\\[(]\\s*\\d{1,3}\\s*,\\s*\\d{1,3}\\s*[\\])]",
+  # A TUPLE of 3+ must be tight: "(0,0,0)", "(0,1,0,1)". The no-space
+  # requirement is what separates it from a CI whose bounds are separated by
+  # ", " -- generalising the pair pattern with `\s*` swallowed
+  # "95% CI [1,234, 5,678]" and stopped it converting at all.
+  "[\\[(]\\d{1,3}(?:,\\d{1,3}){2,}[\\])]",
+  # BARE chains of three or more comma-separated integers where the groups are
+  # NOT all 3 digits wide. A genuine grouped number has every group after the
+  # first exactly three digits ("1,000,000", "1,054,908"); a list does not
+  # ("Figures 6,7,8", "10,14,19", "Ye1,2,3,4", "2017,10,39" -- a year followed
+  # by citation superscripts). Corpus evidence: of 35 bare chains in the
+  # validation set, that single width test classifies 34 correctly.
+  #
+  # Without this the decimal rule converted only the FIRST pair of such a chain
+  # -- "1,2,3,4,5" became "1.2,3,4,5" -- which is worse than either answer,
+  # because it corrupts rather than merely mis-reads.
+  "(?<![\\[(0-9.])\\d{1,4}(?:,\\d{1,2}(?![\\d]))(?:,\\d{1,4})+(?![\\d])"
+)
+
+#' Lift structural spans out of the text, returning placeholders and a store
+#' @keywords internal
+.protect_structural <- function(x) {
+  store <- character(0)
+  for (pat in .NUM_STRUCTURAL_PATTERNS) {
+    repeat {
+      m <- regexpr(pat, x, perl = TRUE)
+      if (m[1] == -1) break
+      hit <- regmatches(x, m)
+      store <- c(store, hit)
+      # \x01 is not present in extracted document text; the index makes each
+      # placeholder unique so restoration is exact.
+      regmatches(x, m) <- sprintf("\x01%d\x01", length(store))
+    }
+  }
+  list(x = x, store = store)
+}
+
+#' @keywords internal
+.restore_structural <- function(x, store) {
+  if (length(store) == 0L) return(x)
+  for (i in rev(seq_along(store))) {
+    x <- gsub(sprintf("\x01%d\x01", i), store[i], x, fixed = TRUE)
+  }
+  x
+}
+
+#' Infer the document's numeric locale from decisive markers
+#'
+#' The two conventions are MUTUALLY EXCLUSIVE -- if the comma is the decimal
+#' separator then thousands must be grouped with a period, space or apostrophe,
+#' and vice versa. So a single unambiguous token anywhere in the text settles
+#' how every ambiguous token in it should be read. That is why this returns an
+#' article-level fact rather than a per-sentence guess.
+#'
+#' Markers are OPERATOR-GUARDED. A bare "0,1" or "0.1" is not decisive: it also
+#' matches coded variables ("gender was coded 0,1"), version numbers ("version
+#' 0.1"), ratios ("0.5:1") and lists ("levels 0,1 and 2"). Requiring a
+#' comparison or assignment operator is what identifies a REPORTED STATISTIC.
+#' Verified: the bare form misfires on 5 of 10 realistic strings, the guarded
+#' form on none.
+#'
+#' `\d,\d{1,2}` is deliberately excluded -- it is contaminated both by lists and
+#' by tight CI separators ("[0.57,0.73]"), which produced a false CONFLICT on a
+#' real article whose six "European" signals were all CI commas.
+#'
+#' @param text Character scalar (any amount -- a clause, a section, a document).
+#' @return List with `decimal_mark`, `grouping_marks`, `confidence`
+#'   ("decisive", "conflict" or "none") and `evidence`.
+#' @keywords internal
+infer_numeric_locale <- function(text) {
+  txt <- paste(text, collapse = "\n")
+  op <- "[=<>\u2264\u2265]\\s*"
+  eu <- list(
+    # 1.234,56 / 1'234,56 / NBSP and narrow-NBSP variants. A PLAIN space is
+    # excluded for the same reason as in .apply_full_notation: it matched
+    # "403,669 107,081" (two English table counts) as one European number and
+    # classified the whole document European, which then gated the thousands
+    # rule off and left every count in that table unstripped.
+    F1 = "\\d[.\u00A0\u202F'](\\d{3}),\\d",
+    E2 = paste0(op, ",\\d{2,}"),                       # p < ,001
+    E3 = paste0(op, "0,\\d"),                          # d = 0,80
+    E4 = "\\d,\\d{4,}",                                # 0,12345
+    E5 = "\\d,\\d+[eE][-+]?\\d"                        # 1,23e-4
+  )
+  us <- list(
+    F2 = "\\d,\\d{3}\\.\\d",                           # 1,234.56
+    U2 = paste0(op, "\\.\\d{2,}"),                     # p < .001
+    U3 = paste0(op, "0\\.\\d"),                        # d = 0.80
+    U4 = "\\d,\\d{3},\\d{3}"                           # 1,234,567
+  )
+  hits <- function(set) {
+    out <- list()
+    for (nm in names(set)) {
+      if (grepl(set[[nm]], txt, perl = TRUE)) {
+        m <- regexpr(set[[nm]], txt, perl = TRUE)
+        out[[nm]] <- list(n = length(gregexpr(set[[nm]], txt, perl = TRUE)[[1]]),
+                          text = regmatches(txt, m))
+      }
+    }
+    out
+  }
+  e <- hits(eu); u <- hits(us)
+  ne <- sum(vapply(e, function(h) h$n, numeric(1)))
+  nu <- sum(vapply(u, function(h) h$n, numeric(1)))
+
+  if (ne == 0 && nu == 0) {
+    return(list(decimal_mark = NA_character_, grouping_marks = NA_character_,
+                confidence = "none", evidence = list()))
+  }
+  # Do not majority-vote a genuine two-sided conflict; report it. A lopsided
+  # ratio is treated as contamination in the minority channel.
+  if (ne > 0 && nu > 0 && min(ne, nu) / max(ne, nu) > 0.2) {
+    return(list(decimal_mark = NA_character_, grouping_marks = NA_character_,
+                confidence = "conflict", evidence = list(european = e, us = u)))
+  }
+  if (ne > nu) {
+    list(decimal_mark = ",", grouping_marks = c(".", " ", "'"),
+         confidence = "decisive", evidence = e)
+  } else {
+    list(decimal_mark = ".", grouping_marks = ",",
+         confidence = "decisive", evidence = u)
+  }
+}
+
+#' Spec rules F1/F2 -- full notation, where BOTH marks are present
+#'
+#' "1.234,56" and "1,234.56" are self-identifying: seeing both separators in one
+#' token fixes their roles with no locale knowledge at all. Handled before T1/D1
+#' because those rules see only one separator at a time and previously turned
+#' "1.234,56" into the unparseable "1.234.56".
+#' @keywords internal
+.apply_full_notation <- function(x) {
+  # Match the WHOLE number, then rebuild it. A first draft did this with
+  # incremental gsubs and a marker token, and one of those steps matched
+  # "0.1100" as a period-grouped thousands token -- deleting the decimal point
+  # and turning eta2 = 0.1100 into 01100. Any 4-decimal value was exposed.
+  # Rebuilding a fully-matched token cannot do that: the pattern REQUIRES both
+  # separators, so an ordinary decimal never enters it.
+
+  # European: 1.234,56 / 1'234,56 / 1.234.567,89, plus the TYPOGRAPHIC space
+  # variants (NBSP, narrow NBSP). A PLAIN space is deliberately excluded: in
+  # English-language journals a space between digit groups separates two
+  # numbers far more often than it groups one. Including it destroyed a real
+  # table row -- "All places 403,669 107,081" matched "669 107,081", read the
+  # space as a thousands separator and the comma as a decimal, and produced
+  # "403.669107.081", fusing two counts into one fictional number.
+  m <- gregexpr("\\d{1,3}(?:[.\u00A0\u202F']\\d{3})+,\\d+", x, perl = TRUE)
+  regmatches(x, m) <- lapply(regmatches(x, m), function(v) {
+    if (!length(v)) return(v)
+    sub(",", ".", gsub("[.\u00A0\u202F ']", "", v), fixed = TRUE)
+  })
+
+  # US: 1,234.56 / 1,234,567.89
+  m <- gregexpr("\\d{1,3}(?:,\\d{3})+\\.\\d+", x, perl = TRUE)
+  regmatches(x, m) <- lapply(regmatches(x, m), function(v) {
+    if (!length(v)) return(v)
+    gsub(",", "", v, fixed = TRUE)
+  })
+  x
+}
+
+#' Spec rule T1 -- strip commas from unambiguously thousands-grouped integers
+#'
+#' Runs BEFORE the decimal rule so that rule never sees a thousands group.
+#' Four independent guards (see SPEC.md): the integer must start `[1-9]` (so
+#' "0,001" is left for the decimal rule); every comma must be followed by
+#' EXACTLY three digits (so "0,05" and "1,5" cannot match); a trailing boundary
+#' is required; and a negative lookbehind leaves statistical brackets alone,
+#' because deciding whether `F(7,140)` is a df pair needs to know the test --
+#' which is effectcheck's layer (rule T2), not this context-free one.
+#'
+#' @param x Character vector.
+#' @return `x` with thousands separators removed from qualifying integers.
+#' @keywords internal
+.apply_thousands_protect <- function(x, locale = NULL) {
+  # Locale gate (spec rule L1). "N = 1,234" is the ONE shape structure cannot
+  # decide: 1234 grouped, or a European 1.234? If the document elsewhere carries
+  # a decisive marker that the comma is its DECIMAL separator, then stripping
+  # here would be wrong -- so leave the token alone for the decimal rule and the
+  # ambiguity flag to handle. The two conventions are mutually exclusive, which
+  # is what makes one observation anywhere in the document sufficient.
+  if (!is.null(locale) && identical(locale$decimal_mark, ",")) return(x)
+  # The boundary set includes "/" for clinical-trial arm counts, which are
+  # written "1,234/5,678 (21.7%) versus ...". Without it the first count kept its
+  # comma, the arm regex's \d+ stopped at the comma, and arm1_events came back
+  # 234 instead of 1234 -- a silently wrong event count feeding the risk-ratio
+  # recomputation. Caught by the end-to-end check, not by the unit tests.
+  # NEGATIVE boundary, not a whitelist of terminators. The whitelist form had to
+  # be patched for "/", then "%", then "-", each time after a silent failure --
+  # the same enumeration anti-pattern this whole rewrite exists to remove.
+  # "not followed by another digit" admits every terminator at once.
+  # `,\s?` admits the OCR/extraction spacing variant "N = 1, 234". Without it
+  # that string reached .pat_doc_N, whose digit run stops at the comma, and the
+  # document N became 1 -- with status OK, and with no df-based plausibility
+  # guard to catch it on a z/U/W test. Found by cross-model audit; it is the
+  # most severe defect in this area precisely because it lives OUTSIDE the
+  # normalization rules everything else here was focused on.
+  #
+  # The leading anchor is (?<![\w]) rather than \b: digits and letters are both
+  # word characters in PCRE, so \b never fires after a glued letter and
+  # "1,920x1,080" stripped only its first number.
+  # "." joins the leading exclusion. Admitting "\s?" after the comma (needed for
+  # the OCR spacing variant "N = 1, 234") let T1 reach ACROSS an F df pair:
+  # "F(1.87, 654.3)" matched "87, 654" and fused it into "F(1.87654.3)", losing
+  # both degrees of freedom. A digit preceded by a decimal point is the
+  # fractional part of another number, never the start of a thousands group.
+  # NO space after the comma. An earlier draft admitted "\s?" to fix the OCR
+  # variant "N = 1, 234", and corpus evidence showed that was badly wrong: among
+  # 2,984 real digit-comma-digit occurrences in the validation corpus, the
+  # space-then-3-digits shape is overwhelmingly a REFERENCE LIST ("Psychol.
+  # Methods 3, 424-453", "Nature genetics 54, 437-449") or an RGB triple, not a
+  # grouped number. The permissive form fused volume into page ("3424-453") and
+  # "RGB = 120, 120, 120" into "120120120". A space after the comma is strong
+  # evidence AGAINST a thousands separator: 68% of no-space occurrences are the
+  # thousands shape, versus 22% of spaced ones. "N = 1, 234" is handled by the
+  # narrow sample-size rule below, where the spacing IS an extraction artifact.
+  pat <- "(?<![A-Z][\\(\\[])(?<![0-9.])[1-9]\\d{0,2}(?:,\\d{3})+(?!\\d)"
+  m <- gregexpr(pat, x, perl = TRUE)
+  regmatches(x, m) <- lapply(regmatches(x, m), function(v) {
+    if (length(v) == 0L) return(v)
+    gsub(",", "", v, fixed = TRUE)
+  })
+
+  # Narrow spaced variant, SAMPLE-SIZE CONTEXT ONLY. "N = 1, 234" and
+  # "nobs = 12, 345" are extraction artifacts: the token is explicitly labelled
+  # a count, so a space inside it is damage rather than a separator. Scoping to
+  # the N/n label is what makes this safe -- the same spacing in running prose
+  # is a reference volume or a list, and the general rule above must not touch
+  # it. Without this, .pat_doc_N's digit run stopped at the comma and the
+  # document N became 1, with status OK and no df-based guard on a z/U/W test.
+  repeat {
+    y <- gsub("(\\b[Nn](?:obs|\\d)?\\s*=\\s*\\d{1,3}),\\s+(\\d{3}\\b)",
+              "\\1\\2", x, perl = TRUE)
+    if (identical(y, x)) break
+    x <- y
+  }
+  x
+}
+
 #' Normalize text for parsing
 #'
 #' Comprehensive normalization pipeline handling Unicode, decimals, whitespace,
@@ -190,17 +506,41 @@ normalize_text <- function(x) {
   # is unambiguously a thousands separator (not a European decimal comma)
   # Handles: N = 1,182 | n = 1,341 | n1 = 2,500 | N = 12,345,678
   # ============================================================================
-  for (.i in 1:3) { # Iterative: handles multi-comma numbers (e.g., 12,345,678)
-    x <- gsub("(\\b[Nn]\\d?\\s*=\\s*\\d+),(\\d{3}\\b)", "\\1\\2", x, perl = TRUE)
-  }
+  # v0.7.2: replaced by the generic rule T1 below. The four narrow context
+  # whitelists that used to live here (N/n, t/H/r/Z df, F df, chi-square inline
+  # N) were an enumeration, not a rule: every statistic outside the list had its
+  # thousands separator turned into a decimal point. "U = 12,345" became 12.345
+  # and published a rank-biserial correlation of 0.99938 where the truth was
+  # 0.38275, with status OK. See inst/normalization-spec/SPEC.md.
+  # Order matters, and each step earns its position:
+  #   1. lift structural spans (lists, indices, DOIs) -- a comma there is a real
+  #      comma and no numeric rule should see it;
+  #   2. full notation (both marks present) -- self-identifying, needs no locale;
+  #   3. thousands groups -- unambiguous by shape;
+  #   4. decimal commas -- whatever is left.
+  # Structural spans are restored after the decimal rule, further below.
+  .prot <- .protect_structural(x)
+  x <- .prot$x
+  x <- .apply_full_notation(x)
+  # Locale is inferred from the text this call receives -- a clause, a section
+  # or a whole document. One decisive marker is enough; when there is none the
+  # thousands default applies unchanged.
+  .loc <- infer_numeric_locale(x)
+  x <- .apply_thousands_protect(x, locale = .loc)
 
   # ============================================================================
   # Pre-strip thousands-separator commas inside test-statistic parentheses
   # Must run BEFORE decimal comma conversion to prevent t(2,758) -> t(2.758)
   # which would silently be parsed as Welch df=2.758 with nonsense N estimate.
   # (MetaESCI E8, 2026-04-11: one article dropped 47 rows to this bug.)
+  #
+  # v0.7.3: locale-gated, like T1 and D1. Cross-model audit caught that this
+  # sibling rule was missed by the locale pass: inside a decisively European
+  # document, "Welch's t(2,758) = 3.21" still had its comma stripped to an
+  # integer df of 2758, discarding a legitimate Welch df of 2.758 -- which is
+  # the E8 incident reopened through the one rule the pass did not reach.
   # ============================================================================
-  for (.i in 1:3) {
+  for (.i in if (identical(.loc$decimal_mark, ",")) integer(0) else 1:3) {
     # t(d,ddd), H(d,ddd), r(d,ddd), Z(d,ddd): single df with thousand separator
     # \s* after comma handles docpluck A4 spacing: "t(2, 758)" as well as "t(2,758)"
     x <- gsub(
@@ -238,25 +578,76 @@ normalize_text <- function(x) {
   # digit pair was still converted because the preceding char was a comma).
   #
   # Trailing lookahead adds a-zA-Z to the exclusion so "1,3Boryana" doesn't fire.
-  x <- gsub("(?<![a-zA-Z,])(\\d{1,3}),([0-9]{1,3})(?=\\s|[^0-9a-zA-Z]|$)",
-            "\\1.\\2", x, perl = TRUE)
+  # v0.7.2 (spec rule D1): EXACTLY ONE digit before the comma.
+  #
+  # This single constraint is what the old implementation got wrong. It allowed
+  # `\d{1,3}` here and `[-+]?\d+` in the rule that followed, so "U = 12,345"
+  # matched and became 12.345 -- a 1000x error that published a rank-biserial
+  # correlation of 0.99938 where the truth was 0.38275, status OK. A European
+  # decimal in real text has one integer digit ("0,05", "1,5", "9,81"); two or
+  # more digits before a comma is a thousands group, which T1 has already
+  # handled above. See inst/normalization-spec/SPEC.md rule D1.
+  #
+  # Lookbehind exclusions, each with a known failure it prevents:
+  #   a-zA-Z  author affiliation superscripts  ("Braunstein1,3")
+  #   ,       multi-affiliation runs           ("Wagner1,3,4")
+  #   0-9     CI pairs and decimal lists       ("[0.45,0.89]")
+  #   [ and ( tight df brackets                ("F[2,42]" -- MetaESCI D2)
+  # The lookahead includes `,` -- a DIVERGENCE from docpluck A3, found by
+  # effectcheck's own suite and filed back to docpluck (see SPEC.md rule D1).
+  # A European paper writes "t(28) = 2,21, d = 0,45": the decimal is followed by
+  # the list comma. docpluck's lookahead omits `,`, so it leaves "2,21" alone and
+  # the parser reads 2. Admitting `,` is safe because the lookbehind already
+  # excludes a preceding digit, which is what blocks CI pairs like "[0.45,0.89]",
+  # and because T1 has already removed genuine thousands groups.
+  # TWO lookbehinds, because a bare "[" exclusion is too blunt. "F[2,42]" is a df
+  # pair that must survive; "CI [0,12, 0,78]" is two European decimals that must
+  # convert -- and both are the shape `[d,dd`. What separates them is a CAPITAL
+  # LETTER IMMEDIATELY before the bracket (docpluck's own T1 guard 4): a stat
+  # bracket is written "F[", a CI bracket is written "CI [" with a space.
+  #   (?<![a-zA-Z,0-9])   char before the digit: blocks affiliations, multi-
+  #                       affiliation runs, and CI pairs like "[0.45,0.89]"
+  #   (?<![A-Z][\[\(])    two chars back: blocks stat brackets "F[", "F(", "t("
+  # The DISCRIMINATOR is the digit count AFTER the comma, not before it.
+  # An earlier draft of this port required exactly one digit before ("(\d),"),
+  # copying docpluck. That silently stopped converting European decimals with
+  # two or more integer digits -- "M = 12,34", "t = 1234,56" -- which the code
+  # this replaced handled correctly. A shape enumeration caught it.
+  #
+  # Because T1 above has already consumed every unambiguous thousands group,
+  # anything still carrying a comma between digits is a decimal, so this rule can
+  # be permissive on both sides. The lookbehinds remain the real guards.
+  # "." joins the lookbehind exclusions. Without it, the negative boundary lets
+  # the rule bite into an ALREADY-FORMED decimal: "[0.45,0.89]" matched "45,0"
+  # (the following "." is not a digit, so `(?!\d)` passed) and produced
+  # "0.45.0.89". A European decimal is never preceded by a period, so excluding
+  # it costs nothing and closes the hole.
+  #
+  # Under a European locale the `d,ddd` shape is EXACTLY the one structure
+  # cannot decide -- 1234 grouped, or 1.234 as a decimal. T1 already stepped
+  # aside for it; D1 must too, or "leave it alone" silently becomes "call it a
+  # decimal". Neither reading is knowable, so the token is preserved verbatim
+  # and the row carries the ambiguity rather than a guess dressed as a value.
+  .amb_shape <- "\\d{1,3},\\d{3}(?!\\d)"
+  .eu_locale <- identical(.loc$decimal_mark, ",")
+  .d1_pat <- if (.eu_locale) {
+    paste0("(?<![a-zA-Z,0-9.])(?<![A-Z][\\[\\(])",
+           "(?!", .amb_shape, ")(\\d+),(\\d+)(?!\\d)")
+  } else {
+    paste0("(?<![a-zA-Z,0-9.])(?<![A-Z][\\[\\(])(\\d+),(\\d+)(?!\\d)")
+  }
+  x <- gsub(.d1_pat, "\\1.\\2", x, perl = TRUE)
 
-  # Handle cases where decimal comma might be in effect sizes or CIs
-  # Pattern: [-+]?digit+,digit+ (with optional leading sign)
-  # This catches "d = 0,45" or "CI [0,12, 0,45]"
-  #
-  # IMPORTANT: \\d+ (one or more) NOT \\d* here. With \\d* the engine could
-  # anchor the match at the comma itself (zero leading digits), which meant the
-  # (?<![a-zA-Z]) lookbehind would check the digit BEFORE the comma (not the
-  # letter before the digit) and therefore fire on patterns like
-  # "Braunstein1,3" where 1 is not a letter.
-  #
-  # With \\d+ the match is always anchored at a real digit, so the lookbehind
-  # applies to the character before that digit, and affiliation patterns are
-  # correctly blocked. The comma exclusion also handles "Wagner1,3,4" style
-  # 3-affiliation sequences.
-  x <- gsub("(?<![a-zA-Z,])([-+]?\\d+),([0-9]+)(?=\\s|,|\\]|\\)|;|$)",
-            "\\1.\\2", x, perl = TRUE)
+  # Structural spans go back untouched.
+  x <- .restore_structural(x, .prot$store)
+
+  # v0.7.2: the second decimal rule that used to sit here is DELETED, not
+  # narrowed. It matched `([-+]?\d+),([0-9]+)` -- unlimited digits on both sides
+  # -- which is the single widest hole in the old implementation: it turned
+  # "BF10 = 1,234,567.89" into "1.234,567.89" (unparseable) and "SE = 1,234.5"
+  # into "1.234.5" (unparseable). Rule D1 above, applied AFTER T1 has removed
+  # genuine thousands groups, covers every European-decimal case the corpus
+  # exercises. See inst/normalization-spec/conformance.json.
 
   # CI delimiter harmonization
   # Convert semicolons to commas in CI bounds: (0.12; 0.45) -> (0.12, 0.45)
@@ -735,6 +1126,11 @@ parse_text <- function(text, context_window_size = 2) {
       two_tailed_detected = logical(0),
       method_context_detected = logical(0),
       method_context_in_chunk = logical(0),
+      resampling_inference = logical(0),
+      resampling_method = character(0),
+      resampling_B = numeric(0),
+      resampling_is_permutation = logical(0),
+      p_reported_is_resampling = logical(0),
       N = numeric(0),
       N_source = character(0),
       N_candidates_str = character(0),
@@ -809,6 +1205,13 @@ parse_text <- function(text, context_window_size = 2) {
     "|(?:^|(?<=\\s|,|;|\\(|\\{))(?:Sobel\\s+)?[Zz]\\s*=\\s*[-+]?\\.?\\d",  # z = value, Sobel Z = value; .5 ok
     "|(?:^|(?<=\\s|,|;|\\(|\\{))U\\s*=\\s*\\d",    # U = value
     "|(?:^|(?<=\\s|,|;|\\(|\\{))W\\s*=\\s*[-+]?\\.?\\d",    # W = value (DSCF W may be negative)
+    # v0.7.0: the robust family must split too. Without these, two robust
+    # statistics in one sentence stayed a single chunk and the surviving row
+    # took the FIRST p-clause -- "WTS(2) = 12.34, p = .002; ATS(1.87, Inf) =
+    # 3.45, p = .061" published the ATS row carrying the WTS's p = .002, and
+    # dropped the WTS row entirely (cross-model review, reproduced).
+    "|(?:^|(?<=\\s|,|;|\\(|\\{))WTS\\s*[\\(\\[=]",          # WTS(df) = / WTS =
+    "|(?:^|(?<=\\s|,|;|\\(|\\{))(?:F[_-]?)?ATS\\s*[\\(\\[]", # ATS(df1, df2) =
     ")"
   )
   chunks <- unlist(lapply(chunks, function(chunk) {
@@ -893,6 +1296,11 @@ parse_text <- function(text, context_window_size = 2) {
       two_tailed_detected = logical(0),
       method_context_detected = logical(0),
       method_context_in_chunk = logical(0),
+      resampling_inference = logical(0),
+      resampling_method = character(0),
+      resampling_B = numeric(0),
+      resampling_is_permutation = logical(0),
+      p_reported_is_resampling = logical(0),
       N = numeric(0),
       N_source = character(0),
       N_candidates_str = character(0),
@@ -1000,6 +1408,49 @@ parse_text <- function(text, context_window_size = 2) {
   #   (docpluck) flattens the "Q_T" subscript to a glued "QT" (e.g.
   #   "QT [40] = 104.65" in collabra.90203), so accept "Q", "QT", and "Q_T".
   pat_cochran_q <- "\\bQ(?:_?[A-Za-z])?\\s*[\\[(]\\s*(\\d+(?:\\.\\d+)?)\\s*[\\])]\\s*=\\s*([-+]?\\d*\\.?\\d+)"
+  # v0.7.0: the modern nonparametric / robust family. All four report a
+  # statistic against a KNOWN reference distribution, so unlike the NOTE-only
+  # types the reported p IS independently verifiable -- it is the effect size
+  # that is not recoverable. Same shape as cochran_q (v0.5.15).
+  #
+  # WTS (Wald-type statistic, GFD/rankFD): asymptotically chi-square with
+  #   df = rank of the contrast matrix. "WTS(2) = 12.34" or "WTS = 12.34, df = 2".
+  pat_wts <- paste0(
+    "(?i)\\bWTS\\s*(?:[\\[(]\\s*(\\d+(?:\\.\\d+)?)\\s*[\\])]\\s*)?",
+    "=\\s*([-+]?\\d*\\.?\\d+)",
+    "(?:\\s*,?\\s*df\\s*[12]?\\s*=\\s*(\\d+(?:\\.\\d+)?))?"
+  )
+  # ATS (ANOVA-type statistic, Brunner-Dette-Munk; nparLD/rankFD/GFD):
+  #   F-distributed with a NON-INTEGER df1 and a df2 that may be finite or Inf.
+  #   "ATS(1.87, 45.30) = 3.45" / "ATS(1.87, Inf) = 3.45".
+  pat_ats <- paste0(
+    "(?i)\\b(?:F[_-]?)?ATS\\s*[\\[(]\\s*(\\d+(?:\\.\\d+)?)\\s*,\\s*",
+    "(Inf|infinity|\\d+(?:\\.\\d+)?)\\s*[\\])]\\s*=\\s*([-+]?\\d*\\.?\\d+)"
+  )
+  # Brunner-Munzel: a t-like statistic with a Satterthwaite-type df. The
+  #   statistic is written W / W_BF / t, all of which collide with existing
+  #   patterns, so the "Brunner-Munzel" name is REQUIRED in the clause -- the
+  #   same discipline chisq_subtype uses for McNemar/Friedman.
+  #   The gap excludes any OTHER test name: cross-model review (reproduced)
+  #   showed "The Brunner-Munzel alternative was considered, but the reported
+  #   Wilcoxon result was W = 123" binding the Wilcoxon's W as a Brunner-Munzel
+  #   statistic -- wrong type AND wrong value. A competing name in between is
+  #   evidence the statistic belongs to that other test, so the match is
+  #   refused rather than guessed.
+  pat_brunner_munzel <- paste0(
+    "(?i)\\bbrunner[\\s-]*munzel\\b",
+    "(?:(?!wilcoxon|mann[\\s-]*whitney|kruskal|friedman|kendall|student)[^.]){0,90}?",
+    "\\b(?:W(?:[_-]?BF)?|t)\\s*(?:[\\[(]\\s*(\\d+(?:\\.\\d+)?)\\s*[\\])]\\s*)?",
+    "=\\s*([-+]?\\d*\\.?\\d+)",
+    "(?:\\s*,?\\s*df\\s*=\\s*(\\d+(?:\\.\\d+)?))?"
+  )
+  # Yuen's trimmed-mean t (WRS2). Written "Ty(df) = v" or "Yuen's t(df) = v";
+  #   the bare-t form collides with an ordinary t-test, so require the name.
+  pat_yuen <- paste0(
+    "(?i)\\byuen\\b[^.]{0,120}?",
+    "\\b(?:Ty|t)\\s*[\\[(]\\s*(\\d+(?:\\.\\d+)?)\\s*[\\])]\\s*",
+    "=\\s*([-+]?\\d*\\.?\\d+)"
+  )
   # v0.6.2: exact binomial test with Cohen's h effect size.
   # Form: "(exact )?binomial p [op] <pval>[, ]Cohen('s)? h = <h>[, 95% CI [<lo>, <hi>]]"
   # The two anchors -- "binomial p" and "Cohen('s)? h" -- are matched together
@@ -1500,6 +1951,10 @@ parse_text <- function(text, context_window_size = 2) {
     m_W_stat <- stringr::str_match(s, pat_W)
     m_H <- stringr::str_match(s, pat_H)
     m_cochran_q <- stringr::str_match(s, pat_cochran_q)
+    m_wts <- stringr::str_match(s, pat_wts)
+    m_ats <- stringr::str_match(s, pat_ats)
+    m_brunner_munzel <- stringr::str_match(s, pat_brunner_munzel)
+    m_yuen <- stringr::str_match(s, pat_yuen)
     m_binom_h   <- stringr::str_match(s, pat_binom_h)
     m_binom_bare <- stringr::str_match(s, pat_binom_bare)
     m_interaction_p <- stringr::str_match(s, pat_interaction_p)
@@ -1559,6 +2014,172 @@ parse_text <- function(text, context_window_size = 2) {
     method_kw <- "\\b(?:p[- ]?curve|equivalence test|TOST|power analysis|simulation|meta-analy|sensitivity analy|bootstrap|applet|sample size calculation|a priori power|post[- ]?hoc power)\\b"
     method_context_in_chunk <- grepl(method_kw, s, ignore.case = TRUE, perl = TRUE)
     method_context_detected <- grepl(method_kw, paste(s, context), ignore.case = TRUE, perl = TRUE)
+
+    # v0.6.21: detect a RESAMPLING-derived p-value (permutation / randomization
+    # / bootstrap / Monte Carlo / jackknife).
+    #
+    # This is deliberately NOT folded into method_kw above. That flag means "this
+    # number is not a result at all" (a power analysis, a meta-analytic aside),
+    # and its user-facing message says so. A permutation result IS a genuine
+    # finding; only its REFERENCE DISTRIBUTION differs. The consequence is
+    # narrow and specific: the p-value is not recomputable from the test
+    # statistic, while the effect size still is (a permutation does not change
+    # how t is computed, so d = 2t/sqrt(df) remains exactly as valid).
+    #
+    # Scoped to the row's OWN clause (`s`), never `context`: the v0.6.18 Welch
+    # fix established that a modifier read from the context window leaks onto a
+    # neighbouring row (there, N went 132 -> 403).
+    #
+    # Two deliberate exclusions:
+    #   * "randomization" must be qualified by "test" -- a bare \brandomi[sz]ed\b
+    #     would match every randomized controlled trial in the corpus.
+    #   * "exact test" is absent. Fisher's exact is a closed-form conditional
+    #     test whose p IS computable; matching it would suppress a legitimate
+    #     check. Only the qualified "exact permutation/randomization" forms
+    #     reach this pattern, via the permut/randomization alternatives.
+    # "randomization" is accepted with test / inference / based / procedure --
+    # "randomization inference" is standard in econometrics and was a real miss
+    # (cross-model review, 2026-08-07, reproduced) -- but never bare, or every
+    # randomized controlled trial would match.
+    resampling_kw <- paste0(
+      "(?i)\\b(?:permut\\w*|",
+      "randomi[sz]ation[- ]?(?:tests?|inference|based|procedures?)|",
+      "resampl\\w*|monte[- ]?carlo|bootstrap\\w*|shuffl\\w*|jack[- ]?knife\\w*)\\b"
+    )
+    # A resampling word attached to an INTERVAL ("bootstrapped 95% CI [...]")
+    # says the CI was resampled, not the p-value. Suppressing the parametric p
+    # check on that basis HIDES a genuine p-mismatch -- caught by cross-model
+    # review and reproduced: "t(58) = 2.31, p = .50, d = 0.61, bootstrapped 95%
+    # CI [0.10, 1.10]" lost its (correct) decision error. So an occurrence
+    # counts for the P-VALUE only when it is NOT immediately followed by
+    # interval language.
+    resamp_pos <- stringr::str_locate_all(s, resampling_kw)[[1]]
+    ci_follows <- paste0(
+      "(?i)^\\W*(?:\\w+\\s+)?",
+      "(?:\\d+(?:\\.\\d+)?\\s*%\\s*)?(?:CIs?|confidence\\s+intervals?)\\b"
+    )
+    resampling_inference <- FALSE
+    resampling_method <- NA_character_
+    if (nrow(resamp_pos) > 0) {
+      for (k in seq_len(nrow(resamp_pos))) {
+        hit <- substr(s, resamp_pos[k, "start"], resamp_pos[k, "end"])
+        after <- substr(s, resamp_pos[k, "end"] + 1L, nchar(s))
+        if (!grepl(ci_follows, after, perl = TRUE)) {
+          resampling_inference <- TRUE
+          resampling_method <- tolower(hit)
+          break
+        }
+      }
+    }
+
+    # v0.7.3: is the BOUND p-value itself resampling-derived, or merely sitting
+    # in a clause that mentions resampling? These are different questions, and
+    # conflating them shipped a false claim: for the real sentence
+    # "t(2037) = -3.26, P = 0.001, P-permutation = 0.002", the bound p is the
+    # PARAMETRIC 0.001 (verified: 2*pt(-3.26, 2037) = 0.001132), yet the row
+    # asserted "this p-value is not reproducible even with the raw data" about
+    # it. A false statement about what is knowable, attached to a number we had
+    # just verified -- the v0.6.19 defect class exactly.
+    #
+    # A p is QUALIFIED when a resampling word is glued or adjacent to it
+    # ("P-permutation =", "permutation p ="). Note pat_p cannot match the
+    # hyphenated form at all -- the hyphen breaks its operator adjacency -- so
+    # in that phrasing the bound p is the unqualified one by accident rather
+    # than by design. This makes the distinction explicit.
+    qualified_p <- paste0(
+      "(?i)(?:", "\\b(?:permut\\w*|randomi[sz]ation|resampl\\w*|bootstrap\\w*|",
+      "monte[- ]?carlo)[\\s_-]*p\\b",
+      "|", "\\bp[\\s_-]*(?:permut\\w*|randomi[sz]ation|resampl\\w*|",
+      "bootstrap\\w*|monte[- ]?carlo)", ")"
+    )
+    # The distinction that makes this SAFE: only the GLUED form
+    # ("P-permutation =", "p_permutation =") is invisible to pat_p, because the
+    # hyphen/underscore breaks its operator adjacency. When the qualifier is
+    # glued, whatever pat_p bound is necessarily the unqualified (parametric)
+    # value -- that is provable, not inferred.
+    #
+    # A SPACED qualifier ("permutation p = .062") is fully visible to pat_p and
+    # may well be what it bound. Reproduced: "permutation p = .062, parametric
+    # p = .025" binds .062. There the binding is NOT provable, so the row stays
+    # conservative. Checking a number you cannot prove you bound correctly is
+    # worse than not checking: it publishes a verdict about the wrong value.
+    glued_qualified_p <- grepl(
+      paste0("(?i)\\b(?:permut\\w*|randomi[sz]ation|resampl\\w*|bootstrap\\w*|",
+             "monte[- ]?carlo)[_-]+p\\b|\\bp[_-]+(?:permut\\w*|randomi[sz]ation|",
+             "resampl\\w*|bootstrap\\w*|monte[- ]?carlo)"),
+      s, perl = TRUE)
+    spaced_qualified_p <- grepl(qualified_p, s, perl = TRUE) && !glued_qualified_p
+    # A plain p that pat_p can see.
+    # ASCII operators only. R/ files must be pure ASCII for CRAN, and the two
+    # routes to a Unicode class both fail here: an R "\\u2264" puts a literal
+    # backslash-u into the pattern, and PCRE's own "\x{2264}" needs UTF mode
+    # that this call does not enable. The loss is negligible -- a bare p-clause
+    # is written with =, < or > essentially always, and normalize_text has
+    # already folded the typographic variants by this point.
+    has_plain_p <- grepl("(?i)(?<![a-z_-])p\\s*[<>=]", s, perl = TRUE)
+
+    # Parametric ONLY when the qualifier is glued (so pat_p could not have bound
+    # it) AND a plain p is present for it to have bound instead.
+    p_reported_is_resampling <- resampling_inference &&
+      !(glued_qualified_p && has_plain_p && !spaced_qualified_p)
+
+    # v0.6.22: the RESAMPLE COUNT (B). With B known, the smallest p the
+    # procedure can produce by counting is 1/(B+1) (Phipson & Smyth 2010) --
+    # checkable with no raw data at all. Without B the p-value is not
+    # reproducible even WITH the data, which is itself worth reporting.
+    # Accepts "10,000 permutations", "B = 10000", "5,000 bootstrap resamples",
+    # "2,000 replicates", "1,000 Monte Carlo samples/draws/iterations".
+    #
+    # Gated on resampling_inference so an ordinary "1,000 samples" or a
+    # generic count in non-resampling prose can never populate it.
+    #
+    # The separator handling is load-bearing. normalize_text() runs its
+    # decimal-comma conversion before this point, so "10,000 permutations"
+    # arrives as "10.000 permutations" -- and numify_int("10.000") is 10.
+    # Taking that at face value would set B = 10, a floor of 1/11 = .09, and
+    # false-flag essentially every permutation p in the corpus. A resample
+    # count is always an integer, so EVERY "." and "," in it is a thousands
+    # separator: strip them all rather than parse the number as written.
+    #
+    # The noun must be resampling-SPECIFIC, or carry a resampling qualifier.
+    # A bare "<n> samples/draws/iterations" is not enough: cross-model review
+    # (reproduced) showed "Across 500 samples, a permutation test with 10,000
+    # permutations ..." binding B = 500 and then FALSE-FLAGGING the p as below
+    # "1/(B+1) = 0.002" -- a wrong accusation built on a count scraped from the
+    # wrong clause. The bare "B = <n>" form is accepted separately.
+    resampling_B <- NA_real_
+    if (resampling_inference) {
+      num <- "(\\d[\\d,.]*\\d|\\d)"
+      qual <- "(?:random|bootstrap|permutation|permuted|monte[- ]?carlo|resampl\\w*)"
+      b_pats <- c(
+        # explicit: "B = 10,000" / "B = 10000"
+        paste0("(?i)\\bB\\s*=\\s*", num, "\\b"),
+        # resampling-specific noun, no qualifier needed
+        paste0("(?i)\\b", num, "\\s+(?:permutations?|resamples?|replicates?|",
+               "bootstraps?|permutation\\s+samples?)\\b"),
+        # generic noun, but only with a resampling qualifier in front
+        paste0("(?i)\\b", num, "\\s+", qual, "\\s+",
+               "(?:samples?|draws?|iterations?|replications?)\\b")
+      )
+      for (bp in b_pats) {
+        m_B <- stringr::str_match(s, bp)
+        if (!is.na(m_B[1, 2])) {
+          b_val <- suppressWarnings(as.numeric(gsub("[,.]", "", m_B[1, 2])))
+          # A plausible resample count. Below 50 this is far likelier to be a
+          # sample-size or item-count clause than a resampling specification.
+          if (!is.na(b_val) && b_val >= 50) { resampling_B <- b_val; break }
+        }
+      }
+    }
+
+    # v0.6.22: only a PERMUTATION-type procedure has the choose(n1+n2, n1)
+    # reference set. A bootstrap resamples WITH replacement, so that floor does
+    # not bind it at all -- applying it flagged a legitimate bootstrap p
+    # (cross-model review, reproduced). Recorded here so check.R can gate the
+    # exact-floor test without re-parsing the method string.
+    resampling_is_permutation <- resampling_inference &&
+      !is.na(resampling_method) &&
+      grepl("(?i)^(?:permut|randomi[sz]ation|shuffl)", resampling_method)
 
     # Enhanced N extraction with extended context and global fallback (Phase 2C)
     # Priority: own sub-chunk > local context > extended context > global
@@ -1828,7 +2449,15 @@ parse_text <- function(text, context_window_size = 2) {
     is_spearman_ctx <- isTRUE(grepl("spearman", rank_ctx, fixed = TRUE)) ||
       isTRUE(grepl("rank[ -]order correlation|rank correlation", rank_ctx))
 
-    if (!all(is.na(m_t))) {
+    # v0.7.0 (cross-model review, reproduced): Yuen's trimmed-mean test and
+    # Brunner-Munzel are most commonly written with a PLAIN "t(df) = v", which
+    # this generic branch claims first -- so "Yuen's trimmed-mean test, t(18.5)
+    # = 2.31" was typed `t` and had ordinary Cohen's d variants computed for it,
+    # effect sizes those statistics do not imply. Both name-anchored patterns
+    # therefore veto the generic t branch. (Cheaper and safer than relocating
+    # the branch: the chain is long and order-sensitive elsewhere.)
+    if (!all(is.na(m_t)) &&
+        all(is.na(m_brunner_munzel)) && all(is.na(m_yuen))) {
       test_type <- "t"
       df1 <- numify(m_t[2])
       stat_value <- numify(m_t[3])
@@ -1971,6 +2600,42 @@ parse_text <- function(text, context_window_size = 2) {
       test_type <- "rdpct"
       stat_value <- numify(m_risk_diff[2])
       stat_value_decimals <- count_decimal_places(m_risk_diff[2])
+    } else if (!all(is.na(m_brunner_munzel))) {
+      # v0.7.0: Brunner-Munzel. The asymptotic form is a t-like statistic with
+      # a Satterthwaite-type df, so its p is verifiable. Placed BEFORE the
+      # generic W / t branches, which would otherwise claim it and attach a
+      # rank-biserial r that the BM statistic does not imply. Its estimand is
+      # p_hat = P(X<Y) + .5*P(X=Y), which is NOT a standard effect size we can
+      # recover from the statistic.
+      test_type <- "brunner_munzel"
+      df1 <- numify(if (!is.na(m_brunner_munzel[2])) m_brunner_munzel[2]
+                    else m_brunner_munzel[4])
+      stat_value <- numify(m_brunner_munzel[3])
+      stat_value_decimals <- count_decimal_places(m_brunner_munzel[3])
+    } else if (!all(is.na(m_yuen))) {
+      # v0.7.0: Yuen's trimmed-mean t (WRS2). Reference distribution is t with
+      # the trimmed df, so the p is verifiable; the trimmed-mean effect size is
+      # not recoverable from the statistic alone.
+      test_type <- "yuen"
+      df1 <- numify(m_yuen[2])
+      stat_value <- numify(m_yuen[3])
+      stat_value_decimals <- count_decimal_places(m_yuen[3])
+    } else if (!all(is.na(m_ats))) {
+      # v0.7.0: ANOVA-type statistic (Brunner-Dette-Munk). F-distributed with a
+      # NON-INTEGER df1; df2 may be Inf, in which case pf(F, df1, Inf) reduces
+      # exactly to pchisq(df1*F, df1).
+      test_type <- "ats"
+      df1 <- numify(m_ats[2])
+      df2 <- if (grepl("^(?i)inf", m_ats[3])) Inf else numify(m_ats[3])
+      stat_value <- numify(m_ats[4])
+      stat_value_decimals <- count_decimal_places(m_ats[4])
+    } else if (!all(is.na(m_wts))) {
+      # v0.7.0: Wald-type statistic. Asymptotically chi-square with df = rank
+      # of the contrast matrix -- structurally the same dispatch as Cochran Q.
+      test_type <- "wts"
+      df1 <- numify(if (!is.na(m_wts[2])) m_wts[2] else m_wts[4])
+      stat_value <- numify(m_wts[3])
+      stat_value_decimals <- count_decimal_places(m_wts[3])
     } else if (!all(is.na(m_cochran_q))) {
       # v0.5.15: Cochran Q heterogeneity (meta-analysis). Q is chi-square
       # distributed under the homogeneity null with the bracketed/parenthesized
@@ -2920,6 +3585,11 @@ parse_text <- function(text, context_window_size = 2) {
       two_tailed_detected = two_tailed_detected,
       method_context_detected = method_context_detected,
       method_context_in_chunk = method_context_in_chunk,
+      resampling_inference = resampling_inference,
+      resampling_method = resampling_method,
+      resampling_B = resampling_B,
+      resampling_is_permutation = resampling_is_permutation,
+      p_reported_is_resampling = p_reported_is_resampling,
       N = N_value, # From enhanced extraction above
       N_source = N_source, # NEW: Track where N came from
       N_candidates_str = if (length(N_candidates) > 1) paste(N_candidates, collapse = ";") else NA_character_,
@@ -2992,6 +3662,11 @@ parse_text <- function(text, context_window_size = 2) {
       two_tailed_detected = logical(0),
       method_context_detected = logical(0),
       method_context_in_chunk = logical(0),
+      resampling_inference = logical(0),
+      resampling_method = character(0),
+      resampling_B = numeric(0),
+      resampling_is_permutation = logical(0),
+      p_reported_is_resampling = logical(0),
       N = numeric(0),
       N_source = character(0),
       N_candidates_str = character(0),
@@ -3370,6 +4045,11 @@ parse_text <- function(text, context_window_size = 2) {
     two_tailed_detected = FALSE,
     method_context_detected = FALSE,
     method_context_in_chunk = FALSE,
+    resampling_inference = FALSE,
+    resampling_method = NA_character_,
+    resampling_B = NA_real_,
+    resampling_is_permutation = FALSE,
+    p_reported_is_resampling = FALSE,
     N = NA_real_,
     N_source = NA_character_,
     N_candidates_str = NA_character_,
