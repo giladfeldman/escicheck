@@ -1,0 +1,441 @@
+{
+  "spec_version": "1.2.0",
+  "derived_from": "docpluck normalize.py A3a + A3, v2.4.126",
+  "description": "Language-neutral conformance corpus for numeric separator normalization. Both the Python (docpluck) and R (effectcheck) implementations must produce `expected` for every `input`. See SPEC.md.",
+  "cases": [
+    {
+      "id": "thousands-U-statistic",
+      "input": "A Mann-Whitney test, U = 12,345, z = -2.10, p = .036.",
+      "expected": "A Mann-Whitney test, U = 12345, z = -2.10, p = .036.",
+      "rule": "T1",
+      "note": "THE regression case. effectcheck v0.7.1 produced U = 12.345, publishing rank-biserial 0.99938 where the truth is 0.38275, with status OK."
+    },
+    {
+      "id": "thousands-W-statistic",
+      "input": "A Wilcoxon test, W = 12,345, p = .036.",
+      "expected": "A Wilcoxon test, W = 12345, p = .036.",
+      "rule": "T1",
+      "note": "Same class as U. Wilcoxon W exceeds 999 routinely."
+    },
+    {
+      "id": "thousands-H-statistic-with-decimal",
+      "input": "A Kruskal-Wallis test, H(2) = 1,234.56, p < .001.",
+      "expected": "A Kruskal-Wallis test, H(2) = 1234.56, p < .001.",
+      "rule": "T1",
+      "note": "effectcheck produced 1.234.56 -- two decimal points, unparseable by as.numeric()."
+    },
+    {
+      "id": "thousands-bayes-factor-multi-comma",
+      "input": "Evidence was decisive, BF10 = 1,234,567.89.",
+      "expected": "Evidence was decisive, BF10 = 1234567.89.",
+      "rule": "T1",
+      "note": "Multi-group integer. effectcheck produced 1.234,567.89 -- unparseable. A degraded BF can flip 'decisive' to 'negligible', a qualitative error."
+    },
+    {
+      "id": "thousands-nobs-token",
+      "input": "A chi-square test, chi2(1) = 12.5, p < .001, nobs = 1,182.",
+      "expected": "A chi-square test, chi2(1) = 12.5, p < .001, nobs = 1182.",
+      "rule": "T1",
+      "note": "nobs is a documented sample-size token (effectcheck v0.5.5, JASP). It produced N = 1 and Cramer's V = 3.5355 -- V is bounded in [0,1], so that is impossible, and it shipped as OK."
+    },
+    {
+      "id": "thousands-N-equals",
+      "input": "Participants were recruited (N = 1,182).",
+      "expected": "Participants were recruited (N = 1182).",
+      "rule": "T1",
+      "note": "The originally-protected context. Must stay protected."
+    },
+    {
+      "id": "thousands-n-subscripted",
+      "input": "Groups differed, n1 = 1,000, n2 = 2,500.",
+      "expected": "Groups differed, n1 = 1000, n2 = 2500.",
+      "rule": "T1",
+      "note": "Per-group sizes."
+    },
+    {
+      "id": "thousands-prose-participants",
+      "input": "We analysed a sample of 1,182 participants.",
+      "expected": "We analysed a sample of 1182 participants.",
+      "rule": "T1",
+      "note": "Bare prose count. Feeds effectcheck's document-level N fallback, which drives effect sizes for z-tests."
+    },
+    {
+      "id": "thousands-prose-bare-count",
+      "input": "The corpus contained 33,719 articles and 32,981 authors.",
+      "expected": "The corpus contained 33719 articles and 32981 authors.",
+      "rule": "T1",
+      "note": "Multiple bare counts in one sentence; both must strip."
+    },
+    {
+      "id": "thousands-multi-group-integer",
+      "input": "The register held 12,345,678 records.",
+      "expected": "The register held 12345678 records.",
+      "rule": "T1",
+      "note": "Two comma groups in one integer."
+    },
+    {
+      "id": "thousands-resample-count",
+      "input": "A permutation test with 10,000 permutations, t(58) = 2.31, p = .062.",
+      "expected": "A permutation test with 10000 permutations, t(58) = 2.31, p = .062.",
+      "rule": "T1",
+      "note": "effectcheck v0.6.22 hit this: 10,000 became 10.000, and numify_int('10.000') is 10 -- a Monte Carlo floor of 1/11 that would false-flag nearly every permutation p."
+    },
+    {
+      "id": "thousands-standard-error",
+      "input": "The model gave b = 2.14, SE = 1,234.5, p = .04.",
+      "expected": "The model gave b = 2.14, SE = 1234.5, p = .04.",
+      "rule": "T1",
+      "note": "Raw-scale SE. effectcheck produced 1.234.5, unparseable."
+    },
+    {
+      "id": "thousands-ci-bounds",
+      "input": "The difference was large, 95% CI [1,234, 5,678].",
+      "expected": "The difference was large, 95% CI [1234, 5678].",
+      "rule": "T1",
+      "note": "Raw-scale CI bounds on a large outcome."
+    },
+    {
+      "id": "thousands-clinical-arm-counts",
+      "input": "Events in 1,234/5,678 (21.7%) versus 987/5,432 (18.2%); RR 1.19.",
+      "expected": "Events in 1234/5678 (21.7%) versus 987/5432 (18.2%); RR 1.19.",
+      "rule": "T1",
+      "note": "Clinical-trial arm counts are written events/total with a slash, so '/' must be in T1's trailing boundary set. Without it the first count kept its comma, the arm regex's \\d+ stopped at the comma, and arm1_events came back 234 instead of 1234 -- a silently wrong event count feeding the risk-ratio recomputation."
+    },
+    {
+      "id": "decimal-cohens-d",
+      "input": "The effect was large, d = 0,80.",
+      "expected": "The effect was large, d = 0.80.",
+      "rule": "D1",
+      "note": "European decimal. Must still convert -- the whole reason the decimal rule exists."
+    },
+    {
+      "id": "decimal-p-value",
+      "input": "The test was significant, p = 0,05.",
+      "expected": "The test was significant, p = 0.05.",
+      "rule": "D1",
+      "note": "European decimal p."
+    },
+    {
+      "id": "decimal-correlation",
+      "input": "They correlated, r = 0,45.",
+      "expected": "They correlated, r = 0.45.",
+      "rule": "D1",
+      "note": "European decimal r."
+    },
+    {
+      "id": "decimal-sentence-final",
+      "input": "The effect was d = 0,87.",
+      "expected": "The effect was d = 0.87.",
+      "rule": "D1",
+      "note": "Sentence-final decimal; the lookahead admits a trailing period via \\.(?!\\d)."
+    },
+    {
+      "id": "decimal-two-integer-digits",
+      "input": "The mean was M = 12,34 and the statistic t = 1234,56.",
+      "expected": "The mean was M = 12.34 and the statistic t = 1234.56.",
+      "rule": "D1",
+      "note": "European decimals with TWO OR MORE integer digits. The discriminator is the digit count AFTER the comma (1-2 = decimal, exactly 3 = thousands), not before it. A draft of this port required exactly one digit before, copying docpluck A3, and silently stopped converting these -- a regression the previous implementation did not have."
+    },
+    {
+      "id": "decimal-one-digit-fraction-long-integer",
+      "input": "The score was 123,4 on that scale.",
+      "expected": "The score was 123.4 on that scale.",
+      "rule": "D1",
+      "note": "Three integer digits, one fractional digit. Cannot be a thousands group (needs exactly 3 after the comma)."
+    },
+    {
+      "id": "decimal-single-digit-fraction",
+      "input": "The ratio was 1,5 times higher.",
+      "expected": "The ratio was 1.5 times higher.",
+      "rule": "D1",
+      "note": "One digit after the comma cannot be a thousands group."
+    },
+    {
+      "id": "single-df-bracket-t",
+      "input": "The test was reliable, t(1,197) = 2.31, p = .021.",
+      "expected": "The test was reliable, t(1197) = 2.31, p = .021.",
+      "rule": "T2",
+      "note": "A t-test has exactly ONE df, so this is a thousands separator (df = 1197), not a df pair. Same shape as F(7,140) but the opposite answer -- the difference is test arity, which is statistics-aware and therefore effectcheck's layer, not the context-free spec's. MetaESCI E8 (2026-04-11): t(2,758) became t(2.758) and one article dropped 47 rows."
+    },
+    {
+      "id": "single-df-bracket-H",
+      "input": "A Kruskal-Wallis test, H(1,024) = 12.5, p < .001.",
+      "expected": "A Kruskal-Wallis test, H(1024) = 12.5, p < .001.",
+      "rule": "T2",
+      "note": "Kruskal-Wallis H also takes one df. Same reasoning as t."
+    },
+    {
+      "id": "guard-df-parens-F",
+      "input": "The effect held, F(7,140) = 4.31, p = .038.",
+      "expected": "The effect held, F(7,140) = 4.31, p = .038.",
+      "rule": "T1-guard-4",
+      "note": "F df pair. Must survive both rules intact."
+    },
+    {
+      "id": "guard-df-brackets-F",
+      "input": "The effect held, F[2,42] = 13.689, p = .001.",
+      "expected": "The effect held, F[2,42] = 13.689, p = .001.",
+      "rule": "D1-lookbehind",
+      "note": "MetaESCI D2 (2026-04-11): this was corrupted to F[2.42], which the parser then failed to match entirely."
+    },
+    {
+      "id": "guard-affiliation-single",
+      "input": "Braunstein1,3 conducted the study.",
+      "expected": "Braunstein1,3 conducted the study.",
+      "rule": "D1-lookbehind",
+      "note": "Author affiliation superscripts. The letter before the digit blocks the match."
+    },
+    {
+      "id": "guard-affiliation-multi",
+      "input": "Wagner1,3,4 replicated it.",
+      "expected": "Wagner1,3,4 replicated it.",
+      "rule": "D1-lookbehind",
+      "note": "Multi-affiliation run; the comma exclusion blocks the middle pair."
+    },
+    {
+      "id": "guard-ci-pair-tight",
+      "input": "The interval was [0.45,0.89].",
+      "expected": "The interval was [0.45,0.89].",
+      "rule": "D1-lookbehind",
+      "note": "A comma-separated CI pair, not a decimal. The digit exclusion in the lookbehind blocks it."
+    },
+    {
+      "id": "guard-citation-year",
+      "input": "As shown by Smith, 1992, the effect replicates.",
+      "expected": "As shown by Smith, 1992, the effect replicates.",
+      "rule": "T1-guard-2",
+      "note": "No digit before the comma, so neither rule applies."
+    },
+    {
+      "id": "guard-european-thousandths",
+      "input": "The value was 0,001 units.",
+      "expected": "The value was 0.001 units.",
+      "rule": "D1",
+      "note": "Leading zero means European decimal, not a thousands group -- T1 guard 1 rejects it, D1 converts it."
+    },
+    {
+      "id": "ambiguous-mean-raw-scale",
+      "input": "The mean was M = 1,234.",
+      "expected": "The mean was M = 1234.",
+      "rule": "T1",
+      "ambiguous": true,
+      "note": "GENUINELY AMBIGUOUS: a mean of 1234, or a European 1.234? Resolved toward thousands, the right default for English APA output, but it is a default and not a proof. Changing this is a semantic decision requiring a spec version bump."
+    },
+    {
+      "id": "decimal-followed-by-list-comma",
+      "input": "The result was t(28) = 2,21, d = 0,45.",
+      "expected": "The result was t(28) = 2.21, d = 0.45.",
+      "rule": "D1",
+      "divergence_from_docpluck": true,
+      "note": "DIVERGENCE, found by effectcheck's suite and filed back to docpluck. A European decimal is routinely followed by the LIST comma. docpluck A3's lookahead omits ',', so it leaves '2,21' alone and a parser reads 2 -- a silent 10x error. effectcheck admits ',' in the lookahead; this is safe because the lookbehind already excludes a preceding digit (which is what blocks CI pairs) and T1 has already removed thousands groups. docpluck should adopt this."
+    },
+    {
+      "id": "decimal-list-in-ci-brackets",
+      "input": "The interval was CI [0,12, 0,78].",
+      "expected": "The interval was CI [0.12, 0.78].",
+      "rule": "D1",
+      "divergence_from_docpluck": true,
+      "note": "Same divergence inside a CI. Both bounds are European decimals separated by a list comma."
+    },
+    {
+      "id": "mixed-conventions-one-sentence",
+      "input": "Across 1,182 participants the effect was d = 0,80.",
+      "expected": "Across 1,182 participants the effect was d = 0.80.",
+      "rule": "T1+D1",
+      "note": "Two conventions in ONE sentence, which is itself contradictory: 'd = 0,80' is a decisive EUROPEAN decimal marker, but '1,182' uses an ENGLISH thousands separator. Because the conventions are mutually exclusive, the decisive marker sets the document locale to European -- and under that locale '1,182' is exactly the shape structure cannot decide (1182 grouped, or 1.182 as a decimal). It is therefore PRESERVED verbatim and the row carries the ambiguity. An earlier expectation of '1182' predated locale inference and assumed shape-only resolution; silently picking either reading here would be a guess presented as a value.",
+      "ambiguous": true
+    },
+    {
+      "id": "list-experiments",
+      "input": "Experiments 1,2 showed the effect.",
+      "expected": "Experiments 1,2 showed the effect.",
+      "rule": "S1",
+      "note": "A head noun (Experiment/Study/Table/Item/Condition...) followed by an integer list. The comma is a real comma. Both effectcheck and docpluck previously produced 'Experiments 1.2'."
+    },
+    {
+      "id": "list-table",
+      "input": "Table 1,2 and 3 summarise this.",
+      "expected": "Table 1,2 and 3 summarise this.",
+      "rule": "S1",
+      "note": "Same class, different head noun."
+    },
+    {
+      "id": "list-items",
+      "input": "items 1,5 and 7 were reversed",
+      "expected": "items 1,5 and 7 were reversed",
+      "rule": "S1",
+      "note": "Note 1,5 is exactly the shape of a European decimal -- only the head noun distinguishes it."
+    },
+    {
+      "id": "list-anchors",
+      "input": "anchors 1,2,3,4,5 were used",
+      "expected": "anchors 1,2,3,4,5 were used",
+      "rule": "S1",
+      "note": "Longer list. Previously produced the INCONSISTENT 'anchors 1.2,3,4,5' -- only the first pair converted."
+    },
+    {
+      "id": "list-coded-binary",
+      "input": "gender was coded 0,1",
+      "expected": "gender was coded 0,1",
+      "rule": "S2",
+      "note": "A coded variable, not a decimal. 'coded 0,1' would otherwise read as a decisive European marker and mis-set the whole document's locale."
+    },
+    {
+      "id": "index-matrix",
+      "input": "matrix[1,2] entry",
+      "expected": "matrix[1,2] entry",
+      "rule": "S3",
+      "note": "Integer-only bracket pair is an index, not a CI. Distinguished from a CI by the absence of decimal points."
+    },
+    {
+      "id": "index-cell",
+      "input": "cell (1,2) of the matrix",
+      "expected": "cell (1,2) of the matrix",
+      "rule": "S3",
+      "note": "Same, parenthesised."
+    },
+    {
+      "id": "doi-preserved",
+      "input": "See doi:10.1037/0022-3514.45,6 for details.",
+      "expected": "See doi:10.1037/0022-3514.45,6 for details.",
+      "rule": "S4",
+      "note": "A DOI is an identifier. Previously corrupted to '.45.6'."
+    },
+    {
+      "id": "eu-full-period",
+      "input": "The mean was M = 1.234,56 units.",
+      "expected": "The mean was M = 1234.56 units.",
+      "rule": "F1",
+      "note": "Period-thousands WITH comma-decimal. Self-identifying: no locale knowledge needed. Previously produced the unparseable '1.234.56'."
+    },
+    {
+      "id": "eu-full-space",
+      "input": "The mean was M = 1 234,56 units.",
+      "expected": "The mean was M = 1234.56 units.",
+      "rule": "F1",
+      "note": "Space as the thousands separator."
+    },
+    {
+      "id": "eu-full-apostrophe",
+      "input": "The mean was M = 1'234,56 units.",
+      "expected": "The mean was M = 1234.56 units.",
+      "rule": "F1",
+      "note": "Swiss apostrophe grouping."
+    },
+    {
+      "id": "us-full-comma",
+      "input": "The mean was M = 1,234.56 units.",
+      "expected": "The mean was M = 1234.56 units.",
+      "rule": "F2",
+      "note": "Comma-thousands WITH period-decimal. Also self-identifying."
+    },
+    {
+      "id": "boundary-percent",
+      "input": "In 12,5% of cases the effect held.",
+      "expected": "In 12.5% of cases the effect held.",
+      "rule": "D1",
+      "note": "'%' was missing from the terminator whitelist, so this silently failed to convert. The fourth boundary character to bite us after '.', '/', '-'."
+    },
+    {
+      "id": "boundary-hyphen-range",
+      "input": "The range was 1,182-1,200 participants.",
+      "expected": "The range was 1182-1200 participants.",
+      "rule": "T1",
+      "note": "'-' was missing too, so only the SECOND number converted -- an inconsistent result within one range."
+    },
+    {
+      "id": "boundary-scientific",
+      "input": "The p-value was 1,23e-4 overall.",
+      "expected": "The p-value was 1.23e-4 overall.",
+      "rule": "D1",
+      "note": "Scientific notation with a European decimal."
+    },
+    {
+      "id": "boundary-slash",
+      "input": "Events in 1,234/5,678 cases.",
+      "expected": "Events in 1234/5678 cases.",
+      "rule": "T1",
+      "note": "Clinical arm counts. '/' was the first boundary character we had to add by hand."
+    },
+    {
+      "id": "locale-eu-resolves-ambiguous",
+      "input": "Der Effekt war d = 0,80. Die Stichprobe war N = 1,234 Personen.",
+      "expected": "Der Effekt war d = 0.80. Die Stichprobe war N = 1,234 Personen.",
+      "rule": "L1",
+      "note": "d = 0,80 is a DECISIVE European marker (operator-guarded leading zero). It establishes comma-as-decimal for the document, so N = 1,234 must NOT be read as 1234 thousands. Preserved and flagged rather than coerced.",
+      "locale": "european"
+    },
+    {
+      "id": "locale-us-resolves-ambiguous",
+      "input": "The effect was d = 0.80. The sample was N = 1,234 participants.",
+      "expected": "The effect was d = 0.80. The sample was N = 1234 participants.",
+      "rule": "L1",
+      "note": "d = 0.80 is a DECISIVE US marker, establishing comma-as-thousands, so N = 1,234 resolves to 1234.",
+      "locale": "us"
+    },
+    {
+      "id": "locale-no-evidence-preserves",
+      "input": "The sample was N = 1,234 participants.",
+      "expected": "The sample was N = 1234 participants.",
+      "rule": "L2",
+      "note": "No decisive marker anywhere. Falls back to the documented default (thousands, correct for English-language APA output) but the row must carry an ambiguity flag rather than presenting as verified.",
+      "ambiguous": true
+    },
+    {
+      "id": "real-reference-volume-pages",
+      "input": "Psychol. Methods 3, 424-453. doi: 10.1037",
+      "expected": "Psychol. Methods 3, 424-453. doi: 10.1037",
+      "rule": "T1-space",
+      "note": "REAL corpus string. A reference-list volume and page range. Admitting a space after the comma in T1 fused these into '3424-453'. Corpus evidence: among 2,984 digit-comma-digit occurrences, the space-then-3-digits shape is overwhelmingly reference-list furniture, not a grouped number."
+    },
+    {
+      "id": "real-reference-volume-pages-2",
+      "input": "Nature genetics 54, 437-449 (2022)",
+      "expected": "Nature genetics 54, 437-449 (2022)",
+      "rule": "T1-space",
+      "note": "REAL corpus string, same class. Became '54437-449'."
+    },
+    {
+      "id": "real-rgb-triple",
+      "input": "four gray squares (RGB = 120, 120, 120), each",
+      "expected": "four gray squares (RGB = 120, 120, 120), each",
+      "rule": "T1-space",
+      "note": "REAL corpus string. An RGB triple, not a number. Became '120120120'."
+    },
+    {
+      "id": "real-table-row-counts",
+      "input": "All places 403,669 107,081 81,140",
+      "expected": "All places 403669 107081 81140",
+      "rule": "T1",
+      "note": "REAL corpus string: three genuine table counts, space-separated, each internally comma-grouped. Must ALL strip. Two separate bugs hit this: the plain-space alternative in the European full-notation rule matched '669 107,081' across the gap and produced '403.669107.081', and the same plain space in the LOCALE DETECTOR classified this English table as European, gating the thousands rule off entirely."
+    },
+    {
+      "id": "real-citation-superscripts",
+      "input": "anger-relevant stimuli49,50. As mentioned",
+      "expected": "anger-relevant stimuli49,50. As mentioned",
+      "rule": "D1-lookbehind",
+      "note": "REAL corpus string. Numbered-citation superscripts glued to a word. The letter in the lookbehind blocks it."
+    },
+    {
+      "id": "real-citation-bracket-run",
+      "input": "misinformation [33,35,41,42]. The combination",
+      "expected": "misinformation [33,35,41,42]. The combination",
+      "rule": "S3",
+      "note": "REAL corpus string. A bracketed citation run -- integers only, so the index/tuple protection covers it."
+    },
+    {
+      "id": "real-citation-after-period",
+      "input": "treatment decisions.10,12 Moreover",
+      "expected": "treatment decisions.10,12 Moreover",
+      "rule": "D1-lookbehind",
+      "note": "REAL corpus string. Superscript citations after a sentence-final period; the '.' exclusion in the lookbehind blocks it."
+    },
+    {
+      "id": "real-n-with-extraction-space",
+      "input": "Participants were recruited (N = 1, 234).",
+      "expected": "Participants were recruited (N = 1234).",
+      "rule": "T1-N-context",
+      "note": "REAL failure mode. A space inside an explicitly labelled COUNT is extraction damage, not a separator, so the narrow N/nobs rule repairs it -- while the general rule leaves the same spacing alone in prose. Without this, .pat_doc_N's digit run stopped at the comma and the document N became 1, status OK, with no df-based guard on a z/U/W test."
+    }
+  ]
+}

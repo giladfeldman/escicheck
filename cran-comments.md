@@ -26,7 +26,7 @@ defect.
 
 ## Test suite
 
-1084 test_that blocks across 130 test files; all pass with 0 failures,
+1135 test_that blocks across 135 test files; all pass with 0 failures,
 0 errors, and 0 warnings (approx. 15 minutes under `R CMD check`).
 
 ## Breaking change since 0.2.3: file extraction removed in 0.4.0

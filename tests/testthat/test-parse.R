@@ -50,11 +50,23 @@ test_that("normalize_text handles n1/n2 with thousands separator", {
 })
 
 test_that("normalize_text: N thousands and decimal comma coexist", {
-  # The N comma should be stripped; the effect size comma should become a dot
+  # v0.7.3: this string is internally contradictory -- "0,45" is a DECISIVE
+  # European decimal marker while "1,182" uses an English thousands separator.
+  # Since the two conventions are mutually exclusive, the decisive marker sets
+  # the document locale to European, under which "1,182" is exactly the shape
+  # structure cannot decide. It is therefore left verbatim rather than guessed.
+  #
+  # The assertion now targets the OUTCOME rather than the intermediate string:
+  # the parser still resolves N correctly, which is what actually matters. The
+  # previous version pinned normalize_text's output and so encoded the old
+  # shape-only behaviour as a requirement.
   text <- "d = 0,45, N = 1,182"
   normalized <- effectcheck:::normalize_text(text)
-  expect_true(grepl("N = 1182", normalized))
   expect_true(grepl("0\\.45", normalized))
+
+  res <- check_text("An independent t-test, t(1180) = 2.31, d = 0,45, N = 1,182.")
+  expect_equal(as.numeric(res$N[1]), 1182)
+  expect_equal(as.numeric(res$effect_reported[1]), 0.45)
 })
 
 test_that("normalize_text strips thousand-sep commas in t-test parens (E8)", {

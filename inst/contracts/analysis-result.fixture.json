@@ -16,7 +16,8 @@
     "t", "F", "r", "chisq", "z", "U", "W", "H", "regression",
     "spearman", "kendall", "kendall_w", "dscf", "cochran_q", "binomial",
     "RR", "rdpct", "md_hl", "interaction_p", "mediation_indirect",
-    "mcnemar_or", "bayes_factor", "hazard_ratio", "table_estimate"
+    "mcnemar_or", "bayes_factor", "hazard_ratio", "table_estimate",
+    "d_reported_only", "wts", "ats", "brunner_munzel", "yuen"
   ],
   "sample": {
     "source": "text",
