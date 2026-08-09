@@ -1,3 +1,161 @@
+# effectcheck 0.7.4
+
+**A column boundary was being read as part of a sentence, so an effect size from
+one column was graded against a test statistic from another.** The chunk splitter
+broke text on `[.!?]` followed by whitespace and an uppercase letter. A two-column
+PDF whose columns the extractor merges resumes with whatever the next column
+happens to start with — often a bare number — and the lookahead required a
+capital, so the two columns stayed one chunk.
+
+`spps.txt` location 216 shipped
+
+```
+The overall effect size was d = 0.33, 95% CI [0.09, 0.57].
+
+0.75, 95% CI = [0.54, 0.95], t = 7.47, p < .001).
+```
+
+as ONE row: `test_type = "t"`, `stat_value = 7.47` from column B, `effect_reported
+= 0.33` from column A, graded `g_ind = 0.379` against N = 1555, status **WARN**.
+Both numbers appear in the article. The pairing does not. The `0.75` that belongs
+with `t = 7.47` was dropped, and a reported effect was charged against a statistic
+it was never reported with. This was disclosed as a known limitation in the 0.6.20
+entry; it is now fixed. The two values are separate rows — `d = 0.33` with its
+interval as a `d_reported_only` row, `t = 7.47` on its own as NOTE — and the
+orphaned effect is verified to survive, since losing it would be worse than the
+mis-pairing.
+
+**The fix is a lookahead, not a paragraph rule, and that distinction was decided
+by measurement rather than taste.** The first version dropped the sentence anchor
+and split on any blank line followed by a capital or a digit — the shape a merge
+takes when the extractor truncates a column mid-sentence. Two independent
+cross-model reviews converged on the same class of counterexample, and the
+whole-corpus diff found the class in the wild:
+
+| input | what the general rule did |
+|---|---|
+| `..., p = .026, d = 0.75`⏎⏎`95% CI [0.09, 1.41].` | t row loses its CI |
+| `..., p = .026`⏎⏎`Cohen's d = 0.75, ...` | t row loses its effect size — the consistency check silently stops running while the row still reports OK |
+| `The effect was medium, d = 0.`⏎⏎`65, 95% CI ...` | boundary inside a decimal |
+| `t(58) = 3.45, p = .03`⏎⏎`1, ...` | p published as `.03` instead of `.031` |
+| `..., d = 0.65, 95%`⏎⏎`CI [0.40, 0.90], ...` | CI severed from its own effect |
+| collabra.37122's flattened appendix table | `OR = 0.99, 95% CI [0.77, 1.27]` dropped from the output entirely |
+
+Requiring the boundary to sit after sentence-ending punctuation refuses every one
+of them: in each case the character before the blank line is a digit, a `%`, or a
+comma — text that is mid-statement by construction. Five reproduced as row-level
+defects and are pinned as regression tests watched RED against that first version;
+two did not reproduce (both sample-size cases, where the truncated N is rejected
+and the document-level scan supplies the value regardless) and are recorded as
+such rather than promoted.
+
+`(?<!\d\.)` is the one guard the anchor does not supply: a period preceded by a
+digit is a decimal point, not a sentence end. Rejoining `<digits>.`⏎`<digits>` was
+considered and **refused on corpus evidence** — across the 48 real-article texts
+that shape occurs 221 times and is dominated by reference numbering and section
+headings (`...962-967.`⏎⏎`30.`⏎⏎`Singh H, ...`, which a joiner would fuse into
+`967.30`), while all 22 occurrences of `<label> = <digits>.` at end of line are
+sentence-final periods. A bridge with no observed benefit and a demonstrated
+corruption path is the v0.6.20 defect class exactly.
+
+**Whole-corpus diff** (48 real-article texts, 765 rows, per-row field comparison —
+not row counts, per the v0.6.20 lesson that `nrow()` cannot see value corruption):
+the general rule touched 11 files with 6 rows lost, 13 gained and 16 changed. The
+shipped rule produces **one change in the entire corpus** — the target defect, and
+nothing else. 0 rows gained, 0 lost.
+
+**Still not fixed, deliberately:** a column truncated *without* sentence-ending
+punctuation still merges. Covering it costs a reported value on real text, which
+is worse on a science tool than one unchecked row.
+
+## Three separator defects, from the review v0.7.3 never ran
+
+v0.7.3 shipped without `/escicheck-qa`, `/escicheck-review` or a cross-model
+review. Running them found the following. Twelve reviewer findings were produced
+across two models; **every one was run against the working tree before anything
+was changed**, three were refuted outright, and the three below reached a
+published number.
+
+**A confidence interval was being destroyed on real published text.** An interval
+written with no space after the comma — `95%CI=[7.944,11.984]`, which is how
+`nathumbeh_replication_2025` writes all 11 of its intervals — matched the
+European full-notation rule as `7.944,11` and was rebuilt into `7944.11`, leaving
+the text as `95%CI=[7944.11.984]`. Both bounds came back `NA` and the row still
+reported status **OK**. The same clause written with a space parses correctly,
+which is exactly what made it invisible: the paper's other rows look fine. The
+guard is structural and needs no locale inference — in genuine full notation the
+part after the comma is a *terminal fraction*, so it cannot be followed by another
+decimal point and more digits. Both lookaheads in the fix are load-bearing:
+`(?!\.\d)` alone is defeated by backtracking, which gives up a digit and matches
+`7.944,1` instead.
+
+**A European p-value was silently dropped.** Rule D1 required at least one digit
+before the comma, but a continental paper omits the leading zero exactly as APA
+does: `p = ,025` is `p = .025`, and `p < ,001` is `p < .001`. Neither matched, so
+`t(48) = 2,31, p = ,025, d = 0,74` published the row with `p_reported = NA` while
+the same clause's `t` and `d` converted normally — and the fuller form carrying
+`p < ,001` returned **zero rows**. New rule D1b keys on the *value position* (a
+comma directly after `=`, `<` or `>` with no space), not on the locale, so an
+English document carrying a stray continental value is repaired rather than
+dropped. Requiring no space is what keeps `CI [0.45, 0.89]` and `F(1, 30)` out.
+
+**An OCR-spaced sample size lost everything after its first group.** The repair
+loop's anchor was `\d{1,3}`, so it could only ever run once: after the first join
+the prefix is four digits and the pattern stopped matching itself.
+`nobs = 1, 234, 567` became `nobs = 1234, 567` and the row published
+**N = 1 234** — a wrong sample size, not a missing one.
+
+**Refuted, and recorded rather than "fixed":** that `F (1,234)` with an extracted
+space fuses its df pair (it normalizes to `F (1, 234)` and parses as df1 = 1,
+df2 = 234); that Indian grouping `12,34,567` is partially stripped (left
+verbatim); and that a 1:5 lopsided locale contradiction leaves `d = 0,80` reading
+as 0 (it converts to 0.80).
+
+**Reproduced but deliberately left:** `F = 1,234` with no locale evidence reads as
+1234 rather than 1.234 — genuinely undecidable from shape, and it publishes no
+effect size. `RGB = 120,120,120` fuses to `120120120` — reproduced, and worse than
+the reviewer claimed, but the fused token is read as no statistic and the
+neighbouring row is byte-identical with and without it. A scan of the 48
+real-article texts found 71 comma chains of three or more groups and **every one
+is a citation superscript** already protected upstream, so the residue is the
+known undecidable case rather than an observed defect.
+
+The four normalization rules are part of the cross-language contract with
+docpluck, so all three fixes are added to `inst/normalization-spec/` as
+conformance cases (spec 1.2.0 → **1.3.0**, 61 → 69 cases) rather than only to the
+R implementation.
+
+## Measured, not implemented
+
+Two items carried in the v0.7.3 handoff as open work were resolved by measuring
+the premise instead of writing code, and are recorded here so the measurement is
+not re-derived:
+
+- **A magnitude prior for fused comma chains.** Proposed to stop
+  `IDs 101,102,103` becoming `101102103`. Across the 48 texts, all 71 chains of
+  three or more groups are citation superscripts and **every one is already left
+  untouched**; the only string that fuses is a chain opening a document with no
+  preceding word at all. Meanwhile the real large counts in the corpus
+  (`N = 854,720`, `N = 201,939`) convert correctly, and the false-fusion
+  candidates produce 3–6 digit values that a 1e6 prior would not catch. The prior
+  would add risk without removing an observed defect.
+- **Widening the resampling keyword vocabulary** to genomics/network forms.
+  `empirical p` occurs **0** times in the corpus; `rewiring`, `configuration
+  model`, `degree-preserving` and `surrogate data` occur 0 times; `null model`
+  occurs 5 times and **none** is a resampling context (four are an analytic null
+  of random connectivity, one is an SEM baseline), so adding it would suppress a
+  legitimate p-check — the failure the existing "exact test" exclusion exists to
+  prevent. The corpus contains no paper from those literatures, so the gap is
+  *untested* rather than absent: the prerequisite is a corpus addition, not a
+  vocabulary edit.
+
+## Frontend
+
+Four test types added in v0.7.0 — `wts`, `ats`, `brunner_munzel`, `yuen` — shipped
+with **no user-facing explanation**, so the audit table named them and said
+nothing about what they are. The result-contract test had been failing since
+v0.7.0; `npm run lint` was never run for that release.
+
 # effectcheck 0.7.3
 
 **A comma between digits means at least four different things, and the code only
