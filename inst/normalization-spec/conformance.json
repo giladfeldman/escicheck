@@ -1,5 +1,5 @@
 {
-  "spec_version": "1.2.0",
+  "spec_version": "1.3.0",
   "derived_from": "docpluck normalize.py A3a + A3, v2.4.126",
   "description": "Language-neutral conformance corpus for numeric separator normalization. Both the Python (docpluck) and R (effectcheck) implementations must produce `expected` for every `input`. See SPEC.md.",
   "cases": [
@@ -436,6 +436,69 @@
       "expected": "Participants were recruited (N = 1234).",
       "rule": "T1-N-context",
       "note": "REAL failure mode. A space inside an explicitly labelled COUNT is extraction damage, not a separator, so the narrow N/nobs rule repairs it -- while the general rule leaves the same spacing alone in prose. Without this, .pat_doc_N's digit run stopped at the comma and the document N became 1, status OK, with no df-based guard on a z/U/W test."
+    },
+    {
+      "id": "leading-comma-decimal-p-equals",
+      "input": "Der Unterschied war signifikant, t(48) = 2,31, p = ,025, d = 0,74.",
+      "expected": "Der Unterschied war signifikant, t(48) = 2.31, p = .025, d = 0.74.",
+      "rule": "D1b",
+      "note": "A continental paper omits the leading zero exactly as APA does. D1 requires a digit BEFORE the comma, so this p-value matched nothing and was SILENTLY DROPPED (p_reported = NA) while the same clause's t and d converted normally."
+    },
+    {
+      "id": "leading-comma-decimal-p-operator",
+      "input": "Die Wirkung war gross, t(58) = 4,12, p < ,001, d = 1,08.",
+      "expected": "Die Wirkung war gross, t(58) = 4.12, p < .001, d = 1.08.",
+      "rule": "D1b",
+      "note": "The operator form. At v0.7.3 the fuller sentence containing this shape returned ZERO rows."
+    },
+    {
+      "id": "leading-comma-repair-not-a-list",
+      "input": "The effect was reliable, d = 0.74, 95% CI [0.45, 0.89].",
+      "expected": "The effect was reliable, d = 0.74, 95% CI [0.45, 0.89].",
+      "rule": "D1b",
+      "note": "D1b is scoped to a VALUE POSITION -- a comma directly after = < or > with NO space. A list comma and a CI pair both carry a space, so neither can match. Admitting them would fuse real numbers."
+    },
+    {
+      "id": "n-with-extraction-space-two-groups",
+      "input": "A register chi-square, chi2(1) = 8.42, nobs = 1, 234, 567, was significant, p = .004.",
+      "expected": "A register chi-square, chi2(1) = 8.42, nobs = 1234567, was significant, p = .004.",
+      "rule": "T1-N-context",
+      "note": "The repair loop's anchor was \\d{1,3}, so it could only ever run ONCE: after the first join the prefix is four digits and the pattern stopped matching. The row published N = 1234 -- a wrong sample size, not a missing one."
+    },
+    {
+      "id": "tight-ci-pair-not-full-notation",
+      "input": "t(183)=9.733, P<0.001, 95%CI=[7.944,11.984]",
+      "expected": "t(183)=9.733, P<0.001, 95%CI=[7.944,11.984]",
+      "rule": "F1",
+      "note": "REAL corpus string, 11 occurrences in one paper. The full-notation rule matched '7.944,11' as European (period groups, comma decimates) and rebuilt it as '7944.11', so the text read '95%CI=[7944.11.984]' and the interval was DESTROYED -- ciL and ciU both NA, status still OK. In genuine full notation the part after the comma is a TERMINAL fraction and cannot be followed by another decimal point plus digits."
+    },
+    {
+      "id": "tight-ci-pair-short-bounds",
+      "input": "t(181)=12.607, P<0.0001, 95%CI=[2.320,3.182]",
+      "expected": "t(181)=12.607, P<0.0001, 95%CI=[2.320,3.182]",
+      "rule": "F1",
+      "note": "Same class, same paper."
+    },
+    {
+      "id": "tight-effect-then-ci-level",
+      "input": "t(1988.3245)=-1.044, P=0.297, b=-0.008,95%CI=[-0.023,0.007]",
+      "expected": "t(1988.3245)=-1.044, P=0.297, b=-0.008, 95%CI=[-0.023,0.007]",
+      "rule": "F1",
+      "note": "REAL corpus string, same paper. The comma introduces the CI's confidence LEVEL, so '0.008,95' was read as full notation and rebuilt into '0008.95' -- fusing the reported coefficient with the interval's level and destroying the effect size. The `(?!\\.\\d)` guard cannot see this shape because what follows the fraction is '%'."
+    },
+    {
+      "id": "full-notation-still-converts",
+      "input": "Der Wert betrug 1.234,56.",
+      "expected": "Der Wert betrug 1234.56.",
+      "rule": "F1",
+      "note": "The guard must not disarm the rule: a sentence-final period after the fraction is not another decimal, so genuine full notation still converts."
+    },
+    {
+      "id": "full-notation-multi-group-still-converts",
+      "input": "A total of 1.234.567,89 records.",
+      "expected": "A total of 1234567.89 records.",
+      "rule": "F1",
+      "note": "Multi-group European full notation."
     }
   ]
 }

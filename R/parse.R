@@ -25,7 +25,7 @@ utils::globalVariables(c("p_reported", "test_type"))
 #'
 #' @return Character scalar, e.g. "1.0.0".
 #' @keywords internal
-normalization_spec_version <- function() "1.2.0"
+normalization_spec_version <- function() "1.3.0"
 
 #' Spec rules S1-S4 -- spans where a comma between digits is a REAL comma
 #'
@@ -224,7 +224,44 @@ infer_numeric_locale <- function(text) {
   # table row -- "All places 403,669 107,081" matched "669 107,081", read the
   # space as a thousands separator and the comma as a decimal, and produced
   # "403.669107.081", fusing two counts into one fictional number.
-  m <- gregexpr("\\d{1,3}(?:[.\u00A0\u202F']\\d{3})+,\\d+", x, perl = TRUE)
+  #
+  # v0.7.4: the trailing `(?!\.\d)` is what makes "self-identifying" actually
+  # true. Without it the rule fired on a TIGHT CI PAIR -- an interval written
+  # with no space after the comma, which is how nathumbeh_replication_2025
+  # writes all 11 of its intervals:
+  #   "95%CI=[7.944,11.984]"  ->  matched "7.944,11"  ->  "95%CI=[7944.11.984]"
+  # and the interval was DESTROYED (ciL and ciU both NA, status still OK). The
+  # same clause written with a space parses correctly, which is exactly what
+  # made it invisible: the paper's other rows look fine.
+  #
+  # The guard is structural, not locale-based, so it needs no inference: in
+  # genuine full notation the part after the comma is a TERMINAL fraction, and a
+  # terminal fraction cannot be followed by another decimal point and more
+  # digits. "7.944,11.984" therefore cannot be one number in any locale, while
+  # "1.234,56" and a sentence-final "1.234,56." both still match.
+  # (Cross-model review of v0.7.3, Claude Sonnet 5 2026-08-09; the constructed
+  # case was "d = 0.123,456 participants", the corpus supplied the real one.)
+  #
+  # BOTH lookaheads are load-bearing. `(?!\.\d)` alone is defeated by
+  # backtracking: on "7.944,11.984" the engine gives up the second `1` and
+  # matches "7.944,1", whose next character is `1` rather than `.`, so the
+  # rebuild still fires and still corrupts. `(?!\d)` forbids exactly those
+  # shortened alternatives, leaving no match at all. A possessive `\d++` would
+  # do the same in PCRE, but this rule is part of the cross-language spec and
+  # Python's `re` has no possessive quantifier, so the two lookaheads are the
+  # portable form.
+  #
+  # `(?!\s*%)` is the SECOND shape of the same defect, found in the same paper
+  # by inspecting what the first guard left behind:
+  #   "=-0.008,95%CI=[-0.023,0.007]"  ->  "=-0008.95%CI=[...]"
+  # Here the comma introduces the CI's confidence LEVEL, so the reported
+  # coefficient was fused with "95" and the effect size destroyed. `(?!\.\d)`
+  # cannot see it because what follows the fraction is `%`. A European
+  # percentage written in full notation ("1.234,56%") is refused as collateral;
+  # that only leaves the token verbatim, which is the conservative direction,
+  # and such a value is not a statistic this parser reads.
+  m <- gregexpr("\\d{1,3}(?:[.\u00A0\u202F']\\d{3})+,\\d+(?!\\d)(?!\\.\\d)(?!\\s*%)",
+                x, perl = TRUE)
   regmatches(x, m) <- lapply(regmatches(x, m), function(v) {
     if (!length(v)) return(v)
     sub(",", ".", gsub("[.\u00A0\u202F ']", "", v), fixed = TRUE)
@@ -308,12 +345,25 @@ infer_numeric_locale <- function(text) {
   # is a reference volume or a list, and the general rule above must not touch
   # it. Without this, .pat_doc_N's digit run stopped at the comma and the
   # document N became 1, with status OK and no df-based guard on a z/U/W test.
-  repeat {
-    y <- gsub("(\\b[Nn](?:obs|\\d)?\\s*=\\s*\\d{1,3}),\\s+(\\d{3}\\b)",
-              "\\1\\2", x, perl = TRUE)
-    if (identical(y, x)) break
-    x <- y
-  }
+  #
+  # v0.7.4: this was a `repeat` loop over a gsub anchored on `\d{1,3}`, and it
+  # could only ever run ONCE -- after the first join the prefix is four digits
+  # and the pattern no longer matches itself. "nobs = 1, 234, 567" stopped at
+  # "nobs = 1234, 567" and the row published N = 1234: a wrong sample size, not
+  # a missing one. (Cross-model review of v0.7.3, Codex 2026-08-09, reproduced.)
+  #
+  # It now matches the WHOLE labelled run in one go and strips the separators
+  # inside it. Deliberately NOT done by widening the anchor to `\d{1,3}(?:\d{3})*`
+  # -- the obvious repair, and wrong: that also admits a run whose FIRST group is
+  # already four digits, so "N = 1234, 567 of whom were female" would fuse into
+  # N = 1234567, a case v0.7.3 correctly refused. The start anchor stays exactly
+  # as strict as it was; only the continuation is new.
+  m <- gregexpr("\\b[Nn](?:obs|\\d)?\\s*=\\s*\\d{1,3}(?:,[ \\t]+\\d{3})+(?!\\d)",
+                x, perl = TRUE)
+  regmatches(x, m) <- lapply(regmatches(x, m), function(v) {
+    if (length(v) == 0L) return(v)
+    gsub(",[ \\t]+(\\d{3})", "\\1", v, perl = TRUE)
+  })
   x
 }
 
@@ -637,6 +687,26 @@ normalize_text <- function(x) {
     paste0("(?<![a-zA-Z,0-9.])(?<![A-Z][\\[\\(])(\\d+),(\\d+)(?!\\d)")
   }
   x <- gsub(.d1_pat, "\\1.\\2", x, perl = TRUE)
+
+  # v0.7.4 (spec rule D1b): a European decimal with NO INTEGER PART.
+  #
+  # D1 above requires at least one digit before the comma -- `(\d+),(\d+)`. But
+  # a continental paper omits the leading zero exactly as APA does: "p = ,025"
+  # is how "p = .025" is written, and "p < ,001" is how "p < .001" is written.
+  # Neither matched anything, so the p-value was SILENTLY DROPPED while the same
+  # clause's t and d converted normally:
+  #   "t(48) = 2,31, p = ,025, d = 0,74"  ->  p_reported = NA, row still WARN
+  # and the fuller form with "p < ,001" returned ZERO rows. Found by the
+  # cross-model review of v0.7.3 (Codex, 2026-08-09) and reproduced.
+  #
+  # The guard is the VALUE POSITION, not the locale: a comma sitting directly
+  # after `=`, `<` or `>` with no space and no digits before it cannot be a list
+  # separator or a thousands group -- there is nothing on its left to group. So
+  # no locale inference is needed and none is used, which also means an English
+  # document carrying a stray continental value is repaired rather than dropped.
+  # Requiring NO space after the comma is what keeps list and CI shapes out:
+  # "CI [0.45, 0.89]" and "F(1, 30)" both have one.
+  x <- gsub("([=<>]\\s*),(\\d+)(?!\\d)", "\\1.\\2", x, perl = TRUE)
 
   # Structural spans go back untouched.
   x <- .restore_structural(x, .prot$store)
@@ -1170,7 +1240,50 @@ parse_text <- function(text, context_window_size = 2) {
   # Improved sentence splitting: handle abbreviations, decimals, etc.
   # Split on period/exclamation/question mark followed by space and capital letter or end
   # But not if period is part of number or abbreviation
-  chunks <- unlist(strsplit(text_normalized, "(?<=[\\.!?])\\s+(?=[A-Z]|$)", perl = TRUE))
+  #
+  # v0.7.4: a sentence that ENDS at a blank line and is followed by a line
+  # opening with a DIGIT also ends a chunk. Without it the splitter had no
+  # notion of a paragraph, so a two-column PDF whose columns the extractor
+  # merged stayed ONE chunk and the parser paired an effect size from one column
+  # with a test statistic from another -- spps.txt location 216 shipped
+  #   "...was d = 0.33, 95% CI [0.09, 0.57].\n\n0.75, 95% CI = [...], t = 7.47"
+  # as a single t row carrying stat_value 7.47 and effect_reported 0.33, graded
+  # g_ind = 0.379 against N = 1555. Both numbers are in the article; the PAIRING
+  # is fabricated. The existing rule could not break it for one reason only: its
+  # `(?=[A-Z]|$)` lookahead requires a capital, and column B resumes with a
+  # digit. So the fix is exactly that -- widen the LOOKAHEAD, keep everything
+  # else, and require a blank line for the digit case because "sentence, space,
+  # digit" on one line is ordinary prose ("...was reliable. 30% of trials...").
+  #
+  # WHY NOT A GENERAL PARAGRAPH RULE. The first version of this fix dropped the
+  # `(?<=[\.!?])` anchor and split on ANY blank line followed by a capital or a
+  # digit -- the shape a two-column merge takes when the extractor truncates a
+  # column mid-sentence. Two independent cross-model reviews converged on the
+  # same class of counterexample, six of which reproduced locally:
+  #   "..., p = .026, d = 0.75\n\n95% CI [0.09, 1.41]."  -> t row loses its CI
+  #   "..., p = .026\n\nCohen's d = 0.75, ..."           -> t row loses its effect
+  #   "The effect was medium, d = 0.\n\n65, 95% CI ..."  -> effect lost mid-number
+  #   "t(58) = 3.45, p = .03\n\n1, ..."                  -> p truncated to .03
+  #   "N = 1\n\n204 participants, ..."                   -> N truncated to 1
+  #   "..., d = 0.65, 95%\n\nCI [0.40, 0.90], t(58)..."  -> CI severed from its d
+  # and the whole-corpus diff found the same class in the wild: collabra.37122's
+  # flattened appendix table separates a chi-square from its own
+  # "OR = 0.99, 95% CI [0.77, 1.27]" cell by a blank line, and the general rule
+  # dropped that odds ratio from the output entirely. Requiring the boundary to
+  # sit after sentence-ending punctuation refuses every one of them, because in
+  # each case the character before the blank line is a digit, a `%`, or a comma
+  # -- text that is mid-statement by construction.
+  #
+  # `(?<!\d\.)` is the one guard the anchor does not supply on its own: a period
+  # preceded by a digit is a DECIMAL POINT, not the end of a sentence, so
+  # "d = 0.\n\n65" must not split even though `.` satisfies the anchor. This is
+  # the same family as the v0.6.20 bridging invariants -- a rule that separates
+  # or discards a reported value is the worst defect class in this parser.
+  chunk_boundary <- paste0(
+    "(?<=[\\.!?])\\s+(?=[A-Z]|$)",                        # sentence boundary
+    "|(?<!\\d\\.)(?<=[\\.!?])\\n[ \\t]*\\n\\s*(?=[0-9])"  # ... resuming on a digit
+  )
+  chunks <- unlist(strsplit(text_normalized, chunk_boundary, perl = TRUE))
   chunks <- chunks[nchar(trimws(chunks)) > 0]
 
   # v0.5.2: an optional subscript label (gof / Pearson / Yates / LR / MH / Wald)

@@ -101,6 +101,27 @@ The lookahead is deliberately restrictive. Broadening it to `[^0-9a-zA-Z]`
 The `\.(?!\d)` alternative admits a sentence-final decimal (`d = 0,87.`) while
 still refusing `1,234.567`.
 
+## Rule D1b — decimal comma with no integer part (runs after D1)
+
+```
+([=<>]\s*),(\d+)(?!\d)
+```
+→ `\1.\2`
+
+A continental paper omits the leading zero exactly as APA does: `p = ,025` is
+how `p = .025` is written, and `p < ,001` is how `p < .001` is written. D1
+requires at least one digit before the comma, so neither matched anything — and
+the p-value was **silently dropped** while the same clause's `t` and `d`
+converted normally. `t(48) = 2,31, p = ,025, d = 0,74` yielded `p_reported = NA`
+with the row still reported; the fuller form carrying `p < ,001` yielded **zero
+rows**. Found by cross-model review of v0.7.3 (2026-08-09) and reproduced.
+
+The guard is the **value position**, not the locale. A comma sitting directly
+after `=`, `<` or `>` with nothing on its left cannot be a list separator or a
+thousands group — there is nothing there to group — so no locale inference is
+needed and none is used. Requiring **no space** after the comma is what keeps
+list and CI shapes out: `CI [0.45, 0.89]` and `F(1, 30)` both have one.
+
 ## Residual ambiguity — what neither rule can decide
 
 `M = 1,234` is genuinely undecidable from the token alone: a mean of 1234, or a
