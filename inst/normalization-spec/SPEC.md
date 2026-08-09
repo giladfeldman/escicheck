@@ -1,6 +1,6 @@
 # Numeric separator normalization spec
 
-**Spec version:** `1.0.0`
+**Spec version:** `1.4.0`
 **Derived from:** docpluck `normalize.py` steps A3a + A3, as of docpluck v2.4.126
 **Status:** proposed to docpluck as the canonical definition (see
 `REQUEST_TO_DOCPLUCK_normalization_spec.md`). Until docpluck adopts it, this
@@ -121,6 +121,41 @@ after `=`, `<` or `>` with nothing on its left cannot be a list separator or a
 thousands group — there is nothing there to group — so no locale inference is
 needed and none is used. Requiring **no space** after the comma is what keeps
 list and CI shapes out: `CI [0.45, 0.89]` and `F(1, 30)` both have one.
+
+## Rule L3 — a CONFLICTED document resolves nothing (added 1.4.0)
+
+Locale inference has **three** outcomes, not two, and an implementation that
+tests only "is the decimal mark a comma?" collapses two of them:
+
+| outcome | meaning | `decimal_mark` | T1 / D1 behaviour on `d,ddd` |
+|---|---|---|---|
+| `decisive` | one convention attested | `","` or `"."` | resolve per the convention |
+| `none` | no evidence either way | `NA` — *absent* | apply the documented thousands default (L2) |
+| `conflict` | BOTH attested, neither dominant | `NA` — *unknown* | **resolve nothing; preserve verbatim** |
+
+`conflict` and `none` both carry `decimal_mark = NA` and they mean opposite
+things. `none` says "no reason to depart from the default"; `conflict` says "the
+document actively contradicts itself." Treating the second as the first
+normalizes a document containing European decimals as if it were decisively US.
+
+**Both halves are required.** If T1 steps aside for a conflicted document but D1
+still converts, "leave it alone" silently becomes "call it a European decimal" —
+merely the other unfounded guess. The token is preserved only when every rule
+that could touch it steps aside.
+
+Worked example (effectcheck v0.7.5, reproduced against the unfixed code). A
+document mixing `p = .035, d = 0.80` with
+`Welch's correction gave t(2,758) = 3,21, d = 0,45` infers `conflict`. Reading it
+as US stripped the comma and published `df = 2758`, `N = 2760` and a **computed**
+`d = 0.122` against a reported `0.45` — a false WARN carrying a fabricated effect
+size, on a correctly reported result. Under `decisive` European the identical
+string yields "cannot verify" with no computed value; `conflict` must reach that
+same outcome.
+
+This rule adds no new *transformation*. It only states which of the three
+outcomes licenses one, and it exists because the third state had been computed
+and never read — a signal nothing consults reads as handled at every call site
+that mentions it.
 
 ## Residual ambiguity — what neither rule can decide
 

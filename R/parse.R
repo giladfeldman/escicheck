@@ -25,7 +25,7 @@ utils::globalVariables(c("p_reported", "test_type"))
 #'
 #' @return Character scalar, e.g. "1.0.0".
 #' @keywords internal
-normalization_spec_version <- function() "1.3.0"
+normalization_spec_version <- function() "1.4.0"
 
 #' Spec rules S1-S4 -- spans where a comma between digits is a REAL comma
 #'
@@ -202,6 +202,50 @@ infer_numeric_locale <- function(text) {
   }
 }
 
+#' Is the comma's role in this document still unestablished?
+#'
+#' v0.7.5. THE single predicate every locale-gated rule asks. Three rules asked
+#' it independently -- `.apply_thousands_protect()`, the test-statistic
+#' paren pre-strip, and D1's `.amb_shape` exclusion -- and all three wrote
+#' `identical(decimal_mark, ",")`, which is only two of the three states.
+#'
+#' `infer_numeric_locale()` returns THREE outcomes, and it sets `decimal_mark`
+#' to NA for two of them:
+#'   "decisive"  -- one convention attested; decimal_mark is "," or "."
+#'   "none"      -- no evidence either way; decimal_mark NA. The US-style
+#'                  thousands default applies, which is the right prior.
+#'   "conflict"  -- BOTH conventions attested and neither dominant; decimal_mark
+#'                  NA to say *unknown*, not *absent*.
+#' Testing the decimal mark alone collapses "conflict" into "none", so a document
+#' with European decimals in it was normalized as if it were decisively US.
+#'
+#' REPRODUCED (2026-08-09): a document mixing "p = .035, d = 0.80" with "Welch's
+#' correction gave t(2,758) = 3,21, d = 0,45" infers `conflict`, then stripped
+#' the comma from `t(2,758)` and published df = 2758, N = 2760 and a COMPUTED
+#' d = 0.122 against a reported 0.45 -- a false WARN, carrying a fabricated
+#' effect size, against a correctly reported result. Under the decisive-European
+#' branch the identical string yields status NOTE with no computed value. That
+#' is the honest outcome and conflict now reaches it.
+#'
+#' Note this is the OPPOSITE of a guess: when the role is unresolved every rule
+#' steps aside and the token survives verbatim, so the row carries the ambiguity
+#' instead of a guess dressed as a value. Both halves are required -- if T1 steps
+#' aside but D1 still converts, "leave it alone" silently becomes "call it a
+#' European decimal", which is merely the other unfounded guess.
+#'
+#' 0 of the 48 validation-corpus papers infer `conflict`, so the whole-corpus
+#' diff for this change is empty by construction. That is the evidence it is
+#' safe, not a reason to have skipped it: a computed signal that nothing reads
+#' is a trap, because it reads as handled at every site that mentions it.
+#'
+#' @param locale The list returned by `infer_numeric_locale()`, or NULL
+#' @return TRUE when no rule may act on a bare digit-comma-digit token
+#' @keywords internal
+.locale_comma_unresolved <- function(locale) {
+  !is.null(locale) &&
+    (identical(locale$decimal_mark, ",") || identical(locale$confidence, "conflict"))
+}
+
 #' Spec rules F1/F2 -- full notation, where BOTH marks are present
 #'
 #' "1.234,56" and "1,234.56" are self-identifying: seeing both separators in one
@@ -296,7 +340,7 @@ infer_numeric_locale <- function(text) {
   # here would be wrong -- so leave the token alone for the decimal rule and the
   # ambiguity flag to handle. The two conventions are mutually exclusive, which
   # is what makes one observation anywhere in the document sufficient.
-  if (!is.null(locale) && identical(locale$decimal_mark, ",")) return(x)
+  if (.locale_comma_unresolved(locale)) return(x)
   # The boundary set includes "/" for clinical-trial arm counts, which are
   # written "1,234/5,678 (21.7%) versus ...". Without it the first count kept its
   # comma, the arm regex's \d+ stopped at the comma, and arm1_events came back
@@ -590,7 +634,7 @@ normalize_text <- function(x) {
   # integer df of 2758, discarding a legitimate Welch df of 2.758 -- which is
   # the E8 incident reopened through the one rule the pass did not reach.
   # ============================================================================
-  for (.i in if (identical(.loc$decimal_mark, ",")) integer(0) else 1:3) {
+  for (.i in if (.locale_comma_unresolved(.loc)) integer(0) else 1:3) {
     # t(d,ddd), H(d,ddd), r(d,ddd), Z(d,ddd): single df with thousand separator
     # \s* after comma handles docpluck A4 spacing: "t(2, 758)" as well as "t(2,758)"
     x <- gsub(
@@ -678,9 +722,16 @@ normalize_text <- function(x) {
   # aside for it; D1 must too, or "leave it alone" silently becomes "call it a
   # decimal". Neither reading is knowable, so the token is preserved verbatim
   # and the row carries the ambiguity rather than a guess dressed as a value.
+  #
+  # v0.7.5: the same applies under `confidence == "conflict"`, and BOTH halves
+  # are needed. T1 above now steps aside for a conflicted document, but if D1
+  # still converted, "leave it alone" would become "call it a European decimal"
+  # -- the opposite guess, equally unfounded. The token is preserved verbatim
+  # only when neither rule touches it.
   .amb_shape <- "\\d{1,3},\\d{3}(?!\\d)"
   .eu_locale <- identical(.loc$decimal_mark, ",")
-  .d1_pat <- if (.eu_locale) {
+  .amb_locale <- .locale_comma_unresolved(.loc)
+  .d1_pat <- if (.amb_locale) {
     paste0("(?<![a-zA-Z,0-9.])(?<![A-Z][\\[\\(])",
            "(?!", .amb_shape, ")(\\d+),(\\d+)(?!\\d)")
   } else {
@@ -1122,6 +1173,292 @@ global_n_from_candidates <- function(ns) {
   }
 }
 
+#' Spelled-out integers admissible as a resample count
+#'
+#' v0.7.5. Bounded on purpose: only `<unit> <scale>` compounds, no general
+#' English-number grammar. The corpus supplies exactly one shape --
+#' `"For permutation tests, ten thousand random shuffles of labels ... were
+#' sampled"` (PNAS 10.1073/pnas.2404157121) -- and a general number-word reader
+#' would be a large surface for the benefit of one form. Everything here must be
+#' a value an author would plausibly choose for B.
+#' @keywords internal
+.RESAMPLE_WORD_UNITS <- c(
+  one = 1, two = 2, three = 3, four = 4, five = 5, six = 6, seven = 7,
+  eight = 8, nine = 9, ten = 10, twenty = 20, thirty = 30, forty = 40,
+  fifty = 50, sixty = 60, seventy = 70, eighty = 80, ninety = 90
+)
+
+#' @rdname dot-RESAMPLE_WORD_UNITS
+#' @keywords internal
+.RESAMPLE_WORD_SCALES <- c(hundred = 100, thousand = 1000, million = 1e6)
+
+#' Resample-count declarations, as one shared definition
+#'
+#' v0.7.5. Used by BOTH the per-clause scan in `parse_text()` and the
+#' document-level Methods prescan `.doc_resampling_b()`. One definition, no
+#' drift -- the v0.5.9 `chi_tok` lesson, where a token duplicated across four
+#' parse sites silently diverged and one copy stopped recognising a form the
+#' others accepted.
+#'
+#' Returns `NA_real_` unless the string yields a plausible B (>= 50; below that
+#' the clause is far likelier to be a sample size or an item count than a
+#' resampling specification).
+#'
+#' THE SEPARATOR HANDLING IS LOAD-BEARING. `normalize_text()` has already run
+#' its decimal-comma conversion, so `"10,000 permutations"` arrives as
+#' `"10.000 permutations"` and `numify_int("10.000")` is 10. A resample count is
+#' always an integer, so EVERY "." and "," inside it is a thousands separator:
+#' strip them all rather than parse the number as written. Taking it at face
+#' value would set B = 10, a floor of 1/11 = .09, and false-flag essentially
+#' every permutation p in the corpus.
+#'
+#' WHAT IS DELIBERATELY REFUSED. A bare `<n> samples` / `<n> draws` never
+#' counts, even inside a resampling sentence. Cross-model review (2026-08-07,
+#' reproduced) showed `"Across 500 samples, a permutation test with 10,000
+#' permutations ..."` binding B = 500 and then FALSE-FLAGGING the p as below
+#' `1/(B+1) = 0.002` -- a wrong accusation built on a count scraped from the
+#' wrong clause. `iterations` / `replications` / `simulations` are admitted with
+#' a qualifier because they are not participant words; `samples` and `draws`
+#' are, so they stay out.
+#'
+#' @param s A single string -- a clause, or one Methods sentence
+#' @return A single numeric B, or `NA_real_`
+#' @keywords internal
+.resample_count_in <- function(s) {
+  if (is.null(s) || length(s) == 0L || is.na(s) || !nzchar(s)) return(NA_real_)
+
+  num <- "(\\d[\\d,.]*\\d|\\d)"
+  qual <- "(?:random|bootstrap\\w*|permutation|permuted|monte[- ]?carlo|resampl\\w*|shuffl\\w*)"
+
+  # A resample count is a positive INTEGER, so every "." and "," inside the
+  # matched literal is a thousands separator and gets stripped. That rule is
+  # correct and necessary (see the header), and it is also a loaded gun: applied
+  # to a DECIMAL it manufactures a large integer out of a small fraction. Caught
+  # in the corpus by this prescan's own first draft, which read
+  #   "(b=0.81, z=2.80, p=0.005, OR=2.25, CI 1..." (brjpsych_1)
+  # as B = 81 -- a regression coefficient becoming a Monte-Carlo floor of
+  # 1/82 = 0.0122, which would have falsely flagged every p below .0122 in that
+  # paper as unattainable. So a literal only counts when its SHAPE is integral:
+  # bare digits, or digit groups where every group after the first is exactly
+  # three wide. "10.000" and "5,000" pass; "0.81" and "2.25" cannot.
+  integral_shape <- "^\\d+$|^\\d{1,3}(?:[,.]\\d{3})+$"
+  # Nouns that MEAN a resample. No qualifier needed.
+  noun_specific <- "(?:permutations?|resamples?|replicates?|bootstraps?|shuffles?|permutation\\s+samples?)"
+  # Nouns that mean a resample only in context, and are not participant words.
+  noun_qualified <- "(?:iterations?|replications?|simulations?|samples?|draws?)"
+  # ... and the subset admissible when the qualifier is elsewhere in the
+  # sentence rather than adjacent. `samples`/`draws` are excluded here: that is
+  # the exact form the 2026-08-07 false accusation came in.
+  noun_loose <- "(?:iterations?|replications?|simulations?)"
+
+  word_unit <- paste0("(?:", paste(names(.RESAMPLE_WORD_UNITS), collapse = "|"), ")")
+  word_scale <- paste0("(?:", paste(names(.RESAMPLE_WORD_SCALES), collapse = "|"), ")")
+
+  # A resampling word anywhere in the string licenses the loose noun form.
+  # "cluster-based permutation testing (1000 iterations at a threshold of 0.05)"
+  # (eLife 10.7554/eLife.87747) states its B in a parenthesis whose noun is
+  # generic and whose qualifier sits before the bracket, so no adjacency rule
+  # can reach it.
+  resamp_word <- paste0("\\b(?:permut\\w*|resampl\\w*|bootstrap\\w*|monte[- ]?carlo|",
+                        "shuffl\\w*|randomi[sz]ation)\\b")
+  has_resampling_word <- grepl(paste0("(?i)", resamp_word), s, perl = TRUE)
+
+  # The qualifier is OPTIONAL before an unambiguous resample noun: the PNAS
+  # declaration is "ten thousand RANDOM shuffles", with the qualifier sitting
+  # between the count and its noun. Requiring adjacency there missed the one
+  # paper this whole prescan exists for.
+  digit_pats <- c(
+    # `B = <n>` is the one form with NO noun to anchor it, so it carries three
+    # guards instead of one. All three were earned against a real corpus string:
+    #   * case-SENSITIVE uppercase B -- lowercase `b =` is the unstandardized
+    #     regression coefficient, in nearly every paper in the corpus;
+    #   * the integral-shape guard above -- it is what rejects `b=0.81`, which
+    #     the first draft of this function read as B = 81 (brjpsych_1);
+    #   * a resampling word required in the SAME sentence -- without it,
+    #     "Grade A+=80% or above, A=70-79%, B=60-69%, C=50-59%" binds B = 60
+    #     off a GRADING SCALE (bmcpsych_cbt_burnout_2025, measured). A grading
+    #     scale in a Methods section is entirely ordinary, so the positional
+    #     scope does not protect against this one -- only the semantic guard.
+    # A floor of 1/61 would have called every p below .0164 in that paper
+    # unattainable. Every guard here exists to prevent a FALSE ACCUSATION
+    # against a correctly reported p-value.
+    # ... and a FOURTH guard: nothing else may claim the number. A bare `B = n`
+    # is a resample count only when no noun follows it. Cross-model review
+    # (Codex/gpt-5.5, 2026-08-09, REPRODUCED) found
+    #   "Bootstrap analyses were not used; vitamin B = 60 mg was administered."
+    # binding B = 60 -- the sentence-level resampling word is satisfied by a
+    # NEGATED mention, and `vitamin B` is not a resample count in any reading.
+    # Detecting negation is fragile; requiring the number to stand alone is not.
+    # This refuses "B = 60 mg", "B = 60 patients", "B = 60 years" and accepts
+    # "B = 10000," / "B = 10000." / "B = 10000)". A genuine "B = 10,000
+    # permutations" is refused HERE and caught by the noun-anchored pattern
+    # below, which is the stronger evidence anyway.
+    # The trailing guard refuses a letter AND a range/unit continuation. Both
+    # halves were earned: `-` catches the UNSPACED grading scale "B=60-69%",
+    # which the space-and-letter form alone let through (cross-model review,
+    # Claude Sonnet, 2026-08-09, REPRODUCED -- it bound B = 60 exactly as the
+    # spaced form once did).
+    if (has_resampling_word) {
+      paste0("\\bB\\s*=\\s*", num, "\\b(?!\\s*[-/%]|\\s+[A-Za-z])")
+    },
+    # EVERY branch requires a resampling word in the sentence, including this
+    # one. `noun_specific` was ungated on the theory that its nouns are
+    # unambiguous; `replicates` is not. Cross-model review (Claude Sonnet,
+    # 2026-08-09, REPRODUCED): "Each condition was tested with 60 replicates."
+    # -- an ordinary wet-lab sentence with no resampling anywhere -- bound
+    # B = 60, and in a Methods section that becomes the document-level count,
+    # producing a floor of 1/61 = .0164 that would falsely flag any correctly
+    # reported permutation p below .0164 elsewhere in the same paper.
+    #
+    # The gate costs nothing on the genuine cases because the unambiguous nouns
+    # SATISFY IT THEMSELVES: "permutations", "resamples", "shuffles" and
+    # "bootstrapped" all match `resamp_word`. Only `replicates` did not -- which
+    # is precisely the word that should not have been in this list.
+    if (has_resampling_word) paste0("(?i)\\b", num, "\\s+(?:", qual, "\\s+)?", noun_specific, "\\b"),
+    if (has_resampling_word) paste0("(?i)\\b", num, "\\s+", qual, "\\s+", noun_qualified, "\\b"),
+    # The loose noun requires the resampling word to come BEFORE the number and
+    # nearby -- not merely somewhere in the same sentence. Without the ordering
+    # and distance constraint, "We enrolled 240 iterations of the survey; a
+    # permutation test followed later." bound B = 240 (same review, REPRODUCED).
+    # The real case this alternative exists for keeps working because its
+    # qualifier does precede its count: "cluster-based permutation testing
+    # (1000 iterations at a threshold of 0.05)".
+    if (has_resampling_word) {
+      paste0("(?i)\\b", resamp_word, "[^.;]{0,40}?\\b", num, "\\s+", noun_loose, "\\b")
+    }
+  )
+  for (bp in digit_pats) {
+    m <- stringr::str_match(s, bp)
+    if (!is.na(m[1, 2]) && grepl(integral_shape, m[1, 2])) {
+      b_val <- suppressWarnings(as.numeric(gsub("[,.]", "", m[1, 2])))
+      if (!is.na(b_val) && b_val >= 50) return(b_val)
+    }
+  }
+
+  # Spelled-out counts. Same noun requirements as the digit forms above, so
+  # "ten thousand participants" can never become a resample count.
+  word_pats <- c(
+    paste0("(?i)\\b(", word_unit, ")\\s+(", word_scale, ")\\s+(?:", qual, "\\s+)?", noun_specific, "\\b"),
+    paste0("(?i)\\b(", word_unit, ")\\s+(", word_scale, ")\\s+", qual, "\\s+", noun_qualified, "\\b"),
+    if (has_resampling_word) paste0("(?i)\\b(", word_unit, ")\\s+(", word_scale, ")\\s+", noun_loose, "\\b")
+  )
+  for (wp in word_pats) {
+    m <- stringr::str_match(s, wp)
+    if (!is.na(m[1, 2])) {
+      b_val <- .RESAMPLE_WORD_UNITS[[tolower(m[1, 2])]] * .RESAMPLE_WORD_SCALES[[tolower(m[1, 3])]]
+      if (!is.na(b_val) && b_val >= 50) return(as.numeric(b_val))
+    }
+  }
+
+  NA_real_
+}
+
+#' Section headings that open a Methods / Analysis region
+#' @keywords internal
+.pat_methods_heading <- paste0(
+  "(?im)^[ \\t]*(?:\\d+[.)]?[ \\t]*)?(?:materials?\\s+and\\s+methods?|methods?|",
+  "statistical\\s+analys[ei]s|data\\s+analys[ei]s|statistical\\s+approach|",
+  "analytic\\s+(?:strategy|plan)|analysis\\s+plan)[ \\t]*:?[ \\t]*$"
+)
+
+#' Section headings that CLOSE a Methods / Analysis region
+#'
+#' Any heading NOT in this list leaves the Methods region open, so an omission
+#' silently widens the scope -- the failure direction this prescan exists to
+#' avoid. Cross-model review (Codex/gpt-5.5, 2026-08-09, REPRODUCED) found
+#' `Appendix` missing: a `Methods` heading followed later by an `Appendix`
+#' section let a count from the appendix bind as the document-level B.
+#' @keywords internal
+.pat_other_heading <- paste0(
+  "(?im)^[ \\t]*(?:\\d+[.)]?[ \\t]*)?(?:results?|discussion|introduction|abstract|",
+  "references?|bibliography|conclusions?|acknowledge?ments?|",
+  "supplementary\\s+\\w+|general\\s+discussion|appendix(?:\\s+\\w+)?|appendices|",
+  "supporting\\s+information|data\\s+availability|",
+  "(?:author\\s+)?contributions?|funding|conflicts?\\s+of\\s+interest|",
+  "competing\\s+interests?|limitations?|ethics(?:\\s+statement)?)[ \\t]*:?[ \\t]*$",
+  # ... and ANY heading-like line, whatever it is called.
+  #
+  # A vocabulary is the wrong shape for a CLOSING list: every heading missing
+  # from it silently WIDENS the Methods region, which is the failure direction
+  # this prescan exists to avoid. Cross-model review (Claude Sonnet, 2026-08-09,
+  # REPRODUCED): a subsection heading left the region open and a count after it
+  # bound as the document-level B.
+  #
+  # It must be STRUCTURAL rather than numeric, because `normalize_text()` has
+  # already stripped section numbers by this point -- "3.1 Sample
+  # Characteristics" arrives as "Sample Characteristics", so a rule anchored on
+  # the numbering can never fire. (Verified, not assumed: a first draft matched
+  # on `\\d+(\\.\\d+)*` and the leak persisted.)
+  #
+  # A heading here is a SHORT STANDALONE LINE: blank line on both sides, starts
+  # with a capital, no sentence-ending punctuation, and no "=" so a displayed
+  # statistic is never mistaken for one. Closing the region EARLY is the safe
+  # error -- it narrows scope, and the worst case is the status quo of not
+  # finding a B at all.
+  "|(?m)(?<=\\n\\n)[ \\t]*[A-Z][^=.!?\\n]{0,60}(?=\\n\\n)"
+)
+
+#' Document-level resample count, scoped to the Methods / Analysis section
+#'
+#' v0.7.5 (handoff Issue C). Authors declare B ONCE, in Methods, and never
+#' restate it beside each reported p -- so the per-clause scan populated
+#' `resampling_B` for **zero rows in the entire 48-paper validation corpus**,
+#' and the Monte-Carlo floor check shipped in v0.6.22 (`p >= 1/(B+1)`,
+#' Phipson & Smyth 2010) never fired once. A check that cannot fire is
+#' indistinguishable from one that passes.
+#'
+#' WHY NOT A WIDER CONTEXT WINDOW. That is how the v0.6.18 Welch N-leak
+#' happened: a neighbouring sentence's "Welch's" leaked onto a paired `t(131)`
+#' and N went 132 -> 403. A document-level default with its OWN provenance
+#' string is a different mechanism -- the consumer can see where the number came
+#' from and discount it -- and it is scoped twice over:
+#'
+#'   1. POSITIONALLY, to text inside a Methods / Analysis section. A count in
+#'      Results or in a Discussion citing another study never binds.
+#'   2. SEMANTICALLY, to a sentence that itself names the resampling procedure.
+#'      `.resample_count_in()` enforces the noun and qualifier requirements.
+#'
+#' When no Methods heading is detectable the function returns `NA_real_` rather
+#' than falling back to a whole-document scan. A silent widening of scope on the
+#' documents where scoping is hardest is precisely the wrong failure direction:
+#' a wrong B produces a wrong FLOOR, which is a false accusation against a
+#' correctly reported p-value.
+#'
+#' @param text_normalized The full document text, already `normalize_text()`d
+#' @return A single numeric B, or `NA_real_`
+#' @keywords internal
+.doc_resampling_b <- function(text_normalized) {
+  if (is.null(text_normalized) || length(text_normalized) == 0L ||
+      is.na(text_normalized) || !nzchar(text_normalized)) {
+    return(NA_real_)
+  }
+
+  starts <- stringr::str_locate_all(text_normalized, .pat_methods_heading)[[1]]
+  if (nrow(starts) == 0L) return(NA_real_)
+  closers <- stringr::str_locate_all(text_normalized, .pat_other_heading)[[1]]
+  total <- nchar(text_normalized)
+
+  for (i in seq_len(nrow(starts))) {
+    from <- starts[i, "end"] + 1L
+    # A Methods region runs to the next section heading of ANY kind. Papers
+    # order sections differently -- this PNAS puts Materials and Methods AFTER
+    # Discussion -- so "first Methods to first Results" is not a usable rule.
+    after <- c(closers[closers[, "start"] > from, "start"],
+               starts[starts[, "start"] > from, "start"])
+    to <- if (length(after)) min(after) - 1L else total
+    if (to <= from) next
+
+    region <- substr(text_normalized, from, to)
+    # One sentence at a time: the count and the resampling word must co-occur in
+    # the SAME sentence, never merely in the same section.
+    for (sentence in unlist(strsplit(region, "(?<=[\\.!?])\\s+", perl = TRUE))) {
+      b_val <- .resample_count_in(sentence)
+      if (!is.na(b_val)) return(b_val)
+    }
+  }
+  NA_real_
+}
+
 #' Count decimal places in the raw matched string
 #'
 #' Counts trailing digits after the decimal point in a numeric string,
@@ -1199,6 +1536,9 @@ parse_text <- function(text, context_window_size = 2) {
       resampling_inference = logical(0),
       resampling_method = character(0),
       resampling_B = numeric(0),
+      resampling_B_source = character(0),
+      p_reported_secondary = numeric(0),
+      p_secondary_symbol = character(0),
       resampling_is_permutation = logical(0),
       p_reported_is_resampling = logical(0),
       N = numeric(0),
@@ -1279,9 +1619,49 @@ parse_text <- function(text, context_window_size = 2) {
   # "d = 0.\n\n65" must not split even though `.` satisfies the anchor. This is
   # the same family as the v0.6.20 bridging invariants -- a rule that separates
   # or discards a reported value is the worst defect class in this parser.
+  # v0.7.5: a BULLETED list item is a sentence boundary too. The existing rule
+  # needs a capital (or a digit, after a blank line) immediately after the
+  # whitespace, and a list marker sits in between, so consecutive bullets stayed
+  # ONE chunk and only the FIRST statistic in the list was ever extracted.
+  # ieee_access_alt prints three checkable results as three bullets and yielded
+  # one row. The markers include U+FFFD because that is what the extractor
+  # actually delivers here -- the bullet glyph is already lost upstream, and a
+  # rule that only knew about U+2022 would not fire on the real text.
+  #
+  # This is strictly the existing capital-letter rule plus an intervening marker:
+  # it keeps the `(?<=[\.!?])` anchor that refused all seven of the v0.7.4
+  # counterexamples, and it still requires a capital after. It therefore cannot
+  # split inside a number or between a statistic and its own effect size, CI,
+  # p-value or N (invariant 6) -- the character before the boundary is
+  # sentence-ending punctuation by construction, and a marker glyph never appears
+  # inside a reported quantity.
+  # `-` IS in the set, and it is the member that actually matters: an earlier
+  # comment here credited U+FFFD, and that was wrong. Checked rather than
+  # assumed -- `normalize_text()` maps the replacement character to a HYPHEN
+  # (codepoint 45) before chunking ever runs, so ieee_access_alt's bullets
+  # arrive as "- Childhood cancer: ...". Dropping `-` silently reverted that
+  # paper from 3 rows to 1.
+  bullet_marker <- paste0("[", intToUtf8(0x2022), intToUtf8(0x00B7),
+                          intToUtf8(0x25CF), intToUtf8(0x25AA), intToUtf8(0xFFFD),
+                          "*+-]")
+  # A hyphen is also a dash, a minus and a range, so the marker alone is not
+  # enough evidence. Cross-model review (Claude Sonnet, 2026-08-09, REPRODUCED):
+  #   "chi2(1) = 12.74, p = .013. - N = 211, OR = 0.99, 95% CI [0.77, 1.27]."
+  # split a chi-square from its own odds ratio and interval, degrading the row
+  # from `mcnemar_or` carrying OR = 0.99 [0.77, 1.27] to a bare `chisq` with
+  # both NA. That is invariant 6, and collabra.37122 is already on record for
+  # losing an OR exactly this way (v0.7.4).
+  #
+  # The discriminator is what FOLLOWS the marker. A new list item is prose ("-
+  # Childhood cancer: Mean difference of ..."); a continued statistic is an
+  # assignment ("- N = 211", "- OR = 0.99"). Refusing to split before a short
+  # symbol-then-operator keeps both behaviours, which the corpus confirms: the
+  # three bulleted results still separate and no row loses a value.
+  bullet_not_stat <- "(?![A-Za-z]{1,3}\\s*[0-9]*\\s*[=<>])"
   chunk_boundary <- paste0(
     "(?<=[\\.!?])\\s+(?=[A-Z]|$)",                        # sentence boundary
-    "|(?<!\\d\\.)(?<=[\\.!?])\\n[ \\t]*\\n\\s*(?=[0-9])"  # ... resuming on a digit
+    "|(?<!\\d\\.)(?<=[\\.!?])\\n[ \\t]*\\n\\s*(?=[0-9])", # ... resuming on a digit
+    "|(?<=[\\.!?])\\s+", bullet_marker, "\\s+(?=[A-Z])", bullet_not_stat
   )
   chunks <- unlist(strsplit(text_normalized, chunk_boundary, perl = TRUE))
   chunks <- chunks[nchar(trimws(chunks)) > 0]
@@ -1412,6 +1792,9 @@ parse_text <- function(text, context_window_size = 2) {
       resampling_inference = logical(0),
       resampling_method = character(0),
       resampling_B = numeric(0),
+      resampling_B_source = character(0),
+      p_reported_secondary = numeric(0),
+      p_secondary_symbol = character(0),
       resampling_is_permutation = logical(0),
       p_reported_is_resampling = logical(0),
       N = numeric(0),
@@ -1713,6 +2096,42 @@ parse_text <- function(text, context_window_size = 2) {
   # returned 0 stats because median-difference was not a recognised
   # test_type.
   pat_median_diff <- "median\\s+difference\\s+(?:was\\s+|of\\s+)?([-+]?\\d+(?:\\.\\d+)?)\\s*[;,]?\\s*95\\s*%\\s*(?:confidence\\s*interval\\s*\\(CI\\)|CI)\\s*([-+]?\\d+(?:\\.\\d+)?)\\s*(?:to|-)\\s*([-+]?\\d+(?:\\.\\d+)?)(?:[^a-zA-Z]*?[pP][- ]?(?:value)?\\s*([<=>]{0,2})\\s*([01]?\\.\\d+|[01]))?"
+  # v0.7.5 (handoff Issue A residue): an UNSTANDARDIZED mean difference reported
+  # with a confidence interval and a p-value, and no test statistic at all.
+  #
+  #   "Mean difference of 457.66 articles, p-value = 7.171e-11,
+  #    confidence interval (320.98, 594.35)."   (ieee_access_alt, 3 occurrences)
+  #
+  # This produced ZERO rows: every existing pattern anchors on a test statistic
+  # or on a standardized effect size, and this clause has neither. But the triple
+  # IS mutually checkable without either -- SE = (594.35 - 320.98)/(2 x 1.96)
+  # = 69.74, z = 457.66/69.74 = 6.56, p ~ 5.3e-11 against a reported 7.171e-11 --
+  # and the estimate must be the midpoint of its own interval. `md_hl` already
+  # establishes the precedent: a row that carries CI-symmetry and p-CI-consistency
+  # checks and claims no standardized effect size.
+  #
+  # NO EFFECT SIZE IS EVER CLAIMED for this type. A mean difference in "articles"
+  # has no standardizer in the clause -- there is no SD, so no d is recoverable --
+  # and inventing one would be the cross-scale defect `ci_referent` exists to
+  # prevent. check.R routes it to NOTE.
+  #
+  # The anchor is deliberately narrow: the words "mean difference", a value, AND
+  # both a p-value and an interval. Two orderings are accepted because both occur
+  # in the wild; each requires all three numbers, so an incidental "mean
+  # difference" in prose cannot create a row.
+  .pat_mdci_num <- "([-+]?\\d+(?:\\.\\d+)?)"
+  .pat_mdci_p <- "([01]?\\.\\d+|[01]|\\d+(?:\\.\\d+)?[eE][-+]?\\d+)"
+  .pat_mdci_ci <- paste0("(?:confidence\\s+interval|CI)\\s*[\\(\\[]\\s*", .pat_mdci_num,
+                         "\\s*(?:,|to)\\s*", .pat_mdci_num, "\\s*[\\)\\]]")
+  .pat_mdci_pv <- paste0("[pP][- ]?(?:value)?\\s*([<=>]{0,2})\\s*", .pat_mdci_p)
+  .pat_mdci_head <- paste0("(?i)\\b(?:mean\\s+difference|difference\\s+in\\s+means)",
+                           "\\s+(?:of\\s+|was\\s+|=\\s*)?", .pat_mdci_num)
+  # order A: estimate, p-value, interval   |   order B: estimate, interval, p-value
+  pat_mean_diff_ci_p <- paste0(.pat_mdci_head, "[^.;]{0,90}?", .pat_mdci_pv,
+                               "[^.;]{0,70}?", .pat_mdci_ci)
+  pat_mean_diff_ci_p_alt <- paste0(.pat_mdci_head, "[^.;]{0,90}?", .pat_mdci_ci,
+                                   "[^.;]{0,70}?", .pat_mdci_pv)
+
   # v0.6.16 (E11 / E-bare-d-ci): a post-hoc contrast reported as a bare Cohen's
   # d with its own CI and no test statistic of its own -- the Scheffe /
   # Games-Howell reporting style. cog_emo 10.1080/02699931.2024.2434156 prints
@@ -1769,7 +2188,33 @@ parse_text <- function(text, context_window_size = 2) {
   # in-range p at the end of a sentence, and a first draft using `(?![0-9.])`
   # turned it into a false "out of valid range" claim (found by cross-model
   # review, reproduced before fixing).
-  pat_p <- "\\b[pP]\\s*(?:=\\s*(?=[<>]))?([<=>]{1,2})\\s*(0?\\.[0-9]+|[01]\\.[0-9]+|[01](?![0-9])(?!\\.[0-9]))"
+  # v0.7.5: a p preceded by a SIGNIFICANCE-LEGEND MARKER is not a result.
+  # "~P < 0.1, *P < 0.05, **P < 0.01, ***P < 0.001" is the asterisk key of a
+  # table or figure, and the thresholds in it belong to no test at all.
+  #
+  # Found in the wild while working Issue D, on the very paper Issue D is about.
+  # PNAS 10.1073/pnas.2404157121's figure caption is merged into the body text
+  # by the extractor and the caption ends "...***P < 0.001." followed by a
+  # LOWERCASE continuation ("higher than that of NR, ..."), so the chunk splitter
+  # -- which requires a capital or a digit after the boundary -- cannot separate
+  # them. pat_p then took the FIRST p in the merged chunk and the row published
+  #   t(2037) = -2.19, p_reported = 0.1
+  # where the paper prints P = 0.029. A threshold from an asterisk key, attached
+  # to a real published statistic, with no flag: the same fabrication class as
+  # the v0.6.20 "p = 10 published as p_reported = 1".
+  #
+  # Fixing it at the p-binding rather than at the chunk boundary is deliberate.
+  # A boundary rule would have to guess where the caption ends; this states the
+  # thing that is actually true -- a marker glyph immediately before `p` means a
+  # legend -- and it cannot separate a statistic from its own values, which is
+  # the invariant chunk-level fixes keep threatening (v0.7.4, invariant 6).
+  # 80 occurrences across 12 of the 48 corpus papers; every sampled one is a
+  # legend. Both spacings are refused ("*p < .05" and "* p < .05"); PCRE needs
+  # fixed-width lookbehinds, hence two of them rather than one alternation.
+  pat_p <- paste0(
+    "(?<![*~+#])(?<![*~+#] )",
+    "\\b[pP]\\s*(?:=\\s*(?=[<>]))?([<=>]{1,2})\\s*",
+    "(0?\\.[0-9]+|[01]\\.[0-9]+|[01](?![0-9])(?!\\.[0-9]))")
   # Detection-only companion to pat_p: any numeric p-clause, in range or not.
   # Used SOLELY to set p_out_of_range when pat_p declined the value, so an
   # impossible p ("p = 10", "p = 3.3") surfaces as a flagged extraction rather
@@ -1784,7 +2229,16 @@ parse_text <- function(text, context_window_size = 2) {
   # mantissa+exponent number is captured, then converted to a decimal string.
   # (normalize_text has already folded Unicode minus U+2212 to ASCII '-', so an
   # ASCII hyphen in the exponent suffices -- same assumption pat_p relies on.)
-  pat_p_enote <- "\\b[pP]\\s*(?:=\\s*(?=[<>]))?([<=>]{1,2})\\s*(\\d+(?:\\.\\d+)?[eE]\\s*-\\s*\\d+)"
+  # v0.7.5: accept the "p-value" spelling. The pattern required the operator to
+  # sit directly after `p`, so "p-value = 7.171e-11" matched nothing and the row
+  # published `p_reported = NA` with "not a valid probability (outside [0,1] or
+  # unparseable)" -- the value is a perfectly ordinary probability, written the
+  # way IEEE and the clinical journals write it. This is the same spelling the
+  # RR / rdpct / md_hl branches already synthesize `m_p` for; fixing it in the
+  # shared pattern means every test type gets it, rather than a fourth per-branch
+  # workaround. Found on ieee_access_alt while adding `mean_diff_ci`.
+  pat_p_enote <- paste0("\\b[pP](?:[- ]?value)?\\s*(?:=\\s*(?=[<>]))?",
+                        "([<=>]{1,2})\\s*(\\d+(?:\\.\\d+)?[eE]\\s*-\\s*\\d+)")
   # "Not significant" notation: "ns", "n.s.", "NS" (only after comma/semicolon)
   pat_p_ns <- "[,;]\\s*(?:ns\\.?|n\\.s\\.?|NS|N\\.S\\.?)(?=[\\s.,;)]|$)"
   # N regex: restrict to word boundary and look for nearby equals
@@ -1939,6 +2393,12 @@ parse_text <- function(text, context_window_size = 2) {
   # v0.6.18: computation shared with check_text() via .doc_global_n().
   global_N <- .doc_global_n(text_normalized)
 
+  # v0.7.5 (handoff Issue C): the document-level resample count, read ONCE from
+  # the Methods / Analysis section. Authors declare B there and never restate it
+  # beside each reported p. Computed here, outside the per-chunk loop, so the
+  # cost is one scan per document rather than one per statistic.
+  doc_resampling_B <- .doc_resampling_b(text_normalized)
+
   # v0.6.8 (E-A1): section-scoped one-sample carry-forward map.
   # A "one-sample t-test against {the midpoint|scale midpoint|chance|N}"
   # declaration scopes ALL of the t-tests that follow it within its study/section
@@ -2080,6 +2540,20 @@ parse_text <- function(text, context_window_size = 2) {
     m_two_props <- stringr::str_match(s, pat_two_props_slash)
     m_risk_diff <- stringr::str_match(s, pat_risk_diff)
     m_median_diff <- stringr::str_match(s, pat_median_diff)
+    # v0.7.5: unstandardized mean difference + CI + p, no test statistic. Order A
+    # (est, p, CI) is tried first because it is the shape observed in the corpus;
+    # the groups are normalized to (est, p_op, p, ciL, ciU) either way, so the
+    # consumer below never has to know which alternative matched.
+    m_mean_diff_ci <- stringr::str_match(s, pat_mean_diff_ci_p)
+    if (all(is.na(m_mean_diff_ci))) {
+      m_alt <- stringr::str_match(s, pat_mean_diff_ci_p_alt)
+      if (!all(is.na(m_alt))) {
+        # alt groups: 1 full, 2 est, 3 ciL, 4 ciU, 5 p_op, 6 p
+        m_mean_diff_ci <- matrix(
+          c(m_alt[1, 1], m_alt[1, 2], m_alt[1, 5], m_alt[1, 6], m_alt[1, 3], m_alt[1, 4]),
+          nrow = 1)
+      }
+    }
 
     # Match p-values (try scientific notation first, then standard)
     m_p_sci <- stringr::str_match(s, pat_p_sci)
@@ -2216,10 +2690,14 @@ parse_text <- function(text, context_window_size = 2) {
     # p = .025" binds .062. There the binding is NOT provable, so the row stays
     # conservative. Checking a number you cannot prove you bound correctly is
     # worse than not checking: it publishes a verdict about the wrong value.
+    # v0.7.5: the qualifier alternation, hoisted to ONE definition. It was
+    # written out twice (here and in `qualified_p` above) and Issue D needs a
+    # third use; three hand-maintained copies is how the v0.5.9 chi_tok drift
+    # happened, where one copy silently stopped accepting a form the others did.
+    resamp_qual_tok <- paste0("(?:permut\\w*|randomi[sz]ation|resampl\\w*|",
+                              "bootstrap\\w*|monte[- ]?carlo)")
     glued_qualified_p <- grepl(
-      paste0("(?i)\\b(?:permut\\w*|randomi[sz]ation|resampl\\w*|bootstrap\\w*|",
-             "monte[- ]?carlo)[_-]+p\\b|\\bp[_-]+(?:permut\\w*|randomi[sz]ation|",
-             "resampl\\w*|bootstrap\\w*|monte[- ]?carlo)"),
+      paste0("(?i)\\b", resamp_qual_tok, "[_-]+p\\b|\\bp[_-]+", resamp_qual_tok),
       s, perl = TRUE)
     spaced_qualified_p <- grepl(qualified_p, s, perl = TRUE) && !glued_qualified_p
     # A plain p that pat_p can see.
@@ -2236,52 +2714,77 @@ parse_text <- function(text, context_window_size = 2) {
     p_reported_is_resampling <- resampling_inference &&
       !(glued_qualified_p && has_plain_p && !spaced_qualified_p)
 
+    # v0.7.5 (handoff Issue D): RECOVER the qualified p instead of discarding it.
+    #
+    # A clause can carry two p-values of different provenance:
+    #   "t(2037) = -3.26, P = 0.001, P-permutation = 0.002"
+    # `pat_p` binds the parametric 0.001 -- it cannot see the hyphenated form at
+    # all, because the hyphen breaks its operator adjacency -- and 0.002 was then
+    # thrown away. A reader of the output could not tell that a permutation p had
+    # been reported at all, let alone check it. Seven such occurrences in the
+    # corpus, all in PNAS 10.1073/pnas.2404157121.
+    #
+    # It lands in a SIBLING COLUMN, never a second row. A new row would change
+    # `nrow()` for every consumer and silently shift every downstream index;
+    # MetaESCI's field registry is frozen at v0.4.0, so it already tolerates new
+    # columns it does not know about, and cannot tolerate new rows.
+    #
+    # Scoped to the GLUED form only, and that scoping is the whole safety
+    # argument: a glued qualifier is PROVABLY invisible to `pat_p`, so whatever
+    # this captures is provably NOT what `pat_p` bound. A spaced qualifier
+    # ("permutation p = .062") is fully visible to pat_p and may well be the
+    # primary already -- capturing it could publish the same number twice under
+    # two provenances, which is worse than dropping it.
+    p_reported_secondary <- NA_real_
+    p_secondary_symbol <- NA_character_
+    if (glued_qualified_p) {
+      # Same numeric alternation as pat_p: a p-value is in [0, 1] and is written
+      # ".002" / "0.002" / "1" / "0". Accepting a wider shape here would let a
+      # neighbouring statistic through under a p-value's name.
+      p_num <- "(0?\\.[0-9]+|[01]\\.[0-9]+|[01](?![0-9])(?!\\.[0-9]))"
+      sec_pats <- c(
+        paste0("(?i)\\b", resamp_qual_tok, "[_-]+p\\s*([<=>]{1,2})\\s*", p_num),
+        paste0("(?i)\\bp[_-]+", resamp_qual_tok, "\\s*([<=>]{1,2})\\s*", p_num)
+      )
+      for (sp in sec_pats) {
+        m_sec <- stringr::str_match(s, sp)
+        if (!is.na(m_sec[1, 3])) {
+          p_reported_secondary <- numify(m_sec[1, 3])
+          p_secondary_symbol <- m_sec[1, 2]
+          break
+        }
+      }
+    }
+
     # v0.6.22: the RESAMPLE COUNT (B). With B known, the smallest p the
     # procedure can produce by counting is 1/(B+1) (Phipson & Smyth 2010) --
     # checkable with no raw data at all. Without B the p-value is not
     # reproducible even WITH the data, which is itself worth reporting.
-    # Accepts "10,000 permutations", "B = 10000", "5,000 bootstrap resamples",
-    # "2,000 replicates", "1,000 Monte Carlo samples/draws/iterations".
     #
-    # Gated on resampling_inference so an ordinary "1,000 samples" or a
-    # generic count in non-resampling prose can never populate it.
+    # Gated on resampling_inference so an ordinary "1,000 samples" or a generic
+    # count in non-resampling prose can never populate it. The accepted forms,
+    # the separator handling and the refusals all live in
+    # `.resample_count_in()`, shared with the document-level prescan -- see its
+    # header. One definition, no drift (the v0.5.9 chi_tok lesson).
     #
-    # The separator handling is load-bearing. normalize_text() runs its
-    # decimal-comma conversion before this point, so "10,000 permutations"
-    # arrives as "10.000 permutations" -- and numify_int("10.000") is 10.
-    # Taking that at face value would set B = 10, a floor of 1/11 = .09, and
-    # false-flag essentially every permutation p in the corpus. A resample
-    # count is always an integer, so EVERY "." and "," in it is a thousands
-    # separator: strip them all rather than parse the number as written.
-    #
-    # The noun must be resampling-SPECIFIC, or carry a resampling qualifier.
-    # A bare "<n> samples/draws/iterations" is not enough: cross-model review
-    # (reproduced) showed "Across 500 samples, a permutation test with 10,000
-    # permutations ..." binding B = 500 and then FALSE-FLAGGING the p as below
-    # "1/(B+1) = 0.002" -- a wrong accusation built on a count scraped from the
-    # wrong clause. The bare "B = <n>" form is accepted separately.
+    # v0.7.5: `resampling_B_source` records WHERE the count came from, because
+    # the two provenances are not equally strong and a consumer must be able to
+    # tell them apart. `own_clause` is stated beside the statistic;
+    # `methods_prescan` is a document-level default read from the Methods /
+    # Analysis section, which is where authors actually declare B -- across the
+    # whole 48-paper validation corpus, the clause-level scan alone populated
+    # `resampling_B` for ZERO rows, so every Monte-Carlo floor check shipped in
+    # v0.6.22 was inert. A check that cannot fire is indistinguishable from one
+    # that passes.
     resampling_B <- NA_real_
+    resampling_B_source <- NA_character_
     if (resampling_inference) {
-      num <- "(\\d[\\d,.]*\\d|\\d)"
-      qual <- "(?:random|bootstrap|permutation|permuted|monte[- ]?carlo|resampl\\w*)"
-      b_pats <- c(
-        # explicit: "B = 10,000" / "B = 10000"
-        paste0("(?i)\\bB\\s*=\\s*", num, "\\b"),
-        # resampling-specific noun, no qualifier needed
-        paste0("(?i)\\b", num, "\\s+(?:permutations?|resamples?|replicates?|",
-               "bootstraps?|permutation\\s+samples?)\\b"),
-        # generic noun, but only with a resampling qualifier in front
-        paste0("(?i)\\b", num, "\\s+", qual, "\\s+",
-               "(?:samples?|draws?|iterations?|replications?)\\b")
-      )
-      for (bp in b_pats) {
-        m_B <- stringr::str_match(s, bp)
-        if (!is.na(m_B[1, 2])) {
-          b_val <- suppressWarnings(as.numeric(gsub("[,.]", "", m_B[1, 2])))
-          # A plausible resample count. Below 50 this is far likelier to be a
-          # sample-size or item-count clause than a resampling specification.
-          if (!is.na(b_val) && b_val >= 50) { resampling_B <- b_val; break }
-        }
+      resampling_B <- .resample_count_in(s)
+      if (!is.na(resampling_B)) {
+        resampling_B_source <- "own_clause"
+      } else if (!is.na(doc_resampling_B)) {
+        resampling_B <- doc_resampling_B
+        resampling_B_source <- "methods_prescan"
       }
     }
 
@@ -2693,6 +3196,23 @@ parse_text <- function(text, context_window_size = 2) {
         p_op_rr <- if (!is.na(m_RR_ci_p[5]) && nchar(m_RR_ci_p[5]) > 0) m_RR_ci_p[5] else "="
         p_val_rr <- m_RR_ci_p[6]
         m_p <- matrix(c(paste0("p", p_op_rr, p_val_rr), p_op_rr, p_val_rr), nrow = 1)
+      }
+    } else if (!all(is.na(m_mean_diff_ci))) {
+      # v0.7.5: unstandardized mean difference with a CI and a p, no statistic.
+      # `stat_value` holds the ESTIMATE, exactly as md_hl holds the median
+      # difference -- it is the quantity the interval brackets, not a test
+      # statistic, and check.R's mean_diff_ci branch treats it as such.
+      test_type <- "mean_diff_ci"
+      stat_value <- numify(m_mean_diff_ci[2])
+      stat_value_decimals <- count_decimal_places(m_mean_diff_ci[2])
+      if (all(is.na(m_p)) && !is.na(m_mean_diff_ci[4])) {
+        p_op_mdci <- if (!is.na(m_mean_diff_ci[3]) && nchar(m_mean_diff_ci[3]) > 0) {
+          m_mean_diff_ci[3]
+        } else {
+          "="
+        }
+        p_val_mdci <- m_mean_diff_ci[4]
+        m_p <- matrix(c(paste0("p", p_op_mdci, p_val_mdci), p_op_mdci, p_val_mdci), nrow = 1)
       }
     } else if (!all(is.na(m_median_diff))) {
       # v0.5.18: median-difference (Hodges-Lehmann) with IQR + CI.
@@ -3580,6 +4100,16 @@ parse_text <- function(text, context_window_size = 2) {
         ciL_reported_decimals <- count_decimal_places(m_risk_diff[3])
         ciU_reported_decimals <- count_decimal_places(m_risk_diff[4])
         if (is.na(ci_level)) { ci_level <- 0.95; ci_level_source <- "assumed_95" }
+      } else if (!is.na(test_type) && test_type == "mean_diff_ci" &&
+                 !all(is.na(m_mean_diff_ci))) {
+        # v0.7.5: the interval is the ONLY verification handle this row has --
+        # there is no test statistic to recompute a p from, so without the bounds
+        # the row would be pure extraction with nothing checkable.
+        ciL <- numify(m_mean_diff_ci[5])
+        ciU <- numify(m_mean_diff_ci[6])
+        ciL_reported_decimals <- count_decimal_places(m_mean_diff_ci[5])
+        ciU_reported_decimals <- count_decimal_places(m_mean_diff_ci[6])
+        if (is.na(ci_level)) { ci_level <- 0.95; ci_level_source <- "assumed_95" }
       } else if (!is.na(test_type) && test_type == "md_hl" && !all(is.na(m_median_diff))) {
         ciL <- numify(m_median_diff[3])
         ciU <- numify(m_median_diff[4])
@@ -3701,6 +4231,9 @@ parse_text <- function(text, context_window_size = 2) {
       resampling_inference = resampling_inference,
       resampling_method = resampling_method,
       resampling_B = resampling_B,
+      resampling_B_source = resampling_B_source,
+      p_reported_secondary = p_reported_secondary,
+      p_secondary_symbol = p_secondary_symbol,
       resampling_is_permutation = resampling_is_permutation,
       p_reported_is_resampling = p_reported_is_resampling,
       N = N_value, # From enhanced extraction above
@@ -3778,6 +4311,9 @@ parse_text <- function(text, context_window_size = 2) {
       resampling_inference = logical(0),
       resampling_method = character(0),
       resampling_B = numeric(0),
+      resampling_B_source = character(0),
+      p_reported_secondary = numeric(0),
+      p_secondary_symbol = character(0),
       resampling_is_permutation = logical(0),
       p_reported_is_resampling = logical(0),
       N = numeric(0),
@@ -4161,6 +4697,9 @@ parse_text <- function(text, context_window_size = 2) {
     resampling_inference = FALSE,
     resampling_method = NA_character_,
     resampling_B = NA_real_,
+    resampling_B_source = NA_character_,
+    p_reported_secondary = NA_real_,
+    p_secondary_symbol = NA_character_,
     resampling_is_permutation = FALSE,
     p_reported_is_resampling = FALSE,
     N = NA_real_,

@@ -404,6 +404,9 @@ VARIANT_METADATA <- list(
     resampling_method = NA_character_,
     p_reported_is_resampling = FALSE,
     resampling_B = NA_real_,
+    resampling_B_source = NA_character_,
+    p_reported_secondary = NA_real_,
+    p_secondary_symbol = NA_character_,
     resampling_p_below_floor = FALSE,
     p_reported = as.numeric(g1("p_reported", NA_real_)),
     ciL_reported = as.numeric(g1("ciL_reported", NA_real_)),
@@ -899,6 +902,34 @@ compute_and_compare_one <- function(row,
   } else {
     NA_real_
   }
+  # v0.7.5: where that B came from. `own_clause` is stated beside the statistic;
+  # `methods_prescan` is a document-level default read from the Methods section.
+  # The floor check treats both as usable -- an author declares B once and it
+  # governs every resampling p in the paper -- but the user-facing message must
+  # SAY which, because a document-level default is an inference about scope and
+  # a clause-level count is not. Surfacing a derived number without its
+  # provenance is the defect v0.6.18 fixed for N_source.
+  resampling_B_source <- if ("resampling_B_source" %in% names(row) &&
+                             length(row$resampling_B_source) > 0) {
+    as.character(row$resampling_B_source[1])
+  } else {
+    NA_character_
+  }
+  # v0.7.5 (Issue D): the SECOND p-value in the clause, when the paper reported
+  # one of each provenance ("P = 0.001, P-permutation = 0.002"). `p_reported` is
+  # the parametric 0.001; this is the 0.002 that used to be discarded.
+  p_reported_secondary <- if ("p_reported_secondary" %in% names(row) &&
+                              length(row$p_reported_secondary) > 0) {
+    as.numeric(row$p_reported_secondary[1])
+  } else {
+    NA_real_
+  }
+  p_secondary_symbol <- if ("p_secondary_symbol" %in% names(row) &&
+                            length(row$p_secondary_symbol) > 0) {
+    as.character(row$p_secondary_symbol[1])
+  } else {
+    NA_character_
+  }
   # v0.7.3: does the BOUND p come from the resampling distribution, or is it the
   # parametric one sitting next to a permutation p? Every claim about
   # p_reported must key on THIS, not on whether the clause mentions resampling.
@@ -1031,6 +1062,9 @@ compute_and_compare_one <- function(row,
       resampling_method = NA_character_,
       p_reported_is_resampling = FALSE,
       resampling_B = NA_real_,
+      resampling_B_source = NA_character_,
+      p_reported_secondary = NA_real_,
+      p_secondary_symbol = NA_character_,
       resampling_p_below_floor = FALSE,
       p_reported = p_reported,
       p_computed = NA_real_,
@@ -3798,6 +3832,121 @@ compute_and_compare_one <- function(row,
               "independent verification requires the slash-count clause",
               "(<events1>/<total1> versus <events2>/<total2>) in scope."))
     }
+  } else if (tt == "mean_diff_ci") {
+    # ------ UNSTANDARDIZED MEAN DIFFERENCE with CI and p, no test statistic ----
+    # v0.7.5. ieee_access_alt reports three of these:
+    #   "Mean difference of 457.66 articles, p-value = 7.171e-11,
+    #    confidence interval (320.98, 594.35)."
+    # No test statistic, no SD, so NO STANDARDIZED EFFECT SIZE IS RECOVERABLE and
+    # none is claimed -- a mean difference "in articles" has no standardizer in
+    # the clause, and inventing one would be the cross-scale defect `ci_referent`
+    # exists to prevent. But the three numbers still constrain each other, and
+    # `md_hl` already establishes that a row may carry CI-symmetry and
+    # p-CI-consistency checks while claiming no effect size.
+    cl <- if ("ciL_reported" %in% names(row)) row$ciL_reported[1] else NA_real_
+    cu <- if ("ciU_reported" %in% names(row)) row$ciU_reported[1] else NA_real_
+    lvl <- if ("ci_level" %in% names(row) && !is.na(row$ci_level[1])) {
+      as.numeric(row$ci_level[1])
+    } else {
+      0.95
+    }
+    md_parts <- character(0)
+
+    if (!is.na(cl) && !is.na(cu) && !is.na(stat)) {
+      # (1) The estimate must be the MIDPOINT of a symmetric Wald interval.
+      # Asymmetry here is a transcription or extraction error, not a modelling
+      # choice: unlike a Hodges-Lehmann interval, a normal-approximation CI on a
+      # mean difference is symmetric by construction.
+      #
+      # THE TOLERANCE IS ROUNDING, NOT A FRACTION OF THE WIDTH. A relative
+      # threshold false-fires on narrow intervals for no reason but reporting
+      # precision: with everything printed to 2 dp, "0.20, CI (0.10, 0.31)" has
+      # a midpoint of 0.205 and a relative asymmetry of 0.048 -- five times a
+      # 0.02 threshold, on numbers that are perfectly consistent before
+      # rounding. That is a false accusation against a correct paper, which is
+      # the outcome this module exists to avoid. (Cross-model review, Claude
+      # Sonnet, 2026-08-09, REPRODUCED.)
+      #
+      # Each of the three values is rounded to its own last place, so the
+      # midpoint of the rounded bounds can differ from the rounded estimate by
+      # about one unit in the last place. Flag only beyond that.
+      width <- cu - cl
+      dec <- function(col) {
+        v <- if (col %in% names(row) && length(row[[col]]) > 0) row[[col]][1] else NA
+        if (is.na(v)) NA_integer_ else as.integer(v)
+      }
+      dps <- c(dec("stat_value_decimals"), dec("ciL_reported_decimals"),
+               dec("ciU_reported_decimals"))
+      dps <- dps[!is.na(dps)]
+      # No precision information at all -> assume 2 dp, the APA default.
+      round_tol <- 10^(-if (length(dps)) min(dps) else 2L)
+      midpoint <- (cl + cu) / 2
+      asym <- if (width > 0) abs((stat - cl) - (cu - stat)) / width else NA_real_
+      if (!is.na(width) && width > 0 && abs(midpoint - stat) > round_tol) {
+        md_parts <- c(md_parts, sprintf(
+          paste("The reported estimate is not the midpoint of its own interval",
+                "(midpoint %s vs reported %s); a normal-approximation CI on a mean",
+                "difference is symmetric by construction, so one of the three",
+                "numbers is mis-stated."),
+          format(signif((cl + cu) / 2, 6), scientific = FALSE),
+          format(stat, scientific = FALSE)))
+      }
+
+      # (2) The interval implies a standard error, and the SE plus the estimate
+      # imply a p-value. This is the check that makes the row worth extracting:
+      # SE = (U - L) / (2 * z_{1-alpha/2}), z = estimate / SE.
+      z_crit <- stats::qnorm(1 - (1 - lvl) / 2)
+      se_implied <- if (width > 0 && z_crit > 0) width / (2 * z_crit) else NA_real_
+      if (!is.na(se_implied) && se_implied > 0 && !is.na(p_reported) && !p_is_inequality) {
+        z_implied <- stat / se_implied
+        p_implied <- 2 * stats::pnorm(-abs(z_implied))
+        # Compared on the RATIO, not the difference. These p-values are routinely
+        # of order 1e-11, where any absolute tolerance waves everything through --
+        # the same reason v0.6.18 moved the p-consistency check from an absolute
+        # to a relative rule after `abs(p_diff) < .005` accepted a 250x gap.
+        ratio <- if (p_implied > 0 && p_reported > 0) {
+          max(p_reported / p_implied, p_implied / p_reported)
+        } else {
+          NA_real_
+        }
+        if (!is.na(ratio) && ratio > 10) {
+          md_parts <- c(md_parts, sprintf(
+            paste("Reported p (%s) disagrees with the p implied by the estimate",
+                  "and its own interval (%s, from SE = %s, z = %s) by a factor of",
+                  "%s. The implied value assumes a normal approximation, so a",
+                  "modest gap is expected; a large one is not."),
+            format(p_reported, scientific = TRUE),
+            format(signif(p_implied, 4), scientific = TRUE),
+            format(signif(se_implied, 4), scientific = FALSE),
+            format(signif(z_implied, 4), scientific = FALSE),
+            format(signif(ratio, 3), scientific = FALSE)))
+        }
+      }
+
+      # (3) The significance decision must agree with the interval.
+      if (!is.na(p_reported)) {
+        zero_in_ci <- (cl <= 0 && cu >= 0)
+        sig_p <- p_reported < alpha
+        if (sig_p && zero_in_ci) {
+          md_parts <- c(md_parts, sprintf(
+            "p < %s but 0 lies inside the interval (p-CI inconsistency)", format(alpha)))
+        } else if (!sig_p && !zero_in_ci) {
+          md_parts <- c(md_parts, sprintf(
+            "p >= %s but 0 lies outside the interval (p-CI inconsistency)", format(alpha)))
+        }
+      }
+    } else {
+      md_parts <- c(md_parts,
+        paste("A mean difference was reported without both interval bounds, so",
+              "nothing about it can be cross-checked."))
+    }
+
+    uncertainty <- c(uncertainty,
+      paste("Unstandardized mean difference: no standardizer (SD) is reported in",
+            "this clause, so no standard effect size is recoverable and none is",
+            "claimed. Checked for internal consistency only."))
+    if (length(md_parts)) uncertainty <- c(uncertainty, md_parts)
+    status <- "NOTE"
   } else if (tt == "md_hl") {
     # ------ MEDIAN-DIFFERENCE (HODGES-LEHMANN) with IQR ------
     # v0.6.0: Hodges-Lehmann point estimate cannot be recomputed from a
@@ -6729,7 +6878,31 @@ compute_and_compare_one <- function(row,
   # mid-p, randomized p), so these state an arithmetic fact and let the reader
   # judge -- they never assert the paper is wrong.
   # ==========================================================================
-  if (p_reported_is_resampling) {
+  # v0.7.5 (Issue D): these checks belong to whichever p came out of the
+  # RESAMPLING distribution, and that is not always `p_reported`. When a clause
+  # reports one of each ("P = 0.001, P-permutation = 0.002"), `p_reported` is the
+  # PARAMETRIC value and the resampling one is in `p_reported_secondary`. Before
+  # this, the whole block was skipped for exactly those rows -- the floor, the
+  # missing-B note and the Monte Carlo fragility check were all inert on the one
+  # paper in the corpus that reports dual p-values, which is also the only paper
+  # that declares a resample count. Retargeting is the point of the column; a
+  # captured value nothing reads is the write-only-column defect (invariant 4).
+  if (p_reported_is_resampling || !is.na(p_reported_secondary)) {
+    p_resamp <- if (p_reported_is_resampling) p_reported else p_reported_secondary
+    p_resamp_ineq <- if (p_reported_is_resampling) {
+      p_is_inequality
+    } else {
+      !is.na(p_secondary_symbol) && grepl("<", p_secondary_symbol)
+    }
+    # Name the value the caveat is about. On a dual-p row "Reported p" would
+    # point the reader at 0.001 while the arithmetic is about 0.002.
+    p_resamp_label <- if (p_reported_is_resampling) {
+      "Reported p"
+    } else if (!is.na(resampling_method)) {
+      sprintf("Reported %s p", resampling_method)
+    } else {
+      "Reported resampling p"
+    }
     floor_mc <- perm_min_p_mc(resampling_B)
     # v0.7.1 (cross-model review, reproduced): the exact floor is a PERMUTATION
     # bound. A bootstrap resamples with replacement and has no choose(n1+n2, n1)
@@ -6742,28 +6915,43 @@ compute_and_compare_one <- function(row,
     # compare with <= rather than <. It also means the reported number is a
     # bound, not an estimate, so it must not be treated as a point value for
     # Monte Carlo error below.
-    below <- function(x, f) if (p_is_inequality) x <= f else x < f
+    below <- function(x, f) if (p_resamp_ineq) x <= f else x < f
 
-    if (!is.na(p_reported) && p_reported > 0) {
-      if (!is.na(floor_mc) && below(p_reported, floor_mc)) {
+    # v0.7.5: every message that quotes B must say where B came from. A
+    # `methods_prescan` B is a document-level default -- the paper declared it
+    # once in Methods and this row assumes it governs here. That assumption is
+    # almost always right and is exactly how authors write, but it IS an
+    # assumption, and a reader deciding whether to act on a floor violation
+    # needs to see it. Stating a derived number without its provenance is the
+    # defect v0.6.18 fixed for N_source ("N_source said not_found beside a
+    # populated N"); the same standard applies here.
+    b_from <- if (identical(resampling_B_source, "methods_prescan")) {
+      paste(" (B is not restated in this clause -- it is the count declared in",
+            "the paper's Methods/Analysis section, assumed to govern this test)")
+    } else {
+      ""
+    }
+
+    if (!is.na(p_resamp) && p_resamp > 0) {
+      if (!is.na(floor_mc) && below(p_resamp, floor_mc)) {
         resampling_p_below_floor <- TRUE
         uncertainty <- c(uncertainty, sprintf(
-          paste("Reported p (%s) is below the minimum attainable by counting %s",
+          paste("%s (%s) is below the minimum attainable by counting %s",
                 "resamples: the smallest such p is 1/(B+1) = %s. This is not",
                 "necessarily an error -- tail approximation, sequential",
                 "sampling, mid-p, or combining p-values can all go lower -- but",
-                "a plain resample count cannot."),
-          format(p_reported, scientific = FALSE),
+                "a plain resample count cannot.%s"),
+          p_resamp_label, format(p_resamp, scientific = FALSE),
           format(resampling_B, big.mark = ",", scientific = FALSE, trim = TRUE),
-          format(signif(floor_mc, 3), scientific = FALSE)))
+          format(signif(floor_mc, 3), scientific = FALSE), b_from))
       }
-      if (!is.na(floor_exact) && below(p_reported, floor_exact)) {
+      if (!is.na(floor_exact) && below(p_resamp, floor_exact)) {
         resampling_p_below_floor <- TRUE
         uncertainty <- c(uncertainty, sprintf(
-          paste("Reported p (%s) is below the minimum attainable by an EXACT",
+          paste("%s (%s) is below the minimum attainable by an EXACT",
                 "permutation test on groups of %s and %s: that reference set has",
                 "choose(%s, %s) members, so no p below %s is reachable."),
-          format(p_reported, scientific = FALSE),
+          p_resamp_label, format(p_resamp, scientific = FALSE),
           format(n1, trim = TRUE), format(n2, trim = TRUE),
           format(n1 + n2, trim = TRUE), format(n1, trim = TRUE),
           format(signif(floor_exact, 3), scientific = FALSE)))
@@ -6777,31 +6965,45 @@ compute_and_compare_one <- function(row,
       # concrete number to a value the paper never reported (cross-model
       # review, reproduced -- it emitted "SE = 0.00218, interval 0.0457 to
       # 0.0543" for a p that could have been far below .05).
-      se_mc <- if (p_is_inequality) NA_real_ else perm_mc_se(p_reported, resampling_B)
+      se_mc <- if (p_resamp_ineq) NA_real_ else perm_mc_se(p_resamp, resampling_B)
       if (!is.na(se_mc) && se_mc > 0) {
-        lo <- p_reported - 1.96 * se_mc
-        hi <- p_reported + 1.96 * se_mc
+        lo <- p_resamp - 1.96 * se_mc
+        hi <- p_resamp + 1.96 * se_mc
         if (lo < alpha && hi > alpha) {
           uncertainty <- c(uncertainty, sprintf(
             paste("Monte Carlo uncertainty: with %s resamples the resampling",
                   "error around p = %s is SE = %s (approx. 95%% interval %s to",
                   "%s), which straddles alpha = %s -- the significance decision",
-                  "is not stable at this resample count."),
+                  "is not stable at this resample count.%s"),
             format(resampling_B, big.mark = ",", scientific = FALSE, trim = TRUE),
-            format(p_reported, scientific = FALSE),
+            format(p_resamp, scientific = FALSE),
             format(signif(se_mc, 3), scientific = FALSE),
             format(signif(max(0, lo), 3), scientific = FALSE),
             format(signif(min(1, hi), 3), scientific = FALSE),
-            format(alpha)))
+            format(alpha), b_from))
         }
       }
     }
 
     if (is.na(resampling_B)) {
-      uncertainty <- c(uncertainty,
-        paste("The number of permutations/resamples is not reported, so this",
-              "p-value is not reproducible even with the raw data; stating it",
-              "(and the seed) would make the result checkable."))
+      # v0.7.5: NAME THE SUBJECT. On a dual-p row this note is true of the
+      # permutation p and FALSE of the parametric one sitting beside it -- and
+      # "this p-value" would be read as the latter, because that is what
+      # `p_reported` holds. Asserting a value is unknowable when it is in fact
+      # computable is the v0.6.19 defect class, and the v0.7.3 R18 test exists
+      # precisely to stop this row making that claim about the parametric p.
+      # The note itself is worth keeping: the paper really did report a
+      # resampling p without stating B.
+      uncertainty <- c(uncertainty, sprintf(
+        paste("The number of permutations/resamples is not reported, so %s is",
+              "not reproducible even with the raw data; stating it (and the",
+              "seed) would make the result checkable."),
+        if (p_reported_is_resampling) {
+          "this p-value"
+        } else {
+          sprintf("%s (%s)", tolower(p_resamp_label),
+                  format(p_resamp, scientific = FALSE))
+        }))
     }
   }
 
@@ -7743,6 +7945,9 @@ compute_and_compare_one <- function(row,
     resampling_method = resampling_method,
     p_reported_is_resampling = p_reported_is_resampling,
     resampling_B = resampling_B,
+    resampling_B_source = resampling_B_source,
+    p_reported_secondary = p_reported_secondary,
+    p_secondary_symbol = p_secondary_symbol,
     resampling_p_below_floor = resampling_p_below_floor,
     ci_match = ci_match,
     ciL_computed = as.numeric(computed_ciL),
@@ -8113,7 +8318,14 @@ check_text <- function(text,
                                  # v0.7.0: modern nonparametric / robust family.
                                  # p verifiable from statistic + df; no
                                  # recoverable effect size.
-                                 "wts", "ats", "brunner_munzel", "yuen"),
+                                 "wts", "ats", "brunner_munzel", "yuen",
+                                 # v0.7.5: unstandardized mean difference with a
+                                 # CI and a p and NO test statistic. Checked for
+                                 # internal consistency (CI symmetry, the p
+                                 # implied by estimate/SE, p-CI agreement); no
+                                 # standardized effect size is recoverable and
+                                 # none is claimed.
+                                 "mean_diff_ci"),
                        ci_level = 0.95,
                        alpha = 0.05,
                        one_tailed = FALSE,
@@ -8351,6 +8563,9 @@ check_text <- function(text,
           resampling_method = NA_character_,
           p_reported_is_resampling = FALSE,
           resampling_B = NA_real_,
+          resampling_B_source = NA_character_,
+          p_reported_secondary = NA_real_,
+          p_secondary_symbol = NA_character_,
           resampling_p_below_floor = FALSE,
           p_reported = NA_real_,
           p_computed = NA_real_,

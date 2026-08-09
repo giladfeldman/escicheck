@@ -17,7 +17,7 @@
     "spearman", "kendall", "kendall_w", "dscf", "cochran_q", "binomial",
     "RR", "rdpct", "md_hl", "interaction_p", "mediation_indirect",
     "mcnemar_or", "bayes_factor", "hazard_ratio", "table_estimate",
-    "d_reported_only", "wts", "ats", "brunner_munzel", "yuen"
+    "d_reported_only", "wts", "ats", "brunner_munzel", "yuen", "mean_diff_ci"
   ],
   "sample": {
     "source": "text",

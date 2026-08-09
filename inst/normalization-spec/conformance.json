@@ -1,5 +1,5 @@
 {
-  "spec_version": "1.3.0",
+  "spec_version": "1.4.0",
   "derived_from": "docpluck normalize.py A3a + A3, v2.4.126",
   "description": "Language-neutral conformance corpus for numeric separator normalization. Both the Python (docpluck) and R (effectcheck) implementations must produce `expected` for every `input`. See SPEC.md.",
   "cases": [
@@ -499,6 +499,24 @@
       "expected": "A total of 1234567.89 records.",
       "rule": "F1",
       "note": "Multi-group European full notation."
+    },
+    {
+      "id": "locale-conflict-preserves-ambiguous",
+      "input": "In Study 1 the effect was reliable, t(58) = 2.41, p = .035, d = 0.80. In Study 2 Welch's correction gave t(2,758) = 3,21, d = 0,45.",
+      "expected": "In Study 1 the effect was reliable, t(58) = 2.41, p = .035, d = 0.80. In Study 2 Welch's correction gave t(2, 758) = 3.21, d = 0.45.",
+      "rule": "L3",
+      "note": "BOTH conventions are attested and neither dominates, so inference returns confidence='conflict' with decimal_mark=NA. The ambiguous d,ddd token t(2,758) must be preserved -- NOT stripped to 2758. Reading conflict as US published df=2758, N=2760 and a computed d=0.122 against a reported 0.45: a false WARN carrying a fabricated effect size on a correctly reported result. Note the operator-guarded 3,21 and 0,45 DO convert -- they are decisive European markers in their own right, and only the d,ddd shape is undecidable.",
+      "locale": "conflict",
+      "ambiguous": true
+    },
+    {
+      "id": "locale-conflict-is-not-no-evidence",
+      "input": "The sample was N = 1,234 participants and the effect was d = 0,80.",
+      "expected": "The sample was N = 1,234 participants and the effect was d = 0.80.",
+      "rule": "L3",
+      "note": "The N = 1,234 token is AMBIGUOUS and stays so. Contrast case locale-no-evidence-preserves (rule L2), whose IDENTICAL token resolves to 1234: the only difference is that this document also carries a decisive European marker (d = 0,80), which makes it conflicted rather than evidence-free. Both states set decimal_mark = NA, so an implementation that tests only the decimal mark cannot tell them apart and will strip this comma -- resolving an ambiguity it has no evidence to resolve.",
+      "locale": "conflict",
+      "ambiguous": true
     }
   ]
 }
