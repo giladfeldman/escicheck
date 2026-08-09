@@ -300,12 +300,31 @@ test_that("v0.7.3 R18: a parametric p beside a permutation p is verified, not di
 
   expect_equal(as.numeric(row$p_reported[1]), 0.001)
   expect_false(isTRUE(row$p_reported_is_resampling[1]))
-  # The parametric p is checkable, so the row must not carry resampling caveats.
-  expect_false(grepl("not reproducible even with the raw data",
-                     row$uncertainty_reasons[1], fixed = TRUE))
+  # The parametric p is checkable, so the row must not disclaim IT.
   expect_false(grepl("not recomputable from the test statistic",
                      row$uncertainty_reasons[1], fixed = TRUE))
   expect_false(row$status[1] %in% c("WARN", "ERROR"))
+
+  # v0.7.5 SHARPENED. This assertion was `expect_false(grepl("not reproducible
+  # even with the raw data", ...))` -- absence of a substring. That was the right
+  # test while the permutation p was being DISCARDED, because the only value the
+  # row knew about was the parametric one and any such claim had to be about it.
+  #
+  # Issue D now recovers the permutation p into `p_reported_secondary`, and the
+  # note is TRUE of that value: the paper reported a resampling p and never
+  # stated B. Suppressing a true statement to keep a substring absent would be
+  # testing the wording rather than the claim. So the property under test is the
+  # one that always mattered -- the row must not assert that the PARAMETRIC p is
+  # unknowable -- and it is now asserted directly.
+  reasons <- row$uncertainty_reasons[1]
+  expect_false(grepl("this p-value is not reproducible", reasons, fixed = TRUE))
+  expect_false(grepl("reported p (0.001) is not reproducible", reasons, fixed = TRUE))
+  if (grepl("not reproducible even with the raw data", reasons, fixed = TRUE)) {
+    # If the note is present at all, it must name the permutation p as its
+    # subject, and that p must be the recovered secondary value.
+    expect_match(reasons, "reported permutation p (0.002)", fixed = TRUE)
+    expect_equal(as.numeric(row$p_reported_secondary[1]), 0.002)
+  }
 })
 
 test_that("v0.7.3 R19: an UNPROVABLE binding stays conservative", {

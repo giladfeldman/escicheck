@@ -49,7 +49,8 @@
     wts = "Wald-type statistic (WTS)",
     ats = "ANOVA-type statistic (ATS)",
     brunner_munzel = "Brunner-Munzel test",
-    yuen = "Yuen trimmed-mean t"
+    yuen = "Yuen trimmed-mean t",
+    mean_diff_ci = "Mean difference (estimate + CI + p)"
   )
   if (type %in% names(lookup)) return(lookup[type])
   type

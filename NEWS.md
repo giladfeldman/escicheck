@@ -1,3 +1,327 @@
+# effectcheck 0.7.5
+
+**A backlog item that would have shipped a feature doing nothing, a p-value
+scraped off a figure legend, and a locale signal three rules computed and none
+read.** v0.7.5 closes the 2026-08-09 handoff. Two of its defects were found by
+*checking the premise before writing the code*, and one by verifying a fix
+against the article text rather than against the test that had just gone green.
+
+## Issue C -- the resample count B, and the feature that would have been inert
+
+The Monte Carlo floor check shipped in v0.6.22 (`p >= 1/(B+1)`, Phipson & Smyth
+2010) had **never fired on any paper**. Measured across the 48-file validation
+corpus before any change: ten rows carried a `resampling_method` and
+`resampling_B` was non-NA on **zero** of them. `resampling_p_below_floor` was
+FALSE everywhere -- not because every paper passed, but because the check had no
+B to test against. *A check that cannot fire is indistinguishable from one that
+passes.*
+
+The handoff attributed this to B being declared once in Methods, and prescribed a
+Methods prescan. That is half of it. The other half only appears by reading the
+paper: PNAS 10.1073/pnas.2404157121 does not write `B = 10,000` anywhere. It
+writes "For permutation tests, **ten thousand** random shuffles of labels ... were
+sampled" -- the count is SPELLED OUT, and a qualifier sits between it and its
+noun. A prescan for the digit form would have added a helper, a provenance value
+and a test suite, and still bound nothing on the one paper it was written for. Of
+the four resample-count declarations in the corpus, the previous clause-level
+scan could read exactly one.
+
+So the fix is a document-level Methods prescan (`.doc_resampling_b()`) **plus** a
+bounded number-word reader, `bootstrap\w*` on the qualifier, and a generic noun
+admitted when a resampling word is elsewhere in the same sentence. New column
+`resampling_B_source` (`own_clause` / `methods_prescan`), and every message that
+quotes B now says which. The PNAS paper's six resampling rows carry B = 10000 and
+the floor check is live.
+
+**The first draft of this feature shipped the exact defect the feature exists to
+prevent**, and the corpus scan caught it. `brjpsych_1.txt` contains
+`(b=0.81, z=2.80, p=0.005, OR=2.25, ...)`; the case-insensitive `B = <num>` form
+matched `b=0.81` and then stripped the `.` -- correct for a thousands separator,
+catastrophic for a decimal -- giving **B = 81**. A floor of 1/82 = 0.0122 would
+have declared every p below .0122 in that paper unattainable. Three guards now:
+case-sensitive uppercase `B`, an integral-shape requirement so `0.81` and `2.25`
+cannot pass, and a resampling word required in the same sentence.
+
+A whole-document scan was measured against the Methods-scoped one and **refused
+on the evidence**: it gains one correct bind (collabra.126266, whose declaration
+genuinely sits in Results) and two wrong ones, including `B = 60` scraped off a
+**grading scale** (`Grade A+=80% or above, A=70-79%, B=60-69%`). The positional
+scope pays for itself. collabra.126266 stays uncovered, deliberately, with the
+reason recorded.
+
+## Issue D -- the permutation p was being discarded
+
+A clause can report two p-values of different provenance:
+`t(2037) = -3.26, P = 0.001, P-permutation = 0.002`. `pat_p` binds the parametric
+0.001 -- it cannot see the hyphenated form at all -- and 0.002 was thrown away, so
+a reader of the output could not tell that a permutation p had been reported.
+
+New sibling **column** `p_reported_secondary` (plus `p_secondary_symbol`), never a
+second row: a new row would change `nrow()` for every consumer and silently shift
+every downstream index, and MetaESCI's field registry is frozen at v0.4.0, so it
+already tolerates unknown columns and cannot tolerate unknown rows. Scoped to the
+GLUED qualifier only, which is the whole safety argument -- a glued qualifier is
+*provably* invisible to `pat_p`, so what this captures is provably not what
+`pat_p` bound. A spaced qualifier may already BE the primary, and capturing it
+could publish the same number twice under two provenances.
+
+The floor / missing-B / Monte-Carlo-SE caveats now retarget to whichever p came
+out of the resampling distribution, and name it ("Reported permutation p (0.002)
+is below the minimum attainable ..."). Previously the entire block was skipped on
+exactly these rows.
+
+## A p-value scraped off a figure legend -- found by checking the source
+
+Verifying Issue D against the article text turned up a defect in the same paper.
+The PNAS figure caption is merged into the body by the extractor, ends
+`...***P < 0.001.`, and continues in LOWERCASE, so the chunk splitter -- which
+needs a capital or a digit -- cannot separate them. `pat_p` took the FIRST p in
+the merged chunk and the row published `t(2037) = -2.19, p_reported = 0.1`, status
+WARN, where the paper prints **P = 0.029** (and `2*pt(-2.19, 2037) = 0.02864`, so
+the correct value is consistent and the row is OK). A threshold from an asterisk
+key, attached to a real published statistic, with no flag.
+
+`pat_p` now refuses a p preceded by a legend marker (`*`, `~`, `+`, `#`, either
+spacing). Fixed at the p-binding rather than at the chunk boundary deliberately:
+a boundary rule would have to guess where the caption ends, while this states
+something simply true, and it cannot separate a statistic from its own values
+(invariant 6). 80 occurrences across 12 of the 48 corpus papers.
+
+**Whole-corpus diff: 0 rows gained, 0 lost, THREE changed -- all three this same
+defect in three different papers**, each new value checked against the article:
+
+| paper | was | is | legend |
+|---|---|---|---|
+| pnas_cognitive_memory_2024 | `p = 0.1` (WARN) | `p = 0.029` (OK) | `~P < 0.1` |
+| frontiers_retrocue_2024 | `p = 0.05` | `p = 0.271` | `*p<0.050` |
+| scireports_exercise_2025 | `p = 0.01` | `p = 0.021` | `# P<0.01` |
+
+## Locale `conflict` was computed by one function and read by none
+
+`infer_numeric_locale()` returns `decisive` / `none` / `conflict` and sets
+`decimal_mark = NA` for **two** of them. Three separate rules gated on
+`identical(decimal_mark, ",")`, which collapses `conflict` into `none`, so a
+document that actively contradicts itself was normalized as if it were decisively
+US. Reproduced: a document mixing `p = .035, d = 0.80` with
+`Welch's correction gave t(2,758) = 3,21, d = 0,45` stripped the comma and
+published `df = 2758`, `N = 2760` and a **computed** `d = 0.122` against a
+reported `0.45` -- a false WARN carrying a fabricated effect size on a correctly
+reported result. Under the decisive-European branch the identical string yields
+"cannot verify" with no computed value; `conflict` now reaches that same outcome.
+
+The third of those rules is one the v0.7.3 cross-model audit had **already fixed
+for the European case** -- by writing a fourth hand-maintained copy of the same
+test, which is precisely why the third state got past all of them. They now share
+`.locale_comma_unresolved()`. Corpus diff for this change alone: **0 of 764 rows
+change**, because 0 of 48 papers infer `conflict`. That emptiness is the evidence
+the change is safe, not a reason it was skippable -- a computed signal nothing
+reads is a trap, because it reads as handled at every site that mentions it.
+
+Shared normalization spec **1.3.0 -> 1.4.0**, 70 -> 72 conformance cases (new rule
+`L3`). SPEC.md's own version stamp had been stale at `1.0.0` for three minor
+versions; corrected.
+
+## New test type `mean_diff_ci` -- estimate + CI + p, no test statistic
+
+`ieee_access_alt` reports three results as `Mean difference of 457.66 articles,
+p-value = 7.171e-11, confidence interval (320.98, 594.35)` and produced **zero
+rows**: every pattern anchors on a test statistic or a standardized effect size
+and this clause has neither. The triple is nonetheless mutually checkable, and
+`md_hl` already establishes that a row may carry CI-symmetry and
+p-CI-consistency checks while claiming no effect size. Scope confirmed with the
+user before implementing.
+
+Three checks, and **no effect size is ever claimed** (a mean difference "in
+articles" has no standardizer in the clause; inventing one would be the
+cross-scale defect `ci_referent` exists to prevent):
+
+1. the estimate must be the **midpoint** of its own interval -- a
+   normal-approximation CI is symmetric by construction, unlike a
+   Hodges-Lehmann one;
+2. the interval implies `SE = (U - L)/(2z)`, and SE plus the estimate imply a
+   p-value, compared on a **ratio** -- these p-values are of order 1e-11, where
+   any absolute tolerance waves everything through (the v0.6.18 lesson);
+3. p and the interval must agree on the significance decision.
+
+The correctly reported paper is NOT flagged: implied 5.291e-11 against a reported
+7.171e-11, a factor of 1.36.
+
+Two supporting fixes, both general rather than scoped to the new type:
+
+- **`p-value = <e-notation>` parsed nothing.** `pat_p_enote` required the operator
+  directly after `p`, so `p-value = 7.171e-11` published `p_reported = NA` with
+  "not a valid probability (outside [0,1] or unparseable)" -- about an ordinary
+  probability written the way IEEE and the clinical journals write it. Fixed in
+  the shared pattern, so every test type gets it.
+- **Consecutive bulleted results were one chunk.** The splitter needed a capital
+  immediately after the whitespace and a list marker sits in between, so only the
+  first statistic in a bulleted list was ever extracted. The marker set includes
+  `U+FFFD`, because that is what the extractor actually delivers here -- the
+  bullet glyph is already lost upstream, and a rule that only knew `U+2022` would
+  not fire on the real text. The `(?<=[.!?])` anchor is kept, so invariant 6
+  holds.
+
+Corpus diff: **0 rows lost, 0 changed, 3 gained**, all in this previously
+zero-row paper.
+
+## Build determinism (P0 from the 2026-08-07 portfolio survey)
+
+`Dockerfile:1` was the only literal `:latest` base image in the portfolio, and
+`effectsize` and `MBESS` -- which compute the effect sizes and confidence
+intervals -- installed from a moving repository. The same commit could publish a
+different CI on two different days with nothing to attribute the change to.
+
+- Base image **pinned by digest**, verified two ways: it is what Docker Hub's
+  `:latest` currently resolves to AND what the live Render build resolved for the
+  image serving production. The pin is a no-op for behaviour.
+- CRAN **pinned to a dated snapshot**. Not via `ENV CRAN=` -- the base image bakes
+  its repository into `Rprofile.site` as a literal at image-build time
+  (rocker-versioned2 `setup_R.sh:34`, read at the pinned revision) and never
+  re-reads the variable, so that would have looked like a pin and changed
+  nothing. The date is deliberately not "today": p3m.dev publishes a day in
+  arrears and `.../2026-08-09` returned 404 while `2026-08-08` returned 200.
+- Every `repos=` override removed, so there is one source of truth. The previous
+  explicit `cloud.r-project.org` also silently bypassed the image's own binary
+  repository, so those packages compiled from source while
+  `remotes::install_local` used a different, binary one. Two repositories, one
+  image.
+- `/health` now reports `engine_versions` (R, platform, effectsize, MBESS,
+  stringi, stringr, ICU). Pinning makes the number stable; recording makes a
+  change attributable, and neither substitutes for the other.
+- `worker/requirements.txt` deleted -- referenced by no Dockerfile or workflow,
+  and it still listed `tesseract`, removed in v0.4.0.
+
+**The Docker build is not verified locally** (no Docker daemon available in this
+session). Every input was verified against its primary source -- the registry
+digest, the p3m snapshot URL, and the base image's own `setup_R.sh` -- but the
+first real proof is the deploy, and the version gate below is what will surface a
+failure instead of hiding it.
+
+## Deploy and CI
+
+- **A push is not a deploy.** The 2026-08-08 v0.7.3 deploy is recorded on Render
+  as `update_failed`: the Docker build SUCCEEDED in 78 seconds, then the container
+  never bound its port, Render timed the deploy out after 15 minutes and rolled
+  back to the v0.6.20 image -- which then answered `{"status":"healthy"}` for 15
+  hours. **The `:latest` base image was NOT the cause** (the build was cache-warm
+  and the digest resolved fine); the leading hypothesis in the handoff is refuted
+  by the build log. Also note the five "lost releases" were ONE push: 0.6.21
+  through 0.7.3 are NEWS entries inside commit `07c4822`.
+- `scripts/verify-deployed-version.mjs` polls `/health` until the committed
+  version is served (exit 0 landed / 1 drift / 2 unverifiable -- the same contract
+  as the one-shot `deploy-drift-check.sh`, which answers a different question).
+  Both read `.claude/deploy-targets.json`, and a release contract now fails if
+  either drifts from it.
+- `npm audit` moved AFTER the browser E2E gate. It ran before `playwright
+  install`, so two HIGH transitive advisories turned the job red and GitHub
+  SKIPPED the E2E suite -- it had not run in CI for at least two releases, behind
+  a single red X that read as one dependency problem. Pinned by a release
+  contract.
+- The 4 remaining MODERATE advisories are **cleared**, and not by the upgrade the
+  previous note assumed: they traced to our own `overrides` block pinning
+  `postcss` to `8.5.21`, which is *below* the advisory's fix line (`<=8.5.22`). A
+  July 2026 security pin had outlived its reason and become the cause. Bumped to
+  `8.5.26`; `npm audit` reports 0 vulnerabilities, `next` untouched.
+
+## Filed to docpluck, not fixed here
+
+**DP-14** (`docs/DOCPLUCK_HANDOFF_2026-08-09.md`): `bmj_1`'s supplementary table
+arrives **column-major** -- one cell per line, no row grouping, and a header split
+mid-word (`Odds Ratio or Coefficien` / `t for Treatmen t Group`). Reassembling it
+means guessing which estimate pairs with which interval, and a wrong guess there
+is not a missing row but a **fabricated** one -- the v0.7.4 two-column defect and
+DP-11 both. ESCImate correctly renders nothing rather than something plausible
+and wrong.
+
+## Cross-model review — 12 findings, 8 confirmed and fixed, 4 refuted
+
+Codex (gpt-5.5) and Claude Sonnet reviewed the diff independently. Every finding
+was REPRODUCED locally before being acted on, and every refutation was
+reproduced before being dismissed. Two of the confirmed defects were in code
+this release added to PREVENT that exact defect class, which is the argument for
+the review in one line.
+
+**Confirmed and fixed (8).** Seven concern `.resample_count_in()` / the Methods
+prescan, where a wrong B produces a Monte-Carlo floor of `1/(B+1)` and therefore
+a FALSE ACCUSATION against a correctly reported p-value:
+
+| # | input that bound a wrong B | was |
+|---|---|---|
+| 1 | `"Bootstrap analyses were not used; vitamin B = 60 mg was administered."` | `B = 60` — the sentence-level resampling gate is satisfied by a NEGATED mention |
+| 2 | `"Grade A+=80%, A=70-79%, B=60-69%, C=50-59%"` | `B = 60` — the UNSPACED grading scale; the first fix only refused the spaced `B = 60 mg` form |
+| 3 | `"Each condition was tested with 60 replicates."` | `B = 60` — `replicates` is ordinary wet-lab vocabulary and its branch was ungated |
+| 4 | `"We enrolled 240 iterations of the survey; a permutation test followed later."` | `B = 240` — the loose noun accepted a resampling word anywhere in the sentence, in any order |
+| 5 | a count in an `Appendix` after a `Methods` heading | adopted — `Appendix` was not a closing heading |
+| 6 | a count after `3.1 Sample Characteristics` | adopted — and no numbering rule can fix it, because `normalize_text()` strips section numbers before the prescan runs (verified, after a first fix that assumed otherwise and did nothing) |
+
+Every count form now requires a resampling word in its own sentence — the
+unambiguous nouns satisfy that themselves, so the gate costs nothing — the loose
+noun additionally requires the qualifier to PRECEDE the number and sit near it,
+`B = <n>` must have nothing else claiming the number, and the Methods region
+closes on any short standalone heading-like line rather than on a vocabulary
+that can always be incomplete.
+
+7. **`mean_diff_ci` false-fired on ordinary rounding.** The CI-symmetry check
+   used a fraction of the interval width, and a correctly reported narrow
+   interval at 2 dp exceeds it for no reason but rounding: `0.06, 95% CI [0.02,
+   0.09]` gives a relative asymmetry of 0.143 against a 0.02 threshold, on
+   numbers that are exactly consistent before rounding. The tolerance is now
+   ROUNDING, not a fraction: each value is rounded to its own last place, so the
+   midpoint can legitimately differ from the estimate by about one unit there.
+   A genuinely mis-stated estimate is still caught.
+
+8. **The bullet chunk rule could sever a chi-square from its own odds ratio.**
+   `"chi2(1) = 12.74, p = .013. - N = 211, OR = 0.99, 95% CI [0.77, 1.27]."`
+   degraded from `mcnemar_or` carrying OR = 0.99 [0.77, 1.27] to a bare `chisq`
+   with both NA — invariant 6, and exactly how collabra.37122 lost an odds ratio
+   in v0.7.4. A hyphen is also a dash, a minus and a range, so the marker alone
+   is not evidence; the boundary now additionally requires that what FOLLOWS the
+   marker is not a statistic assignment (`N =`, `OR =`).
+
+   Removing `-` from the marker set was tried first and **silently reverted
+   ieee_access_alt from 3 rows to 1**: `normalize_text()` maps the U+FFFD the
+   extractor delivers to a HYPHEN before chunking, so `-` was the load-bearing
+   member all along and this file's own comment crediting U+FFFD was wrong. Now
+   asserted per-marker so it cannot recur unnoticed.
+
+**Refuted, and recorded rather than "fixed" (4).**
+
+- *"a 99% CI is graded against z(.975)"* — `ci_level` is read from the text
+  (`ci_level_source = "inferred_from_context"`) and the implied p uses z(.995).
+- *"the midpoint check does not fire on 1.04 vs a midpoint of 1.00"* — it does;
+  the reviewer's asymmetry arithmetic was wrong by a factor of two.
+- *"a blank line before a digit splits a mean difference from its CI"* — the
+  `(?<!\d\.)` guard blocks it, as v0.7.4 designed.
+- *"the dual-p retargeting names the wrong value"* — independently re-verified:
+  the floor message binds to the permutation p and says so, while `p_computed`
+  is still compared against the parametric `p_reported`.
+
+One finding is **accepted as a deliberate trade-off, not fixed**: the legend
+guard also refuses a per-result marginal-significance marker (`+p = .08`). The
+corpus has 80 legend occurrences and ZERO alnum-preceded ones, and the two
+failure directions are not symmetric — refusing loses a p (the row reports NA
+and checks nothing), while admitting publishes a legend threshold AS a reported
+p-value. Losing a value is recoverable; fabricating one is not.
+
+**Blast radius of all eight fixes: 0 rows gained, 0 lost, 0 changed** across the
+48-paper corpus. They are pure tightening on shapes that do not occur in it —
+which is the point: they were found by construction, not by the corpus, and the
+corpus is what proves they cost nothing.
+
+## Verification
+
+- Suite **1187 `test_that` blocks / 0 failures** across 141 files; every new test
+  watched RED against the unfixed code first.
+- Conformance corpus 72 cases.
+- Whole-corpus diff over 48 real-article texts: 767 rows (from 764) -- 3 gained,
+  0 lost, 3 changed, every change verified against the article text.
+- One pre-existing test was **sharpened, not deleted**. v0.7.3 R18 asserted the
+  absence of a substring, which was right while the permutation p was discarded
+  and is not now that the note is true of a value the row actually holds. It now
+  asserts the property that always mattered -- the row must not claim the
+  PARAMETRIC p is unknowable -- and additionally that any such note names the
+  permutation p as its subject.
+
 # effectcheck 0.7.4
 
 **A column boundary was being read as part of a sentence, so an effect size from
