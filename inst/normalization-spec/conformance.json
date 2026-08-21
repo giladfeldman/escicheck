@@ -1,6 +1,6 @@
 {
-  "spec_version": "1.4.0",
-  "derived_from": "docpluck normalize.py A3a + A3, v2.4.126",
+  "spec_version": "1.5.0",
+  "derived_from": "originally docpluck normalize.py steps A3a + A3 (docpluck v2.4.126). Those steps were DELETED in docpluck v2.4.129-v2.4.130; effectcheck is now the only implementation. See SPEC.md 'Status change, 2026-08-21'.",
   "description": "Language-neutral conformance corpus for numeric separator normalization. Both the Python (docpluck) and R (effectcheck) implementations must produce `expected` for every `input`. See SPEC.md.",
   "cases": [
     {
@@ -517,6 +517,62 @@
       "note": "The N = 1,234 token is AMBIGUOUS and stays so. Contrast case locale-no-evidence-preserves (rule L2), whose IDENTICAL token resolves to 1234: the only difference is that this document also carries a decisive European marker (d = 0,80), which makes it conflicted rather than evidence-free. Both states set decimal_mark = NA, so an implementation that tests only the decimal mark cannot tell them apart and will strip this comma -- resolving an ambiguity it has no evidence to resolve.",
       "locale": "conflict",
       "ambiguous": true
+    },
+    {
+      "id": "d1-percent-then-citation-run",
+      "input": "The rate was ~25%6,28 in that sample.",
+      "expected": "The rate was ~25%6,28 in that sample.",
+      "rule": "D1",
+      "note": "Spec 1.5.0. A percentage followed by CITATION SUPERSCRIPTS. Reported by docpluck 2026-08-13 and reproduced at effectcheck HEAD, where it became '%6.28'. `%` is now in D1's lookbehind exclusions: a European decimal is never written immediately after a percent sign, so the exclusion costs no coverage."
+    },
+    {
+      "id": "d1-integer-part-capped-at-four",
+      "input": "The value was 9999999,1 in that condition.",
+      "expected": "The value was 9999999,1 in that condition.",
+      "rule": "D1",
+      "note": "Spec 1.5.0. Reported by docpluck 2026-08-13 as a SPEC-vs-CODE contradiction and reproduced: the SPEC said one digit before the comma, the code allowed (\\d+), and this became 9999999.1. Resolved at four digits -- see SPEC.md rule D1."
+    },
+    {
+      "id": "d1-multi-digit-integer-part-still-converts",
+      "input": "The statistic was 1234,56 overall.",
+      "expected": "The statistic was 1234.56 overall.",
+      "rule": "D1",
+      "note": "Spec 1.5.0. The counterweight to the case above, and the reason the SPEC's original one-digit rule was NOT adopted: a continental paper really does write this, and a one-digit port silently stopped converting it."
+    },
+    {
+      "id": "d1-author-affiliation-run-space-separated",
+      "input": "Erik. T. Frank 1,2 , Lucie Kesner 3 and others.",
+      "expected": "Erik. T. Frank 1,2 , Lucie Kesner 3 and others.",
+      "rule": "D1",
+      "note": "Spec 1.5.0. Reported by docpluck 2026-08-13 and reproduced ('Frank 1.2'). The glued form is blocked by the letter lookbehind and a 3+ run by the width test; a two-element run separated by a SPACE fell through both. Keyed on the author-list punctuation that follows (' ,'), not on the name."
+    },
+    {
+      "id": "d1-affiliation-guard-does-not-eat-a-real-decimal",
+      "input": "Values were Median 0,45, SD 0,12.",
+      "expected": "Values were Median 0.45, SD 0.12.",
+      "rule": "D1",
+      "note": "Spec 1.5.0. The control for the case above, and it caught a real defect in the first draft of that guard: with `\\s*,` instead of a literal ' ,' this input was protected and a genuine European decimal stopped converting."
+    },
+    {
+      "id": "structural-software-version-string",
+      "input": "Analyses used software v2.1.451,52.",
+      "expected": "Analyses used software v2.1.451,52.",
+      "rule": "structural",
+      "note": "Spec 1.5.0. Reported by docpluck 2026-08-13 and reproduced ('v2.1451.52.'). A dotted version is shaped exactly like European full notation, so a trailing citation run fused with it. Versions are identifiers and are now lifted out alongside DOIs."
+    },
+    {
+      "id": "structural-coded-list-prefix-match",
+      "input": "Participants scored 0,87 on average.",
+      "expected": "Participants scored 0.87 on average.",
+      "rule": "structural",
+      "note": "Spec 1.5.0. docpluck reported this as a false negative in the coded|dummy|scored vocabulary and was about to adopt that vocabulary because of it. The vocabulary was never the cause: each element of the protected run is a single \\d, so the pattern matched the PREFIX '0,8'. A trailing (?!\\d) fixes it."
+    },
+    {
+      "id": "structural-coded-list-still-protected",
+      "input": "Gender was coded 0,1 in the model.",
+      "expected": "Gender was coded 0,1 in the model.",
+      "rule": "structural",
+      "note": "Spec 1.5.0. The control: a genuine two-level dummy coding must stay protected."
     }
   ]
 }

@@ -32,7 +32,18 @@ critical_columns <- c(
   ## whose effect size was suppressed at parse time from one where the paper
   ## reported none; losing it silently restores exactly the false all-clear
   ## this release removed.
-  "effect_guard_rejected", "effect_guard_reason", "ci_referent"
+  "effect_guard_rejected", "effect_guard_reason", "ci_referent",
+  ## v0.7.6 additions. Same rationale as the v0.6.20 block above: these are
+  ## documented API surface in API.md, and each one is the ONLY way a consumer
+  ## can distinguish a state that otherwise looks like an absence.
+  ##  * `SE_guard_rejected` separates "a standard error was present and REFUSED
+  ##    as impossible" from "no standard error was reported". Losing it restores
+  ##    exactly the silent-loss class v0.6.20 removed, one field over.
+  ##  * `upstream_sign_rewrites` separates "the extractor reported no value
+  ##    rewrites" (0) from "the extractor told us nothing" (NA). Only the first
+  ##    is an all-clear.
+  "SE_guard_rejected", "SE_guard_reason",
+  "upstream_sign_rewrites", "upstream_normalization_version"
 )
 
 sample_text <- paste(
