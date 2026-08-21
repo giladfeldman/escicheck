@@ -1,10 +1,45 @@
 # Numeric separator normalization spec
 
-**Spec version:** `1.4.0`
-**Derived from:** docpluck `normalize.py` steps A3a + A3, as of docpluck v2.4.126
-**Status:** proposed to docpluck as the canonical definition (see
-`REQUEST_TO_DOCPLUCK_normalization_spec.md`). Until docpluck adopts it, this
-document records the semantics effectcheck implements and tests against.
+**Spec version:** `1.5.0`
+**Derived from:** originally docpluck `normalize.py` steps A3a + A3 (as of docpluck
+v2.4.126). **Those steps no longer exist.**
+**Status:** **effectcheck is now the ONLY implementation.** This document records the
+semantics effectcheck implements and tests against; it is no longer a two-implementation
+contract awaiting docpluck's adoption.
+
+## Status change, 2026-08-21 (effectcheck v0.7.6)
+
+docpluck **deleted its entire EU→US separator machinery**: `A3` (decimal comma) and
+`A3a` (thousands strip) in v2.4.129–v2.4.130, along with `A2`, `A3c`, `A3d`, `W0n`, and
+the whole document-level locale feature (`infer_numeric_locale`, `NumericLocale`,
+`NormalizationReport.numeric_locale`). Verified against the live library on 2026-08-21:
+`d = 0,80`, `U = 12,345`, `N = 185,178` and `M = 1,234.56` are all delivered **verbatim**.
+
+Three consequences, all of which change how this document should be read:
+
+1. **The provenance line above is history, not a citation.** The steps this spec was
+   derived from are gone. Nothing here can be checked against docpluck's implementation
+   any more, because docpluck has no implementation.
+2. **effectcheck's locale inference now works BETTER, not worse.** docpluck's 2026-08-13
+   outbox argued that rules L1/L2/L3 "cannot fire in the real pipeline", because
+   docpluck's own conversion inverted the evidence the inference votes on. That was true
+   when written and is now false: docpluck no longer touches the tokens the detector
+   reads, so the detector sees the source convention. v0.7.5's `conflict`-state work is
+   validated by this change, not obsoleted by it.
+3. **`REQUEST_TO_DOCPLUCK_normalization_spec.md` is moot** and should be closed rather
+   than sent. Its central ask — that docpluck distinguish `conflict` from `none` when
+   gating on an inferred locale — asks docpluck to fix a rule it has deleted. The two
+   cases it raised where we believed docpluck's lookahead was wrong are likewise moot.
+
+**Rule D1's integer-part bound changed in this release, and the SPEC yielded to the
+code rather than the other way round.** docpluck correctly reported that this document
+called "exactly one digit before the comma" the single most important constraint while
+the shipped regex allowed `(\d+)`. Both were wrong. One digit is too strict to ship — a
+continental paper really does write `M = 12,34` and `t = 1234,56`, and an earlier
+one-digit port silently stopped converting them — while unbounded produced
+`9999999,1 → 9999999.1`. The integer part is now capped at **four digits**, which covers
+the real continental shapes and refuses the rest; rule T1 has already removed every
+unambiguous thousands group by the time D1 runs, so nothing longer can be a decimal.
 
 ## Why this exists
 
@@ -78,23 +113,43 @@ reinterpreted as a Welch df of 2.758, and one article dropped 47 rows.
 ## Rule D1 — decimal comma (runs SECOND, on T1's output)
 
 ```
-(?<![a-zA-Z,0-9\[(])(\d),(\d{1,3})(?=\s|[;)\]]|\.(?!\d)|$)
+(?<![a-zA-Z,0-9.%])(?<![A-Z][\[(])(\d{1,4}),(\d+)(?!\d)
 ```
 → `\1.\2`
 
-**Exactly one digit before the comma.** This is the single most important
-constraint in the spec and the one effectcheck previously got wrong: its rule
-allowed `[-+]?\d+` before the comma, so `12,345` matched and was destroyed.
-A European decimal in real text has one integer digit (`0,05`, `1,5`, `9,81`);
-anything with two or more digits before a comma is a thousands group.
+**At most FOUR digits before the comma** (`\d{1,4}`), revised in spec 1.5.0.
+
+The original wording — "exactly one digit before the comma" — was called the single
+most important constraint here, and it was half right. It correctly diagnosed the
+1000× defect it was written for: effectcheck's rule allowed `[-+]?\d+`, so `12,345`
+matched and was destroyed, publishing a rank-biserial of `0.99938` against a truth of
+`0.38275` at status `OK`.
+
+But one digit is **too strict to ship**. Continental papers write `M = 12,34` and
+`t = 1234,56`, and a port that required a single digit silently stopped converting
+them — trading a loud error for a quiet one. Unbounded is also wrong: docpluck
+reported, and effectcheck reproduced, `9999999,1 → 9999999.1`.
+
+Four digits is the bound that admits every real continental shape and refuses the
+rest. It is safe because **rule T1 runs first** and has already consumed every
+unambiguous thousands group, so a comma still standing between digits at this point
+is a decimal — unless the integer run is so long that no decimal notation would
+produce it.
 
 Lookbehind exclusions, each with a known failure it prevents:
 
 - `a-zA-Z` — author affiliation superscripts (`Braunstein1,3`).
 - `,` — the middle of a multi-affiliation run (`Wagner1,3,4`).
 - `0-9` — CI pairs (`[0.45,0.89]`) and already-formed decimal lists.
-- `[` and `(` — tight df brackets (`F[2,42]`), which MetaESCI D2 (2026-04-11)
-  showed being corrupted into `F[2.42]`.
+- `.` — an already-formed decimal (`[0.45,0.89]` matched `45,0` without it).
+- `%` — **added in spec 1.5.0.** A percentage followed by citation superscripts:
+  docpluck reported, and effectcheck reproduced, `~25%6,28 → %6.28`. A European
+  decimal is never written immediately after a percent sign, so the exclusion
+  costs nothing.
+- `[A-Z]` immediately followed by `[` or `(` — tight df brackets (`F[2,42]`),
+  which MetaESCI D2 (2026-04-11) showed being corrupted into `F[2.42]`. Keyed on
+  a preceding CAPITAL rather than a bare bracket, so a CI written `CI [0,12, 0,78]`
+  still converts while a stat bracket written `F[` does not.
 
 The lookahead is deliberately restrictive. Broadening it to `[^0-9a-zA-Z]`
 (as effectcheck previously did) caused ordering regressions with CI parsing.

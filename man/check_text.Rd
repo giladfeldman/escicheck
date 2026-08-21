@@ -31,7 +31,8 @@ check_text(
   design_ambiguous_action = "WARN",
   unknown_groups_action = "WARN",
   min_confidence = 0L,
-  table_rows = NULL
+  table_rows = NULL,
+  extraction_provenance = NULL
 )
 }
 \arguments{
@@ -89,6 +90,19 @@ statistics. Rows whose \code{fields} carry a recognised statistic are mapped via
 pipeline as text-parsed rows, tagged \code{result_context = "table"} and
 deduplicated against any identical prose row. Default NULL (text-only;
 output is byte-identical to prior versions).}
+
+\item{extraction_provenance}{Optional list: the extractor's own normalization
+report, passed through verbatim (docpluck's \code{normalization} block). Read,
+never reinterpreted. It records whether the extractor REWROTE VALUES in this
+document rather than merely canonicalising notation -- docpluck's
+sign-recovery rules can turn a printed \code{SE = 0.199} into \code{-0.199}, and
+before v0.7.6 that rewrite was invisible downstream. Surfaced as the
+document-level columns \code{upstream_sign_rewrites} (integer; NA when no
+report was supplied, 0 when one was supplied and reported none) and
+\code{upstream_normalization_version}. Deliberately does NOT set
+\code{extraction_suspect}: the report is document-level, that flag is
+per-row and gates effect-size rewriting and two ERROR-path downgrades.
+Default NULL.}
 }
 \value{
 An effectcheck S3 object whose \code{results} tibble carries the

@@ -429,6 +429,8 @@ VARIANT_METADATA <- list(
     ci_check_status = NA_character_, ci_method_match = NA_character_, ci_referent = NA_character_,
     effect_guard_rejected = isTRUE(g1("effect_guard_rejected", FALSE)),
     effect_guard_reason = as.character(g1("effect_guard_reason", NA_character_)),
+    SE_guard_rejected = isTRUE(g1("SE_guard_rejected", FALSE)),
+    SE_guard_reason = as.character(g1("SE_guard_reason", NA_character_)),
     ci_width_ratio = NA_real_, ci_symmetry = NA_character_,
     ci_level_mismatch   = NA_character_,
     ci_clipped_to_bound = NA_character_,
@@ -861,6 +863,23 @@ compute_and_compare_one <- function(row,
     NA_character_
   }
 
+  # v0.7.6: the parse-time impossible-SE guard. Same read shape as the effect
+  # guard above, and deliberately a SEPARATE pair of fields: a row can carry a
+  # perfectly good effect size and an impossible standard error, so collapsing
+  # the two would let one rejection hide the other.
+  SE_guard_rejected <- if ("SE_guard_rejected" %in% names(row) &&
+                           length(row$SE_guard_rejected) > 0) {
+    isTRUE(row$SE_guard_rejected[1])
+  } else {
+    FALSE
+  }
+  SE_guard_reason <- if ("SE_guard_reason" %in% names(row) &&
+                         length(row$SE_guard_reason) > 0) {
+    as.character(row$SE_guard_reason[1])
+  } else {
+    NA_character_
+  }
+
   ciL_rep <- if (length(row$ciL_reported) > 0) as.numeric(row$ciL_reported[1]) else NA_real_
   ciU_rep <- if (length(row$ciU_reported) > 0) as.numeric(row$ciU_reported[1]) else NA_real_
 
@@ -1085,6 +1104,8 @@ compute_and_compare_one <- function(row,
       ci_check_status = NA_character_, ci_method_match = NA_character_, ci_referent = NA_character_,
       effect_guard_rejected = effect_guard_rejected,
       effect_guard_reason = effect_guard_reason,
+      SE_guard_rejected = SE_guard_rejected,
+      SE_guard_reason = SE_guard_reason,
       ci_width_ratio = NA_real_, ci_symmetry = NA_character_,
       ci_level_mismatch   = NA_character_,
       ci_clipped_to_bound = NA_character_,
@@ -1252,6 +1273,11 @@ compute_and_compare_one <- function(row,
   # of the O-1 corruptions took exactly this silent-loss path.
   if (effect_guard_rejected) {
     uncertainty <- c(uncertainty, effect_guard_reason)
+  }
+  # v0.7.6: same treatment for a refused standard error -- a suppressed value
+  # must never be indistinguishable from an absent one.
+  if (SE_guard_rejected && !is.na(SE_guard_reason)) {
+    uncertainty <- c(uncertainty, SE_guard_reason)
   }
 
   # Add uncertainty if effect size matched via fallback pattern (Phase 2F)
@@ -4967,10 +4993,23 @@ compute_and_compare_one <- function(row,
           )
         )
       } else {
-        # No SE (or no df) means the b-scale interval cannot be recomputed. Say
-        # so and suppress the comparison rather than grading the b interval
-        # against a standardized one -- that produced a false INCONSISTENT.
-        uncertainty <- c(uncertainty, paste0(
+        # No usable SE (or no df) means the b-scale interval cannot be
+        # recomputed. Say so and suppress the comparison rather than grading the
+        # b interval against a standardized one -- that produced a false
+        # INCONSISTENT.
+        #
+        # v0.7.6: name the ACTUAL reason. This branch is also reached when an SE
+        # was present but REFUSED as impossible (see the parse-time guard), and
+        # the old wording -- "at least one is absent" -- was then simply false.
+        # On a platform whose product is accuracy, a wrong explanation of why we
+        # could not check something is itself a defect: it sends the reader
+        # looking for a missing field that is not missing.
+        uncertainty <- c(uncertainty, if (SE_guard_rejected) paste0(
+          "The b-scale interval cannot be recomputed: this row's standard error ",
+          "was rejected as impossible, so there is no usable SE to build a Wald ",
+          "interval from. Comparing the reported interval against a standardized ",
+          "one would be a cross-scale comparison, so the CI check is skipped."
+        ) else paste0(
           "The b-scale interval cannot be recomputed (that needs both SE and df, ",
           "and at least one is absent), and comparing it against a standardized ",
           "interval would be a cross-scale comparison, so the CI check is skipped."))
@@ -5612,6 +5651,13 @@ compute_and_compare_one <- function(row,
   if (effect_guard_rejected) {
     extraction_suspect <- TRUE
   }
+  # v0.7.6: an impossible standard error is an extraction problem by definition.
+  # Scoped to THIS row -- the one whose own invariant failed -- and never to
+  # every row in a document, because extraction_suspect also gates effect-size
+  # decimal REWRITING and two ERROR-path downgrades further down this function.
+  if (SE_guard_rejected) {
+    extraction_suspect <- TRUE
+  }
   if (!is.na(delta_effect_abs) && delta_effect_abs > EXTREME_DELTA_THRESHOLD) {
     extraction_suspect <- TRUE
     uncertainty <- c(uncertainty,
@@ -5718,6 +5764,38 @@ compute_and_compare_one <- function(row,
         .bounded[[.nm]], .bounded[[.nm]]))
     }
   }
+  # v0.7.6: a REPORTED interval whose lower bound exceeds its upper bound. Like
+  # the two checks around it this is a shape anomaly recognisable without
+  # knowing the right answer -- an interval is an ordered pair by definition.
+  #
+  # The occasion is a measured one. docpluck's rule W0g infers a missing minus
+  # from arithmetic, and on ESCImate's own corpus paper efendic_2022_affect it
+  # rewrote the printed `[0.04, 0.25]` into `[0.04, -0.25]`. Neither the
+  # negative-SE guard nor any p-range check can see that: both bounds are
+  # individually plausible numbers, and only their ORDER is impossible. A
+  # cross-model reviewer named this gap while reviewing the SE guard, and the
+  # corpus evidence for it was already in hand.
+  #
+  # Reported, not computed: a computed interval is built ordered by
+  # construction, so this can only ever be an extraction or reporting fault. As
+  # with the bounded-value check above, the value is SHOWN rather than nulled --
+  # a reader who sees the reversed pair can recognise the failure, and hiding it
+  # would make an extraction artefact look like a paper that reported no
+  # interval at all.
+  if (!is.na(ciL_rep) && !is.na(ciU_rep) &&
+      is.finite(ciL_rep) && is.finite(ciU_rep) && ciL_rep > ciU_rep) {
+    extraction_suspect <- TRUE
+    impossible_value <- TRUE
+    uncertainty <- c(uncertainty, sprintf(
+      paste("IMPOSSIBLE VALUE: the reported interval [%s, %s] is reversed --",
+            "its lower bound exceeds its upper bound, which no interval can do.",
+            "Either the bounds were transposed, or a minus sign was gained or",
+            "lost on one of them during extraction. The CI check is not",
+            "meaningful against a reversed interval, so treat this row's",
+            "interval as unverified and check the source document."),
+      format(ciL_rep), format(ciU_rep)))
+  }
+
   # U and W are counts of pairwise wins, hence integers. A fractional value is
   # a shape anomaly detectable WITHOUT knowing the correct value -- "U = 12.345"
   # announces itself.
@@ -7963,6 +8041,8 @@ compute_and_compare_one <- function(row,
     ci_referent = ci_referent,
     effect_guard_rejected = effect_guard_rejected,
     effect_guard_reason = effect_guard_reason,
+    SE_guard_rejected = SE_guard_rejected,
+    SE_guard_reason = SE_guard_reason,
     ci_width_ratio = ci_width_ratio,
     ci_symmetry = ci_symmetry,
     # v0.3.5 (MetaESCI 2C/2D/2E)
@@ -8256,6 +8336,18 @@ compute_and_compare_one <- function(row,
 #'   pipeline as text-parsed rows, tagged \code{result_context = "table"} and
 #'   deduplicated against any identical prose row. Default NULL (text-only;
 #'   output is byte-identical to prior versions).
+#' @param extraction_provenance Optional list: the extractor's own normalization
+#'   report, passed through verbatim (docpluck's `normalization` block). Read,
+#'   never reinterpreted. It records whether the extractor REWROTE VALUES in this
+#'   document rather than merely canonicalising notation -- docpluck's
+#'   sign-recovery rules can turn a printed `SE = 0.199` into `-0.199`, and
+#'   before v0.7.6 that rewrite was invisible downstream. Surfaced as the
+#'   document-level columns \code{upstream_sign_rewrites} (integer; NA when no
+#'   report was supplied, 0 when one was supplied and reported none) and
+#'   \code{upstream_normalization_version}. Deliberately does NOT set
+#'   \code{extraction_suspect}: the report is document-level, that flag is
+#'   per-row and gates effect-size rewriting and two ERROR-path downgrades.
+#'   Default NULL.
 #' @return An effectcheck S3 object whose `results` tibble carries the
 #'   parsed and recomputed statistics. Notable output columns:
 #'   \describe{
@@ -8347,10 +8439,70 @@ check_text <- function(text,
                        design_ambiguous_action = "WARN",
                        unknown_groups_action = "WARN",
                        min_confidence = 0L,
-                       table_rows = NULL) {
+                       table_rows = NULL,
+                       extraction_provenance = NULL) {
   # Resource Limit Check: Text Length
   if (sum(nchar(text)) > max_text_length) {
     stop("Text too long. Maximum total length: ", max_text_length, " characters")
+  }
+
+  # v0.7.6: DOCUMENT-LEVEL upstream provenance.
+  #
+  # `extraction_provenance` is the extractor's own normalization report --
+  # docpluck's `normalization` block, passed through verbatim by the worker. We
+  # read it; we do not reinterpret it.
+  #
+  # Why this exists. docpluck's normalization does not only canonicalise
+  # notation, it sometimes REWRITES VALUES -- its rule W0g infers a missing
+  # minus from arithmetic, and on ESCImate's own corpus it turned a printed
+  # `SE = 0.199` into `-0.199`, a printed `p = 0.069` into `-0.069`, and a
+  # printed `[0.04, 0.25]` into `[0.04, -0.25]`. Until now a document could
+  # arrive with rewritten statistics and nothing downstream could tell.
+  #
+  # Keyed on docpluck's METRIC KEY (`dropped_minus_signs_recovered`), never on a
+  # rule name. Two reasons: docpluck has said it intends to delete W0g, and a
+  # name-keyed branch would then go silently dark -- a check that cannot fire is
+  # indistinguishable from one that passes. A metric key is the contract; a rule
+  # name is their internal detail. When the rule goes, the count simply drops to
+  # zero and this degrades to a no-op with no code change here.
+  #
+  # DOCUMENT-LEVEL, and deliberately NOT wired to `extraction_suspect`. That
+  # flag gates effect-size decimal REWRITING and two ERROR-path downgrades, so
+  # setting it on every row of a paper because one span was rewritten would
+  # demote unrelated genuine inconsistencies. This reports; it does not judge.
+  # Per-row suspicion is reserved for rows whose own invariant failed.
+  # ABSENT KEY MEANS ZERO, but only when the report itself is present. Measured
+  # against a live docpluck response (2026-08-21): `changes_made` carries a key
+  # ONLY for a step that actually fired, so a document with no sign rewrites has
+  # no `dropped_minus_signs_recovered` key at all rather than a key set to 0.
+  # Reading that absence as "unknown" would have made the common case
+  # indistinguishable from "we were told nothing" -- and an unknown that is
+  # really a zero is the kind of permanent NA nobody ever investigates.
+  .prov_num <- function(x) {
+    if (is.null(x) || length(x) == 0L) return(NA_integer_)
+    v <- suppressWarnings(as.integer(x[[1]]))
+    if (length(v) != 1L || is.na(v)) NA_integer_ else v
+  }
+  upstream_sign_rewrites <- NA_integer_
+  upstream_normalization_version <- NA_character_
+  if (!is.null(extraction_provenance) && is.list(extraction_provenance)) {
+    .cm <- extraction_provenance$changes_made
+    if (is.list(.cm)) {
+      upstream_sign_rewrites <- if (is.null(.cm$dropped_minus_signs_recovered)) {
+        0L
+      } else {
+        .prov_num(.cm$dropped_minus_signs_recovered)
+      }
+    }
+    # `normalization$version` (docpluck's NORMALIZATION_VERSION, e.g. "1.9.57")
+    # is computed from the library itself and is therefore trustworthy. Note
+    # that the sibling `metadata$docpluck_version` is NOT: it resolves from an
+    # environment variable in docpluck's own frontend and reads the literal
+    # string "unknown" whenever that variable is unset -- measured, not assumed.
+    .v <- extraction_provenance$version
+    if (!is.null(.v) && length(.v) > 0L) {
+      upstream_normalization_version <- as.character(.v[[1]])
+    }
   }
 
   # Store settings for reproducibility
@@ -8585,6 +8737,7 @@ check_text <- function(text,
           ci_delta_lower = NA_real_, ci_delta_upper = NA_real_,
           ci_check_status = NA_character_, ci_method_match = NA_character_, ci_referent = NA_character_,
           effect_guard_rejected = FALSE, effect_guard_reason = NA_character_,
+          SE_guard_rejected = FALSE, SE_guard_reason = NA_character_,
           ci_width_ratio = NA_real_, ci_symmetry = NA_character_,
           # v0.3.5 (MetaESCI 2C/2D/2E)
           ci_level_mismatch   = NA_character_,
@@ -8996,6 +9149,24 @@ check_text <- function(text,
   # v0.2.4: min_confidence filter
   if (min_confidence > 0 && "confidence" %in% names(res)) {
     res <- res[is.na(res$confidence) | res$confidence >= min_confidence, ]
+  }
+
+  # v0.7.6: attach the document-level upstream provenance to every row.
+  #
+  # Repeated per row rather than held as an attribute because every consumer of
+  # this package reads COLUMNS -- MetaESCI joins on them, the worker serialises
+  # them, the CSV/JSON exports carry them. An attribute would be silently lost
+  # at the first `as.data.frame()` and would then be a field we declare and
+  # never deliver.
+  #
+  # NA (not 0) when no provenance was supplied: "the extractor reported nothing"
+  # and "the extractor reported no rewrites" are different facts, and only the
+  # second is an all-clear. Text handed straight to check_text() -- a paste, a
+  # test fixture, a .txt upload -- has no upstream normalizer and truthfully
+  # reports NA.
+  if (nrow(res) > 0) {
+    res$upstream_sign_rewrites <- upstream_sign_rewrites
+    res$upstream_normalization_version <- upstream_normalization_version
   }
 
   new_effectcheck(res, call = match.call(), settings = settings)

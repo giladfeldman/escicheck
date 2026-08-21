@@ -25,7 +25,7 @@ utils::globalVariables(c("p_reported", "test_type"))
 #'
 #' @return Character scalar, e.g. "1.0.0".
 #' @keywords internal
-normalization_spec_version <- function() "1.4.0"
+normalization_spec_version <- function() "1.5.0"
 
 #' Spec rules S1-S4 -- spans where a comma between digits is a REAL comma
 #'
@@ -47,6 +47,37 @@ normalization_spec_version <- function() "1.4.0"
 .NUM_STRUCTURAL_PATTERNS <- c(
   # Identifiers first -- they may contain any of the shapes below.
   "(?i)\\b(?:doi|https?|www)\\S*",
+  # v0.7.6: SPACE-SEPARATED AUTHOR AFFILIATION RUNS. The glued form
+  # ("Braunstein1,3") is blocked by D1's letter lookbehind and a 3+ element run
+  # by the bare-chain width test, but a TWO-element run separated from the name
+  # by a space falls through both -- docpluck reported, and this was reproduced,
+  # that "Erik. T. Frank 1,2 , Lucie Kesner 3" became "Frank 1.2".
+  #
+  # Deliberately narrow. A surname followed by a small digit run is not by
+  # itself distinguishable from a European decimal ("Median 0,45" has the same
+  # shape), so the discriminator is the AUTHOR-LIST PUNCTUATION that follows:
+  # a SPACE BEFORE the separating comma, which is how an author list is set
+  # ("Frank 1,2 , Lucie") and is not how a statistic is ever written.
+  #
+  # The space is load-bearing and was found by testing rather than reasoning: a
+  # first draft used `\\s*,` and therefore also matched "Median 0,45, SD 0,12",
+  # protecting a real European decimal from conversion. `\\s*` admits zero
+  # spaces, so "0,45," satisfied it. Requiring a literal space separates the
+  # two shapes exactly.
+  #
+  # Deliberately narrow. A surname followed by a small digit run is not by
+  # itself distinguishable from a European decimal ("Median 0,45" has the same
+  # shape), so matching only the reported punctuation is the point -- a general
+  # "name + digits" rule would start suppressing real continental decimals,
+  # which is the more expensive error of the two.
+  "\\b[A-Z][a-z]{2,}\\s\\d{1,2}(?:\\s*,\\s*\\d{1,2})+(?= ,)",
+  # v0.7.6: SOFTWARE VERSION STRINGS. "v2.1.451" is dotted exactly like European
+  # full notation, so a trailing citation run fused with it -- docpluck
+  # reported, and this was reproduced, that "software v2.1.451,52." became
+  # "v2.1451.52.": the full-notation rule read "1.451,52" as a grouped European
+  # number and rewrote a version identifier into garbage. A version is an
+  # identifier, not a quantity, so it belongs here with the DOIs and URLs.
+  "(?i)\\bv\\d+(?:\\.\\d+)+",
   # Head noun + integer list: "Experiments 1,2", "items 1,5 and 7".
   # Head noun + integer list. The noun must PRECEDE the numbers, so a genuine
   # count written the other way round ("1,234 participants") is untouched.
@@ -63,7 +94,16 @@ normalization_spec_version <- function() "1.4.0"
          "equations?|refs?|references?|questions?|scales?)\\s+",
          "\\d{1,3}(?:\\s*,\\s*\\d{1,3})+"),
   # Coded / dummy variables: "coded 0,1", "dummy coded 0,1,2".
-  "(?i)\\b(?:coded|dummy[- ]coded|scored)\\s+\\d(?:\\s*,\\s*\\d)+",
+  #
+  # v0.7.6: the trailing `(?!\\d)` fixes a PREFIX MATCH, not a vocabulary
+  # problem. Each element here is a single `\\d`, so on "Participants scored
+  # 0,87" the pattern happily matched the leading "0,8" and protected it --
+  # leaving a genuine continental score unconverted while "Participants had
+  # 0,87" converted correctly. docpluck reported this as a false negative in
+  # the word list and was about to adopt that word list because of it;
+  # measuring showed the vocabulary was never the cause. "coded 0,1" is still
+  # protected, because there the run really does end after one digit.
+  "(?i)\\b(?:coded|dummy[- ]coded|scored)\\s+\\d(?:\\s*,\\s*\\d)+(?!\\d)",
   # Integer-only bracket pair = an index, not a CI. A CI carries decimal points,
   # so requiring NO period separates "[1,2]" from "[0.12, 0.45]". Two variants,
   # because the bracket must NOT be a statistical one: "t(1,197)" and "H(1,024)"
@@ -518,6 +558,45 @@ normalize_text <- function(x) {
   x <- gsub("\r\n", "\n", x)
   x <- gsub("\r", "\n", x)
 
+  # v0.7.6: DELETE the form feed. docpluck v2.4.136 stopped destroying page
+  # boundaries -- its standalone-page-number strip was `^\s*\d{1,3}\s*$` under
+  # MULTILINE, and that whitespace class matches U+000C, so the rule consumed the
+  # page break standing beside the number it deleted. Correct of them to fix; it
+  # means form feeds now arrive in text where they never used to (+1..+17 per
+  # paper, 46% of documents).
+  #
+  # A form feed was never invisible here -- PCRE `\s` matches it, so the sentence
+  # chunk boundary already split on one and the `=`-joiner at ~line 900 already
+  # bridged across one. What it was NOT is a PARAGRAPH: the rules written with
+  # `[ \t]` or `(^|\n)` -- the standalone-page-number strip, the section-number
+  # strips, and chunk-boundary alternative 2 -- cannot match it. So a page break
+  # read as a line wrap to the joiner and as nothing at all to the splitter.
+  #
+  # MEASURED, not reasoned about (2026-08-21, through check_text):
+  #   * two results separated by "\n\f\n" collapsed to ONE row carrying the first
+  #     result's d against the second's t -- a pairing that appears in no paper,
+  #     and the exact defect v0.7.4 shipped to remove;
+  #   * normalize_text("... dz =\n\f3\n\n...") produced "dz = 3", adopting a PAGE
+  #     NUMBER as an effect size -- the v0.6.20 bridging class that the strip
+  #     below exists to prevent. After this deletion it does not.
+  #
+  # DELETION, not translation. `\f -> \n` was measured and rejected: it turns the
+  # corpus-majority "\n\f" into "\n\n" and manufactures a chunk split that never
+  # existed, and a cross-model reviewer independently warned it also opens new
+  # cross-page joins. `\f -> \n\n` (a hard page boundary) is a real option but a
+  # different feature -- it would sever a statistic from its own effect size
+  # across a page break, which is the counterexample class that killed the v0.7.4
+  # general blank-line rule. It needs its own corpus measurement, not a free ride
+  # on this fix. Deletion restores exactly the text shape every rule below was
+  # written and measured against.
+  #
+  # Placed HERE, before the whitespace collapse and both number strips, so every
+  # rule downstream sees pre-v2.4.136 text. Note this also fixes the `trimws()`
+  # gap: R's default whitespace class is "[ \t\r\n]" and does NOT strip a form
+  # feed, so a form-feed-only chunk used to survive the empty-chunk filters and
+  # shift every `location` ordinal -- which MetaESCI joins on.
+  x <- gsub("\f", "", x, fixed = TRUE)
+
   # Re-validate UTF-8 after byte operations before Perl regex
   if (requireNamespace("stringi", quietly = TRUE)) {
     x <- stringi::stri_enc_toutf8(x, validate = TRUE)
@@ -543,7 +622,19 @@ normalize_text <- function(x) {
 
   # Fix F-test with square brackets: F[1,30] = 8.33 -> F(1, 30) = 8.33
   # Common in Scientific Reports and some Nature portfolio journals
-  x <- gsub("F\\s*\\[\\s*(\\d+(?:\\.\\d+)?)\\s*,\\s*(\\d+(?:\\.\\d+)?)\\s*\\]",
+  #
+  # v0.7.6: the leading `(?<![A-Za-z])` is the whole point of this edit. Without
+  # it ANY word ending in "F" supplied the F -- docpluck reported, and this was
+  # reproduced verbatim, that
+  #     "Patients with AF [6, 7], were excluded"
+  # became "Patients with AF(6, 7)," -- an abbreviation followed by a CITATION
+  # BRACKET rewritten into F-test notation, from which a consumer can report an
+  # F(6, 7) that appears nowhere in the paper. Fabricating a test out of prose
+  # is worse than missing one.
+  #
+  # A real F statistic is never preceded by a letter (it opens a sentence, or
+  # follows a space, comma or bracket), so the guard costs no coverage.
+  x <- gsub("(?<![A-Za-z])F\\s*\\[\\s*(\\d+(?:\\.\\d+)?)\\s*,\\s*(\\d+(?:\\.\\d+)?)\\s*\\]",
              "F(\\1, \\2)", x, perl = TRUE)
 
   # Fix subscript notation: t754 = -33 -> t(754) = -33
@@ -573,11 +664,27 @@ normalize_text <- function(x) {
   }
 
   # Fix eta2p / etap2 / eta_p^2 / eta_p2 notation -> partial eta-squared = value
-  x <- gsub("(?:eta2p|\u03b72p|etap2|\u03b7p2|eta_p2|eta_p\\^2|\u03b7_p2|\u03b7_p\\^2)\\s*=", "partial eta-squared =", x, perl = TRUE)
+  #
+  # v0.7.6: the `_?` after the 2 admits `eta2_p`, docpluck's SYMBOL CONTRACT v2.0
+  # spelling (shipped v2.4.130, live ~2026-08-14), which `_`-joins every subscript
+  # run. This list already carried the underscore forms `eta_p2` / `eta_p^2`, so
+  # the shape was expected -- the one spelling docpluck actually emits was the one
+  # missing. Until this was added, `eta2_p = .11` bound NOTHING: the row published
+  # `effect_reported = NA` with status OK, where the identical `eta2p = .11` scored
+  # ERROR. A dropped effect size that also turns the verdict green is the worst
+  # shape this package can ship -- a green result from an empty input is a false
+  # green. Scoped to an optional underscore on THIS token rather than a general
+  # `_`-eater, so no unrelated identifier changes meaning.
+  x <- gsub("(?:eta2_?p|\u03b72_?p|etap2|\u03b7p2|eta_p2|eta_p\\^2|\u03b7_p2|\u03b7_p\\^2)\\s*=", "partial eta-squared =", x, perl = TRUE)
   # Also handle n2p (PDF corruption of eta2p) but only if followed by = and a number
   x <- gsub("(?<![a-zA-Z])n2p\\s*=\\s*(\\d)", "partial eta-squared = \\1", x, perl = TRUE)
   # v0.3.0a: omega2p / omegap2 notation -> partial omega-squared = value
-  x <- gsub("(?:omega2p|\u03c92p|omegap2|\u03c9p2)\\s*=", "partial omega-squared =", x, perl = TRUE)
+  # v0.7.6: `_?` admits docpluck symbol contract v2.0's `omega2_p` -- same change
+  # and same reason as the partial-eta line above. This alternation carried NO
+  # underscore variant at all, so the omega case was strictly worse than the eta
+  # case: `omega2_p = .09` published effect_reported = NA at status OK where
+  # `omega2p = .09` scored WARN.
+  x <- gsub("(?:omega2_?p|\u03c92_?p|omegap2|\u03c9p2)\\s*=", "partial omega-squared =", x, perl = TRUE)
   # Superscript 2 (U+00B2) to caret notation (e.g., chi squared, eta squared)
   x <- gsub("\u00B2", "^2", x)
 
@@ -731,11 +838,31 @@ normalize_text <- function(x) {
   .amb_shape <- "\\d{1,3},\\d{3}(?!\\d)"
   .eu_locale <- identical(.loc$decimal_mark, ",")
   .amb_locale <- .locale_comma_unresolved(.loc)
+  # v0.7.6, two bounded corrections, both reported by docpluck and reproduced
+  # here before being touched:
+  #
+  # (1) `%` JOINS THE LOOKBEHIND EXCLUSIONS. "The rate was ~25%6,28" became
+  #     "%6.28" -- a percentage followed by CITATION SUPERSCRIPTS read as a
+  #     decimal. A European decimal is never written immediately after a percent
+  #     sign, so excluding it costs nothing and closes the hole. Same class as
+  #     the letter and comma exclusions already here.
+  #
+  # (2) THE INTEGER PART IS CAPPED AT FOUR DIGITS. The SPEC says "exactly one
+  #     digit before the comma" and the code said `(\d+)` -- unbounded -- so
+  #     "The value was 9999999,1" became "9999999.1". The SPEC is too strict to
+  #     ship (a European paper really does write "M = 12,34" and "t = 1234,56",
+  #     and an earlier one-digit draft silently stopped converting those), but
+  #     unbounded is plainly wrong: T1 above has already consumed every genuine
+  #     thousands group, so a run of five or more digits before a comma is not a
+  #     decimal under any reading. Four digits covers the real continental
+  #     shapes and refuses the rest. The SPEC is updated to match this, rather
+  #     than the code being crippled to match the SPEC -- see
+  #     inst/normalization-spec/SPEC.md rule D1.
   .d1_pat <- if (.amb_locale) {
-    paste0("(?<![a-zA-Z,0-9.])(?<![A-Z][\\[\\(])",
-           "(?!", .amb_shape, ")(\\d+),(\\d+)(?!\\d)")
+    paste0("(?<![a-zA-Z,0-9.%])(?<![A-Z][\\[\\(])",
+           "(?!", .amb_shape, ")(\\d{1,4}),(\\d+)(?!\\d)")
   } else {
-    paste0("(?<![a-zA-Z,0-9.])(?<![A-Z][\\[\\(])(\\d+),(\\d+)(?!\\d)")
+    paste0("(?<![a-zA-Z,0-9.%])(?<![A-Z][\\[\\(])(\\d{1,4}),(\\d+)(?!\\d)")
   }
   x <- gsub(.d1_pat, "\\1.\\2", x, perl = TRUE)
 
@@ -877,7 +1004,30 @@ normalize_text <- function(x) {
   #
   # It also settles the "p =\n1.0 Results" case raised independently by the
   # other reviewer, which the earlier draft had accepted as a residual.
-  x <- gsub("(^|\\n)([ \\t]*)\\d+\\.\\d+[ \\t]+(?=[A-Z])", "\\1\\2", x, perl = TRUE)
+  #
+  # v0.7.6: the capital letter alone was NOT a sufficient discriminator, and
+  # the counterexample is the worst class this package has. docpluck reported,
+  # and this was reproduced verbatim, that a flattened table row
+  #
+  #     "90.6 Third-plus generation had lower rates of reported discrimination."
+  #
+  # lost its "90.6 " -- a PUBLISHED VALUE DELETED WITH NO RESIDUE, along with
+  # "0.01", "0.00" and "0.03" in the same paper. The row shape is identical to
+  # "3.3 Discussion": line-initial single-group number, space, capital.
+  #
+  # What separates them is not the number, it is WHAT FOLLOWS. A section
+  # heading is a short noun phrase with no sentence punctuation; a table row
+  # continues into a sentence and terminates with a period. So the rest of the
+  # line must now contain NO period and be at most 60 characters.
+  #
+  # A leading zero is also refused outright: nothing numbers a section "0.01".
+  #
+  # The residual cost is a heading that contains a period ("Study 1. Results")
+  # surviving as text -- cosmetic. The cost it replaces was deleting a number
+  # the paper printed, which is unrecoverable and silent. On a verification
+  # tool that trade is not close.
+  x <- gsub("(^|\\n)([ \\t]*)[1-9]\\d*\\.\\d+[ \\t]+(?=[A-Z][^\\n.]{0,59}(?:\\n|$))",
+            "\\1\\2", x, perl = TRUE)
 
   # v0.3.0f: Remove standalone page/section numbers BEFORE line-break joining.
   # Must run here (not later at line ~317) because the joiner below would
@@ -1567,6 +1717,8 @@ parse_text <- function(text, context_window_size = 2) {
       df_arity_mismatch = logical(0),
       effect_guard_rejected = logical(0),
       effect_guard_reason = character(0),
+      SE_guard_rejected = logical(0),
+      SE_guard_reason = character(0),
       arm1_events = numeric(0),
       arm1_total  = numeric(0),
       arm2_events = numeric(0),
@@ -1823,6 +1975,8 @@ parse_text <- function(text, context_window_size = 2) {
       df_arity_mismatch = logical(0),
       effect_guard_rejected = logical(0),
       effect_guard_reason = character(0),
+      SE_guard_rejected = logical(0),
+      SE_guard_reason = character(0),
       arm1_events = numeric(0),
       arm1_total  = numeric(0),
       arm2_events = numeric(0),
@@ -3570,8 +3724,56 @@ parse_text <- function(text, context_window_size = 2) {
     SE_coeff <- if (!all(is.na(m_SE))) numify(m_SE[2]) else NA_real_
     adj_R2_val <- if (!all(is.na(m_adj_R2))) numify(m_adj_R2[2]) else NA_real_
 
+    # v0.7.6: a standard error is NON-NEGATIVE BY DEFINITION. `pat_SE` accepts a
+    # leading sign (it always has), and nothing in this package checked it -- so
+    # an impossible SE flowed straight into the t-synthesis below.
+    #
+    # The occasion is docpluck's rule W0g, which infers a missing minus from
+    # arithmetic ("this value must be negative, because otherwise it falls
+    # outside its confidence interval"). Reproduced on OUR OWN corpus by diffing
+    # docpluck 2.4.136 with the rule disabled:
+    #   frontiers_music_mood_2024:  SE = 0.199 -> SE = -0.199 (and p -> -0.069)
+    #   efendic_2022_affect:        [0.04, 0.25] -> [0.04, -0.25]
+    # docpluck intends to delete W0g. This guard is NOT about W0g and does not
+    # expire with it -- a negative SE is impossible whatever produced it.
+    #
+    # REJECT rather than flag-and-keep. "Flag, do not correct" governs a value
+    # the PAPER printed and we might be wrong about; it does not license passing
+    # a mathematically impossible number into arithmetic. Concretely, keeping it
+    # sign-flips the synthesized t at the line below (b/SE), and the one check
+    # that exists to validate that synthesis -- verify_t_from_b_SE -- absolutises
+    # BOTH sides, so it is structurally incapable of noticing. The guard has to
+    # sit UPSTREAM of the synthesis, which is here. The value itself is not lost:
+    # it stays in the row's raw text, and the reason quotes it.
+    #
+    # This is the same shape check.R already applies one layer down, where the
+    # b-referenced CI recompute gates on `SE > 0`. It was simply never propagated
+    # to the extraction that feeds it.
+    SE_guard_rejected <- FALSE
+    SE_guard_reason <- NA_character_
+    if (!is.na(SE_coeff) && SE_coeff < 0) {
+      SE_guard_reason <- paste0(
+        "A reported standard error of ", format(SE_coeff, trim = TRUE),
+        " is impossible -- a standard error cannot be negative. The value was ",
+        "rejected rather than used, so no test statistic was synthesized from ",
+        "it and no interval was recomputed with it. A negative standard error ",
+        "in extracted text is usually an extraction artefact rather than the ",
+        "paper's own error; check the source document for the printed value.")
+      SE_guard_rejected <- TRUE
+      SE_coeff <- NA_real_
+    }
+
+    # v0.7.6: the two branches below decide whether a REGRESSION RESULT EXISTS,
+    # which is a different question from whether its SE is usable. They must
+    # therefore key on "the clause reported an SE at all", not on the post-guard
+    # value -- otherwise refusing an impossible SE would delete the whole result
+    # from the output, and a suppressed value would once again be
+    # indistinguishable from an absent one. That silent-loss shape is the exact
+    # defect class v0.6.20 was written to end.
+    SE_present_in_clause <- !is.na(SE_coeff) || SE_guard_rejected
+
     # Regression type promotion: if t-test AND b + SE co-occur, set type to "regression"
-    if (!is.na(test_type) && test_type == "t" && !is.na(b_coeff) && !is.na(SE_coeff)) {
+    if (!is.na(test_type) && test_type == "t" && !is.na(b_coeff) && SE_present_in_clause) {
       test_type <- "regression"
     }
     # v0.5.6 (T5): a bare regression line -- "b = .., SE = .., p = .." with NO
@@ -3580,10 +3782,17 @@ parse_text <- function(text, context_window_size = 2) {
     # so an incidental b/SE co-occurrence cannot spuriously create a result; df
     # is unknown (no test statistic was reported), so the downstream check is a
     # NOTE rather than a full verification.
-    if (is.na(test_type) && !is.na(b_coeff) && !is.na(SE_coeff) &&
-        SE_coeff != 0 && !all(is.na(m_p))) {
+    #
+    # v0.7.6: the row is still created when the SE was refused, but NO statistic
+    # is synthesized from it. b / (a negative SE) yields a t of the wrong sign,
+    # and verify_t_from_b_SE absolutises both sides and so cannot catch it -- so
+    # the only safe place to stop it is here, before the division.
+    if (is.na(test_type) && !is.na(b_coeff) && SE_present_in_clause &&
+        !all(is.na(m_p))) {
       test_type <- "regression"
-      stat_value <- b_coeff / SE_coeff
+      if (!is.na(SE_coeff) && SE_coeff != 0) {
+        stat_value <- b_coeff / SE_coeff
+      }
     }
 
     # v0.6.16 (E11 / E-bare-d-ci): LAST RESORT -- a post-hoc contrast reported as
@@ -4263,6 +4472,11 @@ parse_text <- function(text, context_window_size = 2) {
       # v0.6.20 (MetaESCI O-1 request 2)
       effect_guard_rejected = effect_guard_rejected,
       effect_guard_reason = effect_guard_reason,
+      # v0.7.6: an impossible standard error was refused. Separate from the
+      # effect guard above because it suppresses a DIFFERENT field -- a row can
+      # have a perfectly good effect size and an impossible SE.
+      SE_guard_rejected = SE_guard_rejected,
+      SE_guard_reason = SE_guard_reason,
       # v0.6.0: clinical-trial per-arm cells (events / totals) extracted from
       # pat_two_props_slash when a "<n1>/<N1> ... versus <n2>/<N2>" clause is
       # in the same chunk as an RR or risk-difference report. Used by check.R
@@ -4342,6 +4556,8 @@ parse_text <- function(text, context_window_size = 2) {
       df_arity_mismatch = logical(0),
       effect_guard_rejected = logical(0),
       effect_guard_reason = character(0),
+      SE_guard_rejected = logical(0),
+      SE_guard_reason = character(0),
       arm1_events = numeric(0),
       arm1_total  = numeric(0),
       arm2_events = numeric(0),
@@ -4728,6 +4944,8 @@ parse_text <- function(text, context_window_size = 2) {
     df_arity_mismatch = FALSE,
     effect_guard_rejected = FALSE,
     effect_guard_reason = NA_character_,
+    SE_guard_rejected = FALSE,
+    SE_guard_reason = NA_character_,
     arm1_events = NA_real_,
     arm1_total  = NA_real_,
     arm2_events = NA_real_,
@@ -4980,6 +5198,23 @@ flattened_rows_to_parsed <- function(table_rows) {
     }
 
     p_val <- if (has(f, "p")) num1(f$p) else NA_real_
+
+    # v0.7.6: range-validate the TYPED p, exactly as the prose path does.
+    #
+    # This path took whatever number the table channel typed as `p` and then
+    # declared `p_valid = !is.na(p)` and `p_out_of_range = FALSE` -- two claims
+    # the code never actually checked. Downstream, check.R has no lower bound on
+    # p_reported and reads `p_reported < alpha` as "significant", so a negative p
+    # would have read as overwhelmingly significant and could have driven a false
+    # decision-error verdict.
+    #
+    # HONEST SCOPE: docpluck's own table channel already drops an out-of-domain
+    # p, so this is defence in depth rather than a live defect being closed. It
+    # is still worth doing on two grounds -- a column effectcheck publishes must
+    # be computed by effectcheck and not inherited from someone else's invariant,
+    # and a hardcoded FALSE is a claim this function cannot back.
+    p_flat_out_of_range <- !is.na(p_val) && (p_val < 0 || p_val > 1)
+    if (p_flat_out_of_range) p_val <- NA_real_
     p_sym <- if (!is.null(f$p_op) && length(f$p_op) > 0L) {
       as.character(f$p_op[[1]])
     } else if (!is.na(p_val)) {
@@ -5011,7 +5246,7 @@ flattened_rows_to_parsed <- function(table_rows) {
       p_reported = p_val,
       p_symbol = p_sym,
       p_valid = !is.na(p_val),
-      p_out_of_range = FALSE,
+      p_out_of_range = p_flat_out_of_range,
       N = nn,
       effect_reported_name = ern,
       effect_reported = er,

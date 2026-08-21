@@ -1,3 +1,124 @@
+# effectcheck 0.7.6
+
+**Two live defects that turned a real verdict green, and the six our extractor
+filed against us that nobody had read.** docpluck had sent THREE outboxes since
+v0.7.5 and only the newest reached this repository; the two older ones carried
+the larger changes.
+
+**A partial eta-squared stopped parsing on ~2026-08-14 and the row went GREEN.**
+docpluck's symbol contract v2.0 (shipped v2.4.130) `_`-joins every subscript
+run, so `eta2p` became **`eta2_p`** and `omega2p` became `omega2_p`. Neither was
+in effectcheck's alternation. Measured on the released 0.7.5:
+`eta2_p = .11` published `effect_reported = NA` at status **OK**, where the
+identical `eta2p = .11` scored **ERROR** — the effect size was dropped AND the
+verdict flipped from ERROR to a clean pass. `omega2_p` did the same from WARN.
+Scope was measured rather than assumed: those two tokens are the ONLY ones that
+broke; `eta2`, `eta2G`, `omega2`, `epsilon2`, `R2`, `f2`, `chi2` and both
+`p < 10^-8` and `p < 10-8` were unaffected.
+
+**Restored page boundaries reverted the v0.7.4 chunk fix.** docpluck v2.4.136
+stopped destroying form feeds (its page-number strip used `\s`, which matches
+U+000C, so it ate the page break beside the number it deleted). effectcheck had
+no form-feed handling at all. Measured through `check_text()`: two results
+separated by `\n\f\n` collapsed into ONE row carrying the first result's
+`d = 0.33` against the second's `t = 7.47` — a pairing that appears in no
+paper, and precisely the defect v0.7.4 shipped to remove. `normalize_text()`
+also fabricated `dz = 3` from a page number, the v0.6.20 bridging class.
+
+The fix DELETES the form feed early, before the whitespace collapse and both
+number strips. Deletion rather than translation was measured, not reasoned:
+`\f -> \n` turns the corpus-majority `\n\f` into `\n\n` and manufactures a
+chunk split that never existed, and one cross-model reviewer recommended
+exactly that. A form feed was never invisible here — PCRE `\s` matches it, so
+the sentence splitter already broke on one and the `=`-joiner already bridged
+across one. What it was not was a PARAGRAPH.
+
+**Impossible values are now refused rather than computed with.** `pat_SE` has
+always accepted a leading sign and nothing checked it, so a negative standard
+error flowed into the `t = b/SE` synthesis and inverted the statistic — and
+`verify_t_from_b_SE`, the one check that exists to validate that synthesis,
+absolutises BOTH sides and is structurally incapable of noticing. A negative SE
+is now rejected before the division, with `extraction_suspect` and a named
+reason; the row is still emitted, because suppressing it would restore the
+silent-loss class v0.6.20 removed. A **reversed reported interval**
+(`ciL > ciU`) joins the impossible-value family, and the b-scale CI message no
+longer claims a field is "absent" when it was present and refused. The docpluck
+flattened-rows path now computes `p_valid` / `p_out_of_range` from the value
+instead of hardcoding them.
+
+The occasion is docpluck's rule W0g, which infers a missing minus from
+arithmetic. Reproduced on THIS repository's own corpus by diffing docpluck
+2.4.136 with the rule disabled: `frontiers_music_mood_2024` had `SE = 0.199`
+rewritten to `-0.199` and `p = 0.069` to `-0.069`; `efendic_2022_affect` had
+`[0.22, 0.75]` rewritten to `[-0.22, 0.75]` and `[0.04, 0.25]` to
+`[0.04, -0.25]`. These guards are NOT about W0g and do not expire with it — a
+standard error is non-negative and an interval is ordered, whatever produced
+them.
+
+**Upstream provenance is now visible.** `check_text()` gains
+`extraction_provenance`; the worker forwards docpluck's `normalization` block,
+which it had received all along and never passed on (`steps_changed` had zero
+occurrences in this package before this release). Two new columns,
+`upstream_sign_rewrites` and `upstream_normalization_version`, report whether
+the extractor REWROTE VALUES in this document. Keyed on docpluck's metric key,
+never on a rule name, so it degrades to a no-op when they delete the rule.
+DOCUMENT-level and deliberately NOT wired to `extraction_suspect`: that flag
+gates effect-size decimal REWRITING and two ERROR-path downgrades, so raising it
+on every row because one span was rewritten would demote unrelated genuine
+inconsistencies.
+
+**The six defects docpluck filed against 0.7.5 on 2026-08-13**, every one
+reproduced at HEAD before being touched and verified red on the released 0.7.5:
+`AF [6, 7]` was rewritten into F-test notation because the bracket rule had no
+letter lookbehind (an F-test fabricated out of prose); the outline stripper
+**deleted a published value** (`90.6 Third-plus generation ...`) it could not
+tell from a heading; `v2.1.451,52.` fused into `v2.1451.52.`; `9999999,1`
+converted as a decimal; a space-separated affiliation run became `Frank 1.2`;
+and `~25%6,28` became `%6.28`.
+
+The seventh is the one worth repeating. docpluck read `scored 0,87` failing to
+convert as a **false negative in our `coded|dummy|scored` vocabulary**, and was
+about to adopt that vocabulary because of it. The vocabulary was never the
+cause: each element of the protected run is a single `\d`, so the pattern
+matched the PREFIX `0,8`. Measurement stopped a sibling project adopting a
+mechanism for a reason that was not true.
+
+Two of these fixes needed a second pass, both caught by testing rather than by
+reading the pattern: the first outline-stripper guard still deleted values, and
+the first affiliation guard used `\s*,` and therefore also protected
+`Median 0,45, SD 0,12`, suppressing a real European decimal.
+
+**Normalization spec 1.4.0 -> 1.5.0, 72 -> 80 conformance cases**, and its
+status changes. docpluck DELETED its entire EU->US separator machinery (`A3`,
+`A3a`, `A3c`, `A3d`, `A2`, `W0n`, and the whole document-level locale feature)
+in v2.4.129-v2.4.130 — verified against the live library, which now delivers
+`d = 0,80`, `U = 12,345` and `N = 185,178` verbatim. effectcheck is therefore
+the ONLY implementation, the spec is no longer a two-implementation contract,
+and `REQUEST_TO_DOCPLUCK_normalization_spec.md` is moot rather than pending. One
+consequence is the opposite of what was feared: v0.7.5's locale inference now
+works BETTER on docpluck output, because docpluck no longer touches the tokens
+it votes on.
+
+**Cost and resilience.** `sections=true` is no longer requested — it has been
+sent on every extraction since v0.6.4 and consumed by nothing. A `429` is now
+retried once, bounded, honouring `Retry-After` (which had zero occurrences
+anywhere in this repository). `/health` reports the docpluck release behind the most recent result, and it reports the one that can be trusted. `metadata.docpluck_version` resolves from an environment variable inside docpluck's own frontend and fails two ways: UNSET gives the literal string `"unknown"` (measured against a local instance that was running 2.4.136), and STALE gives a real-looking wrong number — production reported `"2.4.101"` while returning `normalization.version = "1.9.57"`, which is 2.4.136's normalization version. The first draft of this guard excluded only `"unknown"` and therefore published the stale 2.4.101 as fact. **It was caught by the post-deploy probe, not by any local gate** — no fixture can contain a value only production knows. `normalization.version` is computed from the library and cannot drift from it, so it is authoritative; the self-reported string survives as a labelled fallback (`self-reported-<x>`) for the case where no normalization report exists at all.
+
+**Corpus evidence.** Whole-corpus diff over 37 real-article texts, all v0.7.6
+parser changes against unchanged input: **0 rows gained, 0 lost, 2 verdict
+changes** — both the new reversed-CI guard firing on genuinely reversed
+published intervals, and the 2026-08-13 fixes adding no further change at all.
+One was confirmed against the rasterized source page: Frontiers in Psychology
+10.3389/fpsyg.2024.1303262 p6 prints
+`(r = 0.195, p = 0.240, CI 95%[0.485, 0.132])`. That row previously passed.
+
+Known limitation, disclosed rather than discovered later: the regression corpus
+was found to be **raw pdftotext, not docpluck output** — 38 of its 48 files came
+from the pre-v0.4.0 `read_any_text()` path, so every whole-corpus diff quoted
+for v0.7.4 and v0.7.5 was measured on text production does not consume.
+Re-extraction through the production HTTP path is underway and tracked
+separately; this release does not claim it is finished.
+
 # effectcheck 0.7.5
 
 **A backlog item that would have shipped a feature doing nothing, a p-value
