@@ -99,7 +99,11 @@ sign-recovery rules can turn a printed \code{SE = 0.199} into \code{-0.199}, and
 before v0.7.6 that rewrite was invisible downstream. Surfaced as the
 document-level columns \code{upstream_sign_rewrites} (integer; NA when no
 report was supplied, 0 when one was supplied and reported none) and
-\code{upstream_normalization_version}. Deliberately does NOT set
+\code{upstream_normalization_version}. Treat the count as a LOWER BOUND:
+docpluck's own report assigns rather than accumulates that metric, and
+three of its rules write the same key, so a document where two fire reports
+only the last one. Non-zero reliably means values were rewritten; the
+magnitude is not exact. Deliberately does NOT set
 \code{extraction_suspect}: the report is document-level, that flag is
 per-row and gates effect-size rewriting and two ERROR-path downgrades.
 Default NULL.}

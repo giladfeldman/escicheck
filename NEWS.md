@@ -1,3 +1,97 @@
+# effectcheck 0.7.7
+
+**A retry that skipped its own second chance, a test that guarded a branch
+production never runs, and a comparison endpoint that quietly published NA.**
+No parser, effect-size or verdict logic changed in this release: every fix is in
+the worker's transport and provenance plumbing, plus the release gates that were
+supposed to catch these and did not.
+
+The occasion was the v0.7.6 consumer-readiness handoff, which listed three
+changes that had shipped **asserted only by source grep** -- a `429` +
+`Retry-After` retry whose retry never executed in any test, the removal of
+`sections=true` proved by grepping our own source rather than the query string,
+and `extraction_provenance` with zero worker tests on the one expression that
+carries it to production. Closing those gaps found real defects behind two of
+the three.
+
+## Fixed
+
+* **`429 -> 502 -> 200` returned the 502.** The 502 and 429 retries were two
+  sequential `if`s with 502 first, so each condition was evaluated against a
+  status the other retry had not produced yet. A 502 arriving as the answer to
+  the 429-retry was returned unretried -- surfaced to the browser as HTTP 503
+  after only two requests. It is not a corner case: docpluck emits 502 and 429
+  for the same underlying reason (it is loaded), so the two arriving in one call
+  is the likely shape. Now a `repeat` loop re-evaluates both conditions after
+  every attempt, with a per-condition budget of one retry each. The bound is
+  unchanged: at most two extra requests, at most `2 + retry_after_max_sec`
+  seconds of sleep. Reproduced before fixing; the reverse order (`502 -> 429 ->
+  200`) was already tested and passed against the bug, which is why both orders
+  are now asserted.
+
+* **`/api/v1/compare` published `NA` for both provenance columns** while
+  `/process` and `/report` populated them from the same document.
+  `compare_with_statcheck(text, ...)` splats `...` straight into `check_text()`,
+  and that call site passed nothing. Found by a test that enumerates the router
+  rather than a hand-written list of endpoints, so a fourth extraction endpoint
+  is covered the day it is written.
+
+* **A retry cap of `NA` crashed the extraction** instead of returning the honest
+  429: `wait > retry_after_max_sec` is `NA`, and `if (NA)` is an error in R, not
+  `FALSE`.
+
+* **Stale documentation corrected.** The `structured` roxygen still claimed
+  `?structured=true&sections=true`; v0.7.6 stopped sending `sections`. The
+  `docpluck_extract()` return-shape contract omitted `retry_after`, added in
+  v0.7.6 -- and because that contract test is network-gated and the v0.7.6 gate
+  ran without a key, it skipped, and a skipped test reports exactly like a
+  passing one.
+
+* **`upstream_sign_rewrites` is now documented as a LOWER BOUND**, not a count.
+  docpluck's `NormalizationReport._track` *assigns* rather than accumulates
+  (`normalize.py:2686`), and three of its rules write that same key over one
+  document, so when two fire only the last survives; the value is also a
+  character-length delta rather than a count. Verified by reading the upstream
+  source and filed to docpluck. Non-zero still reliably means "the extractor
+  rewrote values here", which is what the column is for.
+
+## Tests
+
+Worker suite **46 passed / 2 skipped -> 145 passed / 0 skipped**. Every new
+assertion was watched failing against a real mutation of the code it guards,
+including reverting the retry to its previous sequential-`if` form (three tests
+red) and removing the `NA` cap guard (R's `missing value where TRUE/FALSE
+needed`).
+
+The end-to-end provenance test now drives a **real multipart request through
+plumber's own router** (`pr$call()`), so the CORS filter, body parser, route
+match, handler and serializer all run. The previous version built `req$FILES` by
+hand and passed -- and scanning plumber 1.3.3, webutils 1.2.2 and httpuv 1.6.17
+symbol by symbol finds `"FILES"` **zero times**: nothing in the serving stack
+sets it. That test was green on a branch production never takes.
+
+Package suite unchanged at 1231 `test_that` blocks / 3719 assertions / 0
+failures; no package logic changed in this release.
+
+## Release gates
+
+New `scripts/verify-upstream-and-consumers.mjs`, wired into all four project
+skills, with checks for: an unread upstream docpluck outbox (a FAIL, not a
+note -- three went unread for eight days and one broke production for seven);
+corpus provenance and completeness; the symbol-contract canary; the consumer pin
+table in the new `docs/CONSUMERS.md`; and a release notification for the version
+being shipped.
+
+Three of its own checks were false greens on first review and are fixed: `SKIP`
+exited 0, the canary hash check matched the word "SHAPE" in a comment, and the
+pin table was validated against itself rather than against each consumer's
+source.
+
+**All testing now runs against a LOCAL docpluck service.** The harnesses refuse
+a non-loopback URL unless `--allow-remote` is passed, because `.Renviron` points
+`DOCPLUCK_URL` at the metered hosted endpoint and any script that merely read
+the environment billed production silently.
+
 # effectcheck 0.7.6
 
 **Two live defects that turned a real verdict green, and the six our extractor
