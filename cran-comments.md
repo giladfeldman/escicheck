@@ -1,7 +1,7 @@
 ## Submission
 
 This is an update of 'effectcheck' from 0.2.3 (the current CRAN release) to
-0.6.20. Development has been active across 0.2.4-0.6.20 -- new test types,
+0.7.7. Development has been active across 0.2.4-0.7.7 -- new test types,
 nonparametric and regression support, confidence-interval computation, and
 many parser and consistency fixes -- and the most significant change is
 structural, in 0.4.0 (see "Breaking change" below). Every intervening version
@@ -9,25 +9,37 @@ is documented in NEWS.md.
 
 ## Test environments
 
-* win-builder, R-devel (2026-08-05 r90355) -- Status: OK
-* Ubuntu 24.04 (GitHub Actions), R release, `R CMD check --as-cran
-  --no-manual` with `error_on = "warning"`
-* Windows 11, R 4.4.0 (local)
+* Windows 11, R 4.4.0 (local), `R CMD check --as-cran --no-manual`
+
+win-builder R-devel is run on the submission candidate immediately before
+upload; that result is recorded here in place of this note when it is in hand.
+(The archived win-builder logs in this package's development repository are for
+0.6.19 and are kept as history, not as validation for this version.)
+
+`--no-manual` is used locally because the local machine has no LaTeX, so the
+PDF-manual step fails with "pdflatex is not available" -- a toolchain gap
+rather than an Rd defect. Every Rd check passes, and win-builder built the
+manual without error when this package was last checked there.
 
 ## R CMD check results
 
-0 errors | 0 warnings | 0 notes on win-builder R-devel.
+0 errors | 0 warnings | 1 note.
 
-The only local result not reproduced there is an ERROR and a WARNING from
-"checking PDF version of manual", caused by this machine having no LaTeX
-installation ("pdflatex is not available"). win-builder reports "checking PDF
-version of manual ... OK", confirming a local toolchain gap rather than an Rd
-defect.
+The NOTE is "checking for future file timestamps ... unable to verify current
+time" -- a transient failure to reach the time server from the check machine,
+not a package problem.
+
+"Checking CRAN incoming feasibility" reports only the standard maintainer
+line; there are no misspelling or URL findings.
 
 ## Test suite
 
-1231 test_that blocks across 144 test files; all pass with 0 failures,
-0 errors, and 0 warnings (approx. 15 minutes under `R CMD check`).
+1232 test_that blocks across 144 test files; all pass with 0 failures,
+0 errors, and 0 warnings (13 minutes under `R CMD check`).
+
+This is the count in the committed tree. The submission candidate is
+rebuilt and re-checked from a clean committed tree before upload, and
+these figures are refreshed with it.
 
 ## Breaking change since 0.2.3: file extraction removed in 0.4.0
 
@@ -52,5 +64,5 @@ error rather than "could not find function".
 
 ## Reverse dependencies
 
-None. tools::package_dependencies("effectcheck", reverse = TRUE) returns no
-packages.
+None. tools::package_dependencies("effectcheck", reverse = TRUE) against the
+current CRAN package index returns no packages.

@@ -26,14 +26,32 @@
 # anywhere -- that blind spot is real, is why the token-set hash below exists as
 # a separate tripwire, and is why this does not replace the corpus diff.
 
-.canary_snapshot <- function() {
-  p <- system.file("docpluck-contract", "symbol_contract_snapshot.json",
-                   package = "effectcheck")
+.canary_contract_file <- function(name) {
+  p <- system.file("docpluck-contract", name, package = "effectcheck")
   if (!nzchar(p) || !file.exists(p)) {
-    p <- file.path("..", "..", "inst", "docpluck-contract",
-                   "symbol_contract_snapshot.json")
+    p <- file.path("..", "..", "inst", "docpluck-contract", name)
   }
+  p
+}
+
+.canary_snapshot <- function() {
+  p <- .canary_contract_file("symbol_contract_snapshot.json")
   if (!file.exists(p)) skip("docpluck contract snapshot not locatable")
+  jsonlite::fromJSON(p, simplifyVector = FALSE)
+}
+
+# The BOUNDARY golden: what a live, local docpluck was last OBSERVED to emit for
+# the committed fixtures (worker/tests/fixtures/docpluck-contract/), captured by
+# `Rscript worker/tests/docpluck-contract.R --refresh`.
+#
+# The snapshot above and this golden answer different questions, and the pair is
+# the point. The snapshot is docpluck's DECLARED token table; the golden is what
+# actually came out of the wire. On 2026-08-14 those two agreed with each other
+# and disagreed with effectcheck, which is why a declared-contract check alone
+# could not save us.
+.canary_boundary_golden <- function() {
+  p <- .canary_contract_file("boundary_contract_golden.json")
+  if (!file.exists(p)) skip("docpluck boundary golden not locatable")
   jsonlite::fromJSON(p, simplifyVector = FALSE)
 }
 
@@ -60,6 +78,49 @@ test_that("v0.7.6 canary: every effect-size spelling docpluck emits binds a valu
                  info = paste0(s$txt, " bound NOTHING -- an effect size the paper ",
                                "reported was dropped, and the row will still carry a status"))
     expect_equal(r$effect_reported[1], s$want, info = s$txt)
+  }
+})
+
+# --- invariant 1b: what docpluck ACTUALLY emitted still binds ---------------
+#
+# The fixture list above is a list of spellings WE thought of. This one is a list
+# of spellings DOCPLUCK PRODUCED, read out of the boundary golden, so a token
+# nobody anticipated is covered the moment a capture records it.
+#
+# It also closes the hole the tripwire comment at the bottom of this file warns
+# about. Refreshing the boundary golden without fixing the parser is the modern
+# form of "updating the snapshot alone is how eta2_p ships again" -- and this
+# test turns that into a RED offline test, in the package suite, with no network
+# and no local service. It cannot skip for want of a running docpluck; the
+# golden is committed.
+
+test_that("v0.7.6 canary: every effect size docpluck was OBSERVED to emit still binds", {
+  golden <- .canary_boundary_golden()
+  lines <- golden$asserted$symbols_html$symbol_probe_lines
+  expect_true(length(lines) > 0,
+              info = "the boundary golden recorded no symbol probes -- a green result from an empty input is a false green")
+
+  # Probes P01..P06 are the effect-size probes of the committed fixture
+  # (contract-symbols.html); the rest are test statistics, operators and glyph
+  # rules that `check_text` is not expected to bind as an effect size.
+  effect_probes <- sprintf("P%02d", 1:6)
+  present <- intersect(effect_probes, names(lines))
+  expect_equal(length(present), length(effect_probes),
+               info = paste0("boundary golden is missing effect-size probe(s): ",
+                             paste(setdiff(effect_probes, names(lines)), collapse = ", ")))
+
+  for (id in present) {
+    clause <- as.character(lines[[id]])          # e.g. "eta2_p = .11"
+    want <- suppressWarnings(as.numeric(sub("^.*=\\s*", "", clause)))
+    expect_false(is.na(want),
+                 info = paste(id, "-- could not read a value out of", clause))
+    r <- check_text(paste0("A main effect emerged, F(1, 98) = 4.2, p = .04, ", clause, "."))
+    expect_equal(nrow(r), 1L, info = paste(id, clause))
+    expect_false(is.na(r$effect_reported[1]),
+                 info = paste0(id, ": docpluck emits '", clause,
+                               "' and effectcheck bound NOTHING. This is the 2026-08-14 ",
+                               "defect exactly -- the row will still carry a status."))
+    expect_equal(r$effect_reported[1], want, info = paste(id, clause))
   }
 })
 

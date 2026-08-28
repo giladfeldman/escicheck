@@ -70,8 +70,9 @@ hand and passed -- and scanning plumber 1.3.3, webutils 1.2.2 and httpuv 1.6.17
 symbol by symbol finds `"FILES"` **zero times**: nothing in the serving stack
 sets it. That test was green on a branch production never takes.
 
-Package suite unchanged at 1231 `test_that` blocks / 3719 assertions / 0
-failures; no package logic changed in this release.
+Package suite **1232 `test_that` blocks / 3745 assertions / 0 failures**, across
+144 files; no package *logic* changed in this release. The one added block is the
+boundary-contract canary described under Release gates below.
 
 ## Release gates
 
@@ -91,6 +92,35 @@ source.
 a non-loopback URL unless `--allow-remote` is passed, because `.Renviron` points
 `DOCPLUCK_URL` at the metered hosted endpoint and any script that merely read
 the environment billed production silently.
+
+**The docpluck BOUNDARY contract.** The symbol-contract snapshot pins what
+docpluck *declares*; this pins what it actually *sends*. Two committed synthetic
+fixtures are pushed across the wire to a local docpluck and the returned field
+set is diffed against a committed golden
+(`inst/docpluck-contract/boundary_contract_golden.json`, the one new file this
+release ships to CRAN users). The pair is the point: on 2026-08-14 the declared
+table and the wire agreed with each other and disagreed with effectcheck --
+`eta2p` became `eta2_p`, every partial eta-squared was dropped, and a real
+statistical inconsistency published as a clean PASS for seven days. Nothing in
+the declaration was wrong, so a declared-contract check structurally could not
+see it.
+
+Exit 0 PASS / 1 FAIL / **2 COULD-NOT-VERIFY**; a run without a local docpluck
+never reports green. Verified two-sided against a synthetic capture: renaming a
+probe's VALUE while its KEY is unchanged -- the 2026-08-14 defect exactly -- is
+caught and both strings printed, and a removed key is caught and labelled
+REMOVED/RENAMED.
+
+The golden is currently **HELD** at docpluck 2.4.137 / normalization 1.9.58. The
+local 2.4.138 build adds four keys and removes none, and docpluck confirms that
+re-goldening against a `dirty` build is forbidden because `dirty` is not a
+reproducible identity. It refreshes when 2.4.138 is tagged.
+
+`.gitattributes` was added in the same change and is load-bearing: both fixtures
+are hashed by the golden, and with `core.autocrlf=true` a checkout rewrote their
+bytes, so the recorded hashes matched on the machine that captured them and on
+no fresh clone. Measured with `git checkout-index` before the fixtures were ever
+committed.
 
 # effectcheck 0.7.6
 
