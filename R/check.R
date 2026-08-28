@@ -8344,11 +8344,21 @@ compute_and_compare_one <- function(row,
 #'   before v0.7.6 that rewrite was invisible downstream. Surfaced as the
 #'   document-level columns \code{upstream_sign_rewrites} (integer; NA when no
 #'   report was supplied, 0 when one was supplied and reported none) and
-#'   \code{upstream_normalization_version}. Treat the count as a LOWER BOUND:
-#'   docpluck's own report assigns rather than accumulates that metric, and
-#'   three of its rules write the same key, so a document where two fire reports
-#'   only the last one. Non-zero reliably means values were rewritten; the
-#'   magnitude is not exact. Deliberately does NOT set
+#'   \code{upstream_normalization_version}. \strong{A zero does not mean no
+#'   rewrite happened} -- corrected 2026-08-22, and stronger than the "lower
+#'   bound" this said before. The earlier stated reason (docpluck assigned
+#'   rather than accumulated the metric, so only the last of three rules
+#'   survived) was fixed upstream in normalization 1.9.59. The remaining cause
+#'   is different and worse: docpluck derives the metric from a
+#'   \emph{character-length delta} and skips it entirely when that delta is
+#'   zero, so a length-neutral rewrite -- a \code{2}-for-minus or U+2212 glyph
+#'   substitution, which is precisely the sign-corruption class this column
+#'   exists to expose -- increments nothing and the key can be absent. An absent
+#'   key is read here as 0 (docpluck omits NA fields rather than sending them),
+#'   so such a document publishes \code{upstream_sign_rewrites = 0} while values
+#'   were in fact rewritten. Non-zero still reliably means values were
+#'   rewritten, and the magnitude is not an occurrence count in any case.
+#'   Deliberately does NOT set
 #'   \code{extraction_suspect}: the report is document-level, that flag is
 #'   per-row and gates effect-size rewriting and two ERROR-path downgrades.
 #'   Default NULL.
