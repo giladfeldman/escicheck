@@ -49,7 +49,7 @@
 # DECISION: keep the duplicate rather than risk dropping a real finding. A
 # duplicate row is a counting error the reader can see; a dropped row is a lost
 # result they cannot. The finding stays OPEN in run-meta and in
-# docs/TRIAGE_iterate_2026-08-04.md.
+# communications/TRIAGE_iterate_2026-08-04.md.
 #
 # The tests below pin the INVARIANTS that any future fix must not break. They
 # pass against current behaviour (no dedup) and would also pass against a

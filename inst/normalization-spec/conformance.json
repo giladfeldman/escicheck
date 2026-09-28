@@ -155,7 +155,7 @@
       "input": "The test was reliable, t(1,197) = 2.31, p = .021.",
       "expected": "The test was reliable, t(1197) = 2.31, p = .021.",
       "rule": "T2",
-      "note": "A t-test has exactly ONE df, so this is a thousands separator (df = 1197), not a df pair. Same shape as F(7,140) but the opposite answer -- the difference is test arity, which is statistics-aware and therefore effectcheck's layer, not the context-free spec's. MetaESCI E8 (2026-04-11): t(2,758) became t(2.758) and one article dropped 47 rows."
+      "note": "A t-test has exactly ONE df, so this is a thousands separator (df = 1197), not a df pair. Same shape as F(7,140) but the opposite answer -- the difference is test arity, which is statistics-aware and therefore effectcheck's layer, not the context-free spec's. Downstream E8 (2026-04-11): t(2,758) became t(2.758) and one article dropped 47 rows."
     },
     {
       "id": "single-df-bracket-H",
@@ -176,7 +176,7 @@
       "input": "The effect held, F[2,42] = 13.689, p = .001.",
       "expected": "The effect held, F[2,42] = 13.689, p = .001.",
       "rule": "D1-lookbehind",
-      "note": "MetaESCI D2 (2026-04-11): this was corrupted to F[2.42], which the parser then failed to match entirely."
+      "note": "downstream D2 (2026-04-11): this was corrupted to F[2.42], which the parser then failed to match entirely."
     },
     {
       "id": "guard-affiliation-single",

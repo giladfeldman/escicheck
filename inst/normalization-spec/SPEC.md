@@ -107,7 +107,7 @@ the separator inside brackets belonging to **single-df tests only** — `t`, `H`
 `r`, `Z` — leaving `F` and chi-square df pairs intact. This is the layer split in
 action: docpluck cannot make this call, and should not try.
 
-MetaESCI E8 (2026-04-11) is the incident: `t(2,758)` became `t(2.758)`, silently
+Downstream E8 (2026-04-11) is the incident: `t(2,758)` became `t(2.758)`, silently
 reinterpreted as a Welch df of 2.758, and one article dropped 47 rows.
 
 ## Rule D1 — decimal comma (runs SECOND, on T1's output)
@@ -147,7 +147,7 @@ Lookbehind exclusions, each with a known failure it prevents:
   decimal is never written immediately after a percent sign, so the exclusion
   costs nothing.
 - `[A-Z]` immediately followed by `[` or `(` — tight df brackets (`F[2,42]`),
-  which MetaESCI D2 (2026-04-11) showed being corrupted into `F[2.42]`. Keyed on
+  which downstream D2 (2026-04-11) showed being corrupted into `F[2.42]`. Keyed on
   a preceding CAPITAL rather than a bare bracket, so a CI written `CI [0,12, 0,78]`
   still converts while a stat bracket written `F[` does not.
 

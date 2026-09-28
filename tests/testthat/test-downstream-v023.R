@@ -1,4 +1,4 @@
-# test-metaesci-v023.R -- Regression tests for v0.2.3 bug fixes and features
+# test-downstream-v023.R -- Regression tests for v0.2.3 bug fixes and features
 #
 # Issue A: g_ind in F->t conversion, ci_affects_status parameter
 # Issue B: OR/RR/IRR/h in EFFECT_SIZE_FAMILIES, cross_type_action parameter
@@ -306,9 +306,26 @@ test_that("chi2(df>1) with V does NOT produce ERROR (Bug A regression fix)", {
 })
 
 test_that("chi2(1) with V still works (regression)", {
+  # EXPECTATION CHANGED v0.7.9, PASS -> NOTE. Gilad's ruling 2026-09-04, after the
+  # defect was demonstrated to him: "We should never just correct things, the aim
+  # is highest transparency and accuracy."
+  #
+  # This input states NO sample size. The old code back-solved N from the reported
+  # V and then recomputed V from that N -- and `V_from_chisq` is the exact
+  # algebraic inverse of that back-calculation, so the recomputed V equalled the
+  # reported V identically and PASS was guaranteed. This assertion was therefore
+  # not evidence that 0.41 is right; it would have held for ANY reported V.
+  # Verified 2026-09-04: with N absent, V = 0.41, 0.10 and 0.90 all returned PASS.
+  #
+  # The back-calculation still runs (with no stated N it is the only way to get
+  # one, and the CI needs it), but it can no longer produce a verdict. NOTE is the
+  # existing "surfaced for human review" status.
   res <- check_text("chi2(1) = 85.03, p < 0.001, V = 0.41")
   expect_equal(nrow(res), 1)
-  expect_equal(res$status[1], "PASS")
+  expect_equal(res$status[1], "NOTE")
+  expect_true(grepl("SAMPLE SIZE DERIVED FROM THE REPORTED EFFECT",
+                    as.character(res$uncertainty_reasons[1]), fixed = TRUE),
+    info = "the reader must be told the N was inferred from the effect being checked")
 })
 
 test_that("chi2(4) V back-calculation uses correct m from enumerate_m_from_df", {

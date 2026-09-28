@@ -370,7 +370,7 @@ test_that("ci_dz computes CI for paired dz", {
   expect_true(result$bounds[2] > dz)
 })
 
-test_that("ci_dz uses noncentral-t inversion (MetaESCI E10)", {
+test_that("ci_dz uses noncentral-t inversion (downstream E10)", {
   # Algina & Keselman (2003): CI for standardized mean (paired dz) comes
   # from inverting the noncentral-t distribution on t = dz * sqrt(n).
   # Reference fixture: dz = 0.55, n = 9 -> CI ~= [-0.17, 1.24]

@@ -1,6 +1,6 @@
 # test-gz-gav-grm.R — v0.2.7 Issue A: Paired Hedges variants
 # EFFECT_SIZE_FAMILIES declares gz/gav/grm but they were never computed.
-# Adding them fixes 52/112 (46%) of Hedges' g ERRORs from MetaESCI.
+# Adding them fixes 52/112 (46%) of Hedges' g ERRORs from downstream.
 
 test_that("gz computed for paired t-test", {
   # t(21) = 7.23: dz = 7.23/sqrt(22) = 1.5414, J(21) = 0.9643
@@ -16,7 +16,7 @@ test_that("gz computed for paired t-test", {
   }
 })
 
-test_that("gav matches MetaESCI case with r~0.6", {
+test_that("gav matches downstream case with r~0.6", {
   # From simulation: t(21)=7.23, g=1.66
   # dz = 1.5414, dav(r=0.6) = 1.5414/sqrt(2*0.4) = 1.7234
   # gav = 1.7234 * J(21) = 1.7234 * 0.9643 = 1.6618

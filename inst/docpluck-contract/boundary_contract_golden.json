@@ -2,15 +2,17 @@
   "schema": "docpluck-boundary-contract/1",
   "consumer": "ESCImate worker -- worker/docpluck_client.R",
   "what_this_pins": "The field set and statistical-symbol surface docpluck returns for two committed fixtures, captured THROUGH THE PRODUCTION CLIENT. Refresh with: Rscript worker/tests/docpluck-contract.R --refresh",
-  "captured_utc": "2026-08-22T08:38:56Z",
+  "captured_utc": "2026-09-27T12:38:27Z",
   "docpluck": {
-    "docpluck_version": "2.4.137",
-    "service_version": "1.6.0",
+    "docpluck_version": "2.4.145",
+    "docpluck_identity": "2.4.145/deb69ae/clean",
+    "version_crosscheck": "agreed",
+    "service_version": "1.8.0",
     "sectioning_version": "1.2.5",
-    "table_extraction_version": "2.4.12",
-    "normalization_version": "1.9.58",
-    "library_repo_sha": "56b67b0",
-    "service_repo_sha": "3718a24",
+    "table_extraction_version": "2.4.17",
+    "normalization_version": "1.9.69",
+    "library_repo_sha": "deb69ae",
+    "service_repo_sha": "a96fff2",
     "captured_from": "http://127.0.0.1:6117"
   },
   "request": {
@@ -33,8 +35,8 @@
   "asserted": {
     "client_result_keys": ["error", "flattened_rows", "http_status", "metadata", "normalization", "ok", "quality", "retry_after", "route_used", "sections", "text"],
     "symbols_html": {
-      "metadata_keys": ["chars", "docpluck_version", "engine", "extraction_time_ms", "file_hash", "file_type", "ocr_engine", "ocr_used", "pages", "pdf_hash", "tables_skipped"],
-      "normalization_keys": ["changes_made", "column_interleave_pages", "fallback_details", "fallbacks", "footnote_spans", "footnote_texts", "level", "page_offsets", "residual_control_chars", "steps_applied", "steps_changed", "version", "warnings"],
+      "metadata_keys": ["chars", "docpluck_identity", "docpluck_version", "engine", "extraction_time_ms", "file_hash", "file_type", "normalize_version", "ocr_engine", "ocr_used", "pages", "pdf_hash", "tables_skipped", "version_crosscheck"],
+      "normalization_keys": ["changes_made", "changes_made_by_step", "column_interleave_pages", "fallback_details", "fallbacks", "footnote_spans", "footnote_texts", "level", "page_offsets", "residual_control_chars", "steps_applied", "steps_changed", "version", "warnings"],
       "quality_keys": ["common_word_ratio", "confidence", "details", "garbled", "score"],
       "flattened_rows_present": false,
       "sections_present": false,
@@ -64,17 +66,17 @@
       }
     },
     "structure_pdf": {
-      "metadata_keys": ["chars", "docpluck_version", "engine", "extraction_time_ms", "file_hash", "file_type", "ocr_engine", "ocr_used", "pages", "pdf_hash", "table_extraction_version", "table_method"],
-      "normalization_keys": ["changes_made", "column_interleave_pages", "fallback_details", "fallbacks", "footnote_spans", "footnote_texts", "level", "page_offsets", "residual_control_chars", "steps_applied", "steps_changed", "version", "warnings"],
+      "metadata_keys": ["chars", "docpluck_identity", "docpluck_version", "engine", "extraction_time_ms", "file_hash", "file_type", "normalize_version", "ocr_engine", "ocr_used", "pages", "pdf_hash", "table_extraction_version", "table_method", "version_crosscheck"],
+      "normalization_keys": ["changes_made", "changes_made_by_step", "column_interleave_pages", "fallback_details", "fallbacks", "footnote_spans", "footnote_texts", "level", "page_offsets", "residual_control_chars", "steps_applied", "steps_changed", "version", "warnings"],
       "quality_keys": ["common_word_ratio", "confidence", "details", "garbled", "score"],
-      "flattened_row_count": 8,
-      "flattened_row_keys": ["fields", "header", "label", "page", "raw_cells", "row_idx", "row_label", "sentence", "table_id"],
+      "flattened_row_count": 5,
+      "flattened_row_keys": ["caption_status", "fields", "header", "label", "page", "raw_cells", "row_idx", "row_label", "sentence", "table_id"],
       "flattened_row_field_keys": ["d", "df", "df1", "df2", "F", "p", "p_op", "t"],
       "sections_present": false
     }
   },
   "provenance_only": {
-    "normalization_steps_applied": ["C0_furniture_control_strip", "H0_header_banner_strip", "T0_toc_dot_leader_strip", "P0_page_footer_strip", "P0r_recurring_running_header_strip", "P1_frontmatter_metadata_leak_strip", "H0b_letterspaced_label_collapse", "W0_watermark_strip", "W0b_minus_sign_recovery", "W0c_lt_operator_recovery", "W0o_lt_as_b_recovery", "W0d_minus_ci_pairing", "W0j_prose_minus_recovery", "W0k_prose_times_recovery", "W0l_prose_times_residuals", "W0g_dropped_minus_ci_pairing", "W0q_ci_upper_detached_minus", "W0e_pua_glyph_recovery", "S1_encoding_validation", "S2_accent_recombination", "S3_ligature_expansion", "S4_quote_normalization", "S5_dash_normalization", "S5a_fffd_context_recovery", "S5b_fffd_comparison_recovery", "S6_whitespace_normalization", "S7_hyphenation_repair", "S7a_space_broken_compound_rejoin", "S8_line_break_joining", "A1_stat_linebreak_repair", "S9_header_footer_removal", "A3b_stat_bracket_to_paren", "A4_ci_delimiter_harmonization", "A5_math_symbol_normalization", "A6_footnote_removal", "A7_doi_rejoin", "R2_inline_pgnum_scrub", "R3_continuation_join", "LateJoin_line_break_rejoin", "H0r_header_banner_restrip", "P1r_frontmatter_leak_restrip", "P0r_page_footer_restrip", "G5c2_split_numbered_heading_rejoin"],
+    "normalization_steps_applied": ["C0_furniture_control_strip", "H0_header_banner_strip", "T0_toc_dot_leader_strip", "P0_page_footer_strip", "P0r_recurring_running_header_strip", "P1_frontmatter_metadata_leak_strip", "H0b_letterspaced_label_collapse", "W0_watermark_strip", "W0b_minus_sign_recovery", "W0c_lt_operator_recovery", "W0o_lt_as_b_recovery", "W0d_minus_ci_pairing", "W0j_prose_minus_recovery", "W0q_ci_upper_detached_minus", "W0e_pua_glyph_recovery", "S1_encoding_validation", "S2_accent_recombination", "S3_ligature_expansion", "S4_quote_normalization", "S5_dash_normalization", "S5a_fffd_context_recovery", "S5b_fffd_comparison_recovery", "S6_whitespace_normalization", "S7_hyphenation_repair", "S7a_space_broken_compound_rejoin", "S8_line_break_joining", "A1_stat_linebreak_repair", "P0_standalone_page_numbers", "S9_header_footer_removal", "A3b_stat_bracket_to_paren", "A4_ci_delimiter_harmonization", "A5_math_symbol_normalization", "A6_footnote_removal", "A7_doi_rejoin", "R2_inline_pgnum_scrub", "R3_continuation_join", "LateJoin_line_break_rejoin", "H0r_header_banner_restrip", "P1r_frontmatter_leak_restrip", "P0r_page_footer_restrip", "G5c2_split_numbered_heading_rejoin"],
     "pdf_pages": "1"
   }
 }

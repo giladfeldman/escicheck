@@ -49,6 +49,39 @@ ci_result <- function(bounds = c(NA_real_, NA_real_), method = NA_character_,
   list(bounds = bounds, method = method, success = success, reason = reason)
 }
 
+# v0.7.8: the engine that ACTUALLY produced a set of bounds.
+#
+# `ci_d_ind_noncentral_t()` falls through to `ci_d_ind_approx()` -- a
+# large-sample approximation, a materially different method -- on two paths:
+# |ncp| beyond R's noncentral-t accuracy limit, and MBESS not installed. Its
+# callers labelled the result "noncentral_t" either way, so the package
+# reported a method it had not run. Measured 2026-09-02 on d = 0.67,
+# n1 = n2 = 25: [0.0965, 1.2370] with MBESS, [0.0997, 1.2403] without, one
+# label. MBESS is a Suggests installed through a Docker step measured dropping
+# 18 packages silently, so a build reporting success can reach this.
+#
+# The bounds now carry a `ci_engine` attribute and the label is derived from
+# it. `uniroot_nct` still reports "noncentral_t" because it IS a noncentral-t
+# inversion, only a different implementation of one; only the genuinely
+# approximate engine changes what is published, so rows that were correct
+# before are byte-identical after.
+.tag_ci_engine <- function(bounds, engine) {
+  attr(bounds, "ci_engine") <- engine
+  bounds
+}
+
+.ci_method_from_engine <- function(bounds, default = "noncentral_t") {
+  engine <- attr(bounds, "ci_engine")
+  if (is.null(engine)) return(default)
+  switch(engine,
+    mbess_ci_smd = "noncentral_t",
+    mbess_ci_sm  = "noncentral_t",
+    uniroot_nct  = "noncentral_t",
+    large_sample_approx = "large_sample_approx",
+    default
+  )
+}
+
 # Check if effectsize package is available
 has_effectsize <- function() {
   requireNamespace("effectsize", quietly = TRUE)
@@ -77,7 +110,7 @@ ci_d_ind_approx <- function(d, n1, n2, level = 0.95) {
   N <- n1 + n2
   se_d <- sqrt((N / (n1 * n2)) + (d^2 / (2 * (N - 2))))
   z <- qnorm(1 - (1 - level) / 2)
-  c(d - z * se_d, d + z * se_d)
+  .tag_ci_engine(c(d - z * se_d, d + z * se_d), "large_sample_approx")
 }
 
 #' Noncentral t CI for independent d
@@ -108,7 +141,7 @@ ci_d_ind_noncentral_t <- function(d, n1, n2, level = 0.95) {
   # Try MBESS if available
   if (requireNamespace("MBESS", quietly = TRUE)) {
     # Silence any stray print()/cat()/message()/warning() from MBESS internals
-    # so batch stdout stays readable (MetaESCI E1).
+    # so batch stdout stays readable (downstream E1).
     bounds <- tryCatch(
       {
         ci_res <- NULL
@@ -129,11 +162,12 @@ ci_d_ind_noncentral_t <- function(d, n1, n2, level = 0.95) {
       error = function(e) c(NA_real_, NA_real_)
     )
     if (!any(is.na(bounds))) {
-      return(bounds)
+      return(.tag_ci_engine(bounds, "mbess_ci_smd"))
     }
   }
 
-  # Fallback to approximation
+  # Fallback to approximation. It keeps ci_d_ind_approx()'s own engine tag, so
+  # the caller reports the approximation rather than the method it asked for.
   return(ci_d_ind_approx(d, n1, n2, level))
 }
 
@@ -170,7 +204,9 @@ ci_d_ind <- function(d, n1, n2, level = 0.95, prefer_noncentral = TRUE) {
   if (prefer_noncentral) {
     bounds <- ci_d_ind_noncentral_t(d, n1, n2, level)
     if (!any(is.na(bounds))) {
-      return(ci_result(bounds = bounds, method = "noncentral_t", success = TRUE))
+      return(ci_result(bounds = bounds,
+                       method = .ci_method_from_engine(bounds),
+                       success = TRUE))
     }
   }
 
@@ -204,7 +240,9 @@ ci_dz <- function(dz, n, level = 0.95) {
   # dz CI = [ncp_lo, ncp_hi] / sqrt(n).
   bounds <- ci_dz_noncentral_t(dz, n, level)
   if (!any(is.na(bounds))) {
-    return(ci_result(bounds = bounds, method = "noncentral_t", success = TRUE))
+    return(ci_result(bounds = bounds,
+                     method = .ci_method_from_engine(bounds),
+                     success = TRUE))
   }
 
   # Fallback: large-sample normal approximation
@@ -243,7 +281,7 @@ ci_dz_noncentral_t <- function(dz, n, level = 0.95) {
       error = function(e) c(NA_real_, NA_real_)
     )
     if (!any(is.na(bounds))) {
-      return(bounds)
+      return(.tag_ci_engine(bounds, "mbess_ci_sm"))
     }
   }
 
@@ -272,7 +310,9 @@ ci_dz_noncentral_t <- function(dz, n, level = 0.95) {
     },
     error = function(e) c(NA_real_, NA_real_)
   )
-  bounds
+  # uniroot IS a noncentral-t inversion, so this still reports "noncentral_t"
+  # at the caller -- tagged only so the implementation stays recoverable.
+  .tag_ci_engine(bounds, "uniroot_nct")
 }
 
 #' Calculate Cohen's dz from t-statistic (Paired)
@@ -553,7 +593,9 @@ ci_d_ind_all <- function(d, n1, n2, level = 0.95) {
   bounds_nct <- tryCatch(ci_d_ind_noncentral_t(d, n1, n2, level),
                          error = function(e) c(NA_real_, NA_real_))
   if (!any(is.na(bounds_nct)))
-    results$noncentral_t <- ci_result(bounds = bounds_nct, method = "noncentral_t", success = TRUE)
+    results$noncentral_t <- ci_result(bounds = bounds_nct,
+                                      method = .ci_method_from_engine(bounds_nct),
+                                      success = TRUE)
   # Method 2: Normal approximation (symmetric)
   bounds_na <- ci_d_ind_approx(d, n1, n2, level)
   if (!any(is.na(bounds_na)))
@@ -667,7 +709,7 @@ ci_dz_all <- function(dz, n, level = 0.95) {
   bounds_nc <- ci_dz_noncentral_t(dz, n, level)
   if (!any(is.na(bounds_nc))) {
     results$noncentral_t <- ci_result(
-      bounds = bounds_nc, method = "noncentral_t", success = TRUE
+      bounds = bounds_nc, method = .ci_method_from_engine(bounds_nc), success = TRUE
     )
   }
   # Method 2: Normal approximation (symmetric)

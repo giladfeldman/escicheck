@@ -1,11 +1,11 @@
-## Schema stability test (MetaESCI request E3)
+## Schema stability test (downstream request E3)
 ## -----------------------------------------------
-## check_text() must return a tibble with the columns MetaESCI and other
+## check_text() must return a tibble with the columns downstream and other
 ## downstream pipelines depend on. (In v0.3.x this test also covered
 ## checkPDF()/checkPDFdir() schema equivalence; v0.4.0 removed those entry
 ## points — extraction now happens via docpluck before check_text() is called.)
 ##
-## The set of "critical columns" below is the MetaESCI contract (aggregate.R,
+## The set of "critical columns" below is the downstream contract (aggregate.R,
 ## validate_esci.py, analysis.Rmd) -- removing or renaming any of them is a
 ## breaking change and must bump the effectcheck major version.
 
@@ -17,15 +17,15 @@ critical_columns <- c(
   "ci_match", "ci_check_status", "ci_method_match",
   "ci_width_ratio", "ci_symmetry",
   "decision_error", "decision_error_reason",
-  ## v0.3.5 additions (MetaESCI CI-audit pack)
+  ## v0.3.5 additions (downstream CI-audit pack)
   "effect_reported_decimals", "ciL_reported_decimals",
   "ciU_reported_decimals", "stat_value_decimals",
   "ci_expected", "ci_reported",
   "ci_level_mismatch", "ci_clipped_to_bound",
   "ci_symmetry_class",
-  ## v0.3.6 addition (ScienceArena tier-5 deception detection)
+  ## v0.3.6 addition (tier-5 deception detection)
   "df_arity_mismatch",
-  ## v0.6.20 additions (MetaESCI O-1 request 2 and O-3). Additive, so no major
+  ## v0.6.20 additions (downstream O-1 request 2 and O-3). Additive, so no major
   ## bump -- but they are documented API surface in API.md now, and a consumer
   ## filtering on extraction_suspect or ci_referent depends on them existing.
   ## `effect_guard_rejected` in particular is the ONLY way to distinguish a row
@@ -43,7 +43,11 @@ critical_columns <- c(
   ##    rewrites" (0) from "the extractor told us nothing" (NA). Only the first
   ##    is an all-clear.
   "SE_guard_rejected", "SE_guard_reason",
-  "upstream_sign_rewrites", "upstream_normalization_version"
+  "upstream_sign_rewrites", "upstream_normalization_version",
+  ## v0.7.12: `df_guard_rejected` separates "a table row's numbers were present
+  ## and WITHHELD because its typed test cannot exist" from "the row printed no
+  ## numbers". Same silent-loss class, one field over again.
+  "df_guard_rejected", "df_guard_reason"
 )
 
 sample_text <- paste(
@@ -53,7 +57,7 @@ sample_text <- paste(
   sep = "\n"
 )
 
-test_that("check_text() exposes all MetaESCI-critical columns", {
+test_that("check_text() exposes all downstream-critical columns", {
   result <- check_text(sample_text)
   expect_true(is.data.frame(result))
   expect_gt(nrow(result), 0)
@@ -62,7 +66,7 @@ test_that("check_text() exposes all MetaESCI-critical columns", {
   expect_equal(
     missing_cols, character(0),
     info = paste(
-      "check_text() is missing MetaESCI-critical columns:",
+      "check_text() is missing downstream-critical columns:",
       paste(missing_cols, collapse = ", ")
     )
   )

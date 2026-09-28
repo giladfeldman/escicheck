@@ -1,5 +1,5 @@
 # Tests for audit fixes (Issues 1-5)
-# See: MetaESCI/preregistration/escicheck_audit_report.md
+# See: the downstream consumer's audit report (internal).
 
 # ===========================================================================
 # Issue 1: Cross-type effect size matching

@@ -56,7 +56,7 @@ test_that("v0.6.16 E7: the r-test multi-N candidate path is NOT short-circuited"
   # r-test exclusion: a correlation with no explicit df runs a
   # best-N-by-p-value-fit selection over ALL candidates and must keep emitting
   # its "Multiple sample sizes" note. Binding the first own-clause N silently
-  # dropped that note (test-metaesci-v023.R:530 and
+  # dropped that note (test-downstream-v023.R:530 and
   # test-v0612-ownclause-n-and-repcol-dedup.R:188 both went red).
   res <- check_text("N = 32. N = 959. r = .25, p < .001")
   row <- res[!is.na(res$stat_value), ]

@@ -594,7 +594,7 @@ normalize_text <- function(x) {
   # rule downstream sees pre-v2.4.136 text. Note this also fixes the `trimws()`
   # gap: R's default whitespace class is "[ \t\r\n]" and does NOT strip a form
   # feed, so a form-feed-only chunk used to survive the empty-chunk filters and
-  # shift every `location` ordinal -- which MetaESCI joins on.
+  # shift every `location` ordinal -- which downstream joins on.
   x <- gsub("\f", "", x, fixed = TRUE)
 
   # Re-validate UTF-8 after byte operations before Perl regex
@@ -733,7 +733,7 @@ normalize_text <- function(x) {
   # Pre-strip thousands-separator commas inside test-statistic parentheses
   # Must run BEFORE decimal comma conversion to prevent t(2,758) -> t(2.758)
   # which would silently be parsed as Welch df=2.758 with nonsense N estimate.
-  # (MetaESCI E8, 2026-04-11: one article dropped 47 rows to this bug.)
+  # (downstream E8, 2026-04-11: one article dropped 47 rows to this bug.)
   #
   # v0.7.3: locale-gated, like T1 and D1. Cross-model audit caught that this
   # sibling rule was missed by the locale pass: inside a decisively European
@@ -793,7 +793,7 @@ normalize_text <- function(x) {
   #   a-zA-Z  author affiliation superscripts  ("Braunstein1,3")
   #   ,       multi-affiliation runs           ("Wagner1,3,4")
   #   0-9     CI pairs and decimal lists       ("[0.45,0.89]")
-  #   [ and ( tight df brackets                ("F[2,42]" -- MetaESCI D2)
+  #   [ and ( tight df brackets                ("F[2,42]" -- downstream D2)
   # The lookahead includes `,` -- a DIVERGENCE from docpluck A3, found by
   # effectcheck's own suite and filed back to docpluck (see SPEC.md rule D1).
   # A European paper writes "t(28) = 2,21, d = 0,45": the decimal is followed by
@@ -951,7 +951,7 @@ normalize_text <- function(x) {
   # Strip section numbers at start of lines (e.g., "3.3." or "3.3.1.") to prevent
   # them from being captured as p-values when joined across line breaks.
   #
-  # v0.6.20 (MetaESCI O-1, class A): the old pattern was `\d+(\.\d+)+\.?[ \t]+`,
+  # v0.6.20 (downstream O-1, class A): the old pattern was `\d+(\.\d+)+\.?[ \t]+`,
   # which also matches a LINE-WRAPPED REPORTED VALUE -- "d =\n0.86 in the
   # treatment group" had "0.86 " stripped, so the row shipped
   # effect_reported = NA with status OK (a false all-clear), and
@@ -964,10 +964,10 @@ normalize_text <- function(x) {
   # form (single group, no trailing dot) is now KEPT: preferring a possible
   # section number over a possible reported value is the wrong trade on a
   # verification tool, and a p-value taking a section number is caught
-  # downstream by the [0, 1] validation at the p_reported extraction.
+  # Downstream by the [0, 1] validation at the p_reported extraction.
   #
   # The leading `(?<![=<>])(?<![=<>][ \t])` is the second half of the fix, for a
-  # case neither MetaESCI nor the cross-model review raised: a wrapped value that
+  # case neither downstream nor the cross-model review raised: a wrapped value that
   # ENDS A SENTENCE is shaped exactly like a section number, because the sentence
   # period supplies the trailing dot.
   #
@@ -1054,7 +1054,7 @@ normalize_text <- function(x) {
   # Fix uses [ \t]*+ (possessive horizontal whitespace) after [<=>] to prevent two bugs:
   # 1. Backtracking: \s* would backtrack past space, lookahead sees space not digit, fires
   # 2. Newline eating: \s*+ would consume \n, leaving nothing for the \n literal in pattern
-  # v0.6.20 (MetaESCI O-1/O-2, class A): the skipped span is DIGIT-FREE
+  # v0.6.20 (downstream O-1/O-2, class A): the skipped span is DIGIT-FREE
   # ([^\n\d]), so this rule can never discard a number that is already present.
   # It previously skipped `[^\n]{0,50}`, which happily swallowed real reported
   # statistics -- "p < ns although F(1,20) = 3.1\n2 participants" collapsed to
@@ -1078,7 +1078,7 @@ normalize_text <- function(x) {
   # Allow optional non-numeric text between = and number (up to 30 chars)
   #
   # ==========================================================================
-  # v0.6.20 (MetaESCI O-1/O-2) -- THE INVARIANT FOR EVERY LINE-WRAP BRIDGE:
+  # v0.6.20 (downstream O-1/O-2) -- THE INVARIANT FOR EVERY LINE-WRAP BRIDGE:
   #
   #   A bridging rule may JOIN a wrapped number to its label. It must NEVER
   #   DELETE a number that is already present.
@@ -1089,7 +1089,7 @@ normalize_text <- function(x) {
   # line, which is the only situation the rule exists to repair.
   #
   # The old class was `[^\n]{0,30}`, with no guard of any kind, and it was the
-  # single root cause of BOTH MetaESCI O-1 and O-2 (they were filed as separate
+  # single root cause of BOTH downstream O-1 and O-2 (they were filed as separate
   # defects with separate diagnoses; both traced here):
   #
   #   "etap2 = .86, and Experiment\n1b"      -> "partial eta-squared = 1"
@@ -1131,7 +1131,7 @@ normalize_text <- function(x) {
 
   # Fix cases where p-value pattern got broken: "p = text" followed by number on next line
   # More aggressive: look for "p = " followed by non-numeric text, then newline, then number
-  # v0.6.20 (MetaESCI O-1/O-2, class A): digit-free skip span per the invariant
+  # v0.6.20 (downstream O-1/O-2, class A): digit-free skip span per the invariant
   # above, and BOUNDED. The old `[^\n]*` was unbounded, so a single match could
   # discard an entire line of statistics -- "p = ns, t(20) = 2.51, d = 0.55, 95%
   # CI [0.1, 1.0]\n10 items" collapsed to "p = 10", taking the t-test, the effect
@@ -1995,7 +1995,7 @@ parse_text <- function(text, context_window_size = 2) {
   # ~80 chars) by a p-clause. Word-boundary lookbehind avoids matching `dt =`,
   # `pt = `, etc. The trailing p-anchor distinguishes a genuine t-test report
   # from any unrelated "t = value" (e.g. a time variable). df1 stays NA and the
-  # downstream NA-N guard at check.R:1390 yields status=NOTE (extracted but not
+  # Downstream NA-N guard at check.R:1390 yields status=NOTE (extracted but not
   # exactly verifiable without df).
   pat_t_p_nodf <- "(?<![a-zA-Z])t\\s*=\\s*([-+]?\\d*\\.?\\d+)(?=[^a-zA-Z]{1,80}?[pP]\\s*[<=>])"
   # F-test: F(df1, df2) = value OR F[df1, df2] = value (square brackets for Scientific Reports)
@@ -2326,7 +2326,7 @@ parse_text <- function(text, context_window_size = 2) {
   # follows (lookahead), so a normal "p = .40" still captures "=" as the operator
   # and "p <= .05" still captures "<=". collabra.126266 H5 punishment mediation:
   # docpluck delivers "Sobel Z = 4.87, p = <.001" (the PDF prints "p < .001").
-  # v0.6.20 (MetaESCI O-1 sweep, class B): the bare `[01]` alternative had no
+  # v0.6.20 (downstream O-1 sweep, class B): the bare `[01]` alternative had no
   # right-hand boundary, so it matched the LEADING DIGIT of a longer number and
   # the rest was silently dropped -- "p = 10" was published as p_reported = 1,
   # with p_valid = TRUE and p_out_of_range = FALSE. The [0, 1] validation at the
@@ -2880,7 +2880,7 @@ parse_text <- function(text, context_window_size = 2) {
     #
     # It lands in a SIBLING COLUMN, never a second row. A new row would change
     # `nrow()` for every consumer and silently shift every downstream index;
-    # MetaESCI's field registry is frozen at v0.4.0, so it already tolerates new
+    # Downstream's field registry is frozen at v0.4.0, so it already tolerates new
     # columns it does not know about, and cannot tolerate new rows.
     #
     # Scoped to the GLUED form only, and that scoping is the whole safety
@@ -3042,7 +3042,7 @@ parse_text <- function(text, context_window_size = 2) {
       # explicit df runs a best-N-by-p-value-fit selection over ALL candidates
       # and emits a "Multiple sample sizes" note. Binding the first own-clause N
       # short-circuits that selection and silently drops the ambiguity note --
-      # caught by test-metaesci-v023.R:530 and
+      # caught by test-downstream-v023.R:530 and
       # test-v0612-ownclause-n-and-repcol-dedup.R:188 when this branch was first
       # written without the exclusion.
       N_value <- N_own_candidates[1]
@@ -3182,9 +3182,9 @@ parse_text <- function(text, context_window_size = 2) {
     stat_value_decimals <- NA_integer_
     chi_inline_N <- NA_real_
     df_arity_mismatch <- FALSE
-    # v0.6.20 (MetaESCI O-1 request 2): set by the parse-time plausibility guard
+    # v0.6.20 (downstream O-1 request 2): set by the parse-time plausibility guard
     # when it suppresses a reported effect size, so the suppression is visible
-    # downstream instead of reading as "no effect size was reported".
+    # Downstream instead of reading as "no effect size was reported".
     effect_guard_rejected <- FALSE
     effect_guard_reason <- NA_character_
     # v0.6.10 (E-mediation): set when this sub-chunk is a Sobel-Z mediation indirect
@@ -4011,11 +4011,11 @@ parse_text <- function(text, context_window_size = 2) {
     # before they enter the pipeline. This prevents false ERRORs from
     # garbled PDF extractions like R2=52.2, V=173.5, d=8.
     #
-    # v0.6.20 (MetaESCI O-1 request 2): every rejection below is now RECORDED.
+    # v0.6.20 (downstream O-1 request 2): every rejection below is now RECORDED.
     # The guard used to null the value and say nothing, which made the row
     # indistinguishable downstream from "this statistic reported no effect
     # size" -- a false all-clear, and the more dangerous of the two O-1 failure
-    # modes (27 of MetaESCI's 42 corrupted rows were silent losses of this
+    # modes (27 of downstream's 42 corrupted rows were silent losses of this
     # shape, shipped as OK / SKIP / NOTE). `effect_guard_rejected` and
     # `effect_guard_reason` travel with the row; check.R turns them into an
     # uncertainty message and sets extraction_suspect, so a suppressed value is
@@ -4043,7 +4043,7 @@ parse_text <- function(text, context_window_size = 2) {
 
       # v0.3.0f: Extended d-family guard to include dz, dav, drm
       # d > 10: virtually always a line number or page artifact (43 cases
-      # in MetaESCI corpus: dz=219, dz=388, etc.)
+      # in downstream corpus: dz=219, dz=388, etc.)
       d_family <- c("d", "g", "dz", "dav", "drm")
       if (!is.na(effect_reported) && !is.na(effect_name) &&
           effect_name %in% d_family && abs(effect_reported) > 10) {
@@ -4260,7 +4260,7 @@ parse_text <- function(text, context_window_size = 2) {
     }
 
     # Guard: a confidence level outside [0.50, 1.00) is implausible (parsing
-    # artifact). v0.6.20 (MetaESCI): this test was one-sided (`< 0.50` only), so
+    # artifact). v0.6.20 (downstream): this test was one-sided (`< 0.50` only), so
     # a level ABOVE 1 sailed through untouched -- "263.95% CI [0.11, 0.47]"
     # yielded ci_level = 2.6395, ci_level_mismatch = NA and status PASS. A
     # coverage probability of 1 or more is not merely implausible, it is
@@ -4417,7 +4417,7 @@ parse_text <- function(text, context_window_size = 2) {
         # value is not in [0, 1] at all -- "p = 10", "p = 3.3") is just as
         # out-of-range as one pat_p captured and the [0, 1] validation rejected.
         # Before this, only the second kind was flagged, so an impossible p read
-        # downstream as "this result reported no p-value".
+        # Downstream as "this result reported no p-value".
         #
         # The malformed detector is suppressed when the row reports an explicit
         # "ns": that row's p is legitimately non-numeric, so a stray impossible
@@ -4454,22 +4454,22 @@ parse_text <- function(text, context_window_size = 2) {
       table_c = if (!all(is.na(m_dim))) numify(m_dim[3]) else NA_real_,
       effect_reported_name = effect_name,
       effect_reported = effect_reported,
-      effect_reported_decimals = effect_reported_decimals, # v0.3.5 (MetaESCI 2A)
-      stat_value_decimals = stat_value_decimals,           # v0.3.5 (MetaESCI 2A)
+      effect_reported_decimals = effect_reported_decimals, # v0.3.5 (downstream 2A)
+      stat_value_decimals = stat_value_decimals,           # v0.3.5 (downstream 2A)
       effect_fallback = effect_fallback, # NEW: Phase 2F - flag fallback pattern use
       eta = if (length(effect_name) > 0 && !is.na(effect_name) && effect_name == "eta") effect_reported else NA_real_,
       ci_level = ci_level,
       ci_level_source = ci_level_source, # NEW: Phase 2H - Track where CI level came from
       ciL_reported = ciL,
       ciU_reported = ciU,
-      ciL_reported_decimals = ciL_reported_decimals,       # v0.3.5 (MetaESCI 2A)
-      ciU_reported_decimals = ciU_reported_decimals,       # v0.3.5 (MetaESCI 2A)
+      ciL_reported_decimals = ciL_reported_decimals,       # v0.3.5 (downstream 2A)
+      ciU_reported_decimals = ciU_reported_decimals,       # v0.3.5 (downstream 2A)
       z_auxiliary = z_auxiliary,
       b_coeff = b_coeff,
       SE_coeff = SE_coeff,
       adj_R2 = adj_R2_val,
       df_arity_mismatch = df_arity_mismatch,
-      # v0.6.20 (MetaESCI O-1 request 2)
+      # v0.6.20 (downstream O-1 request 2)
       effect_guard_rejected = effect_guard_rejected,
       effect_guard_reason = effect_guard_reason,
       # v0.7.6: an impossible standard error was refused. Separate from the
@@ -4953,6 +4953,21 @@ parse_text <- function(text, context_window_size = 2) {
   )
 }
 
+#' Which docpluck table rows come from a grid no caption claimed
+#'
+#' docpluck 2.4.145+ marks them `caption_status == "uncaptioned_candidate"`.
+#' A row without the field (docpluck <= 2.4.144) is never uncaptioned.
+#' @param table_rows A list of docpluck flattened-row records.
+#' @return A logical vector, one element per row.
+#' @keywords internal
+#' @noRd
+.table_rows_uncaptioned <- function(table_rows) {
+  vapply(table_rows, function(rec) {
+    cs <- rec$caption_status
+    !is.null(cs) && length(cs) > 0L && identical(as.character(cs[[1]]), "uncaptioned_candidate")
+  }, logical(1))
+}
+
 #' Map docpluck structured table rows to parsed-statistic rows
 #'
 #' v0.6.4: consumes docpluck's `?structured=true` `flattened_rows[]` (typed
@@ -5004,7 +5019,21 @@ flattened_rows_to_parsed <- function(table_rows) {
   has <- function(f, k) {
     !is.null(f[[k]]) && length(f[[k]]) > 0L && !is.na(num1(f[[k]]))
   }
+  # v0.7.13: docpluck 2.4.145 includes rows from grids no caption claimed,
+  # marked caption_status == "uncaptioned_candidate" (about half are page
+  # furniture). Measured on the 27 seam papers they verified nothing (PASS/OK
+  # unchanged) and produced two false WARNs, so they are dropped -- BEFORE the
+  # cross-table dedup, so an uncaptioned grid cannot suppress a captioned
+  # table that repeats it. Filter on the field, never on the table_id prefix.
+  table_rows <- table_rows[!.table_rows_uncaptioned(table_rows)]
+  if (length(table_rows) == 0L) {
+    return(NULL)
+  }
+  cross_dup <- .table_row_cross_table_duplicates(table_rows)
   rows <- lapply(seq_along(table_rows), function(i) {
+    if (cross_dup[i]) {
+      return(NULL)
+    }
     rec <- table_rows[[i]]
     f <- rec$fields
     if (is.null(f) || length(f) == 0L) {
@@ -5170,7 +5199,7 @@ flattened_rows_to_parsed <- function(table_rows) {
       # only its reason was wrong. Practical consequence: do NOT invest in
       # font/CMap/ToUnicode recovery for this class -- it targets the ordinary
       # space before `=` and can never recover drawn curves. The viable non-OCR
-      # route is a vector-path recogniser. See docs/REPLY_FROM_DOCPLUCK_2026-06-25.md.
+      # route is a vector-path recogniser. See communications/REPLY_FROM_DOCPLUCK_2026-06-25.md.
       if (has(f, "eta2")) {
         ern <- "etap2"
         er <- num1(f$eta2)
@@ -5225,6 +5254,19 @@ flattened_rows_to_parsed <- function(table_rows) {
     ciL <- if (has(f, "CI_lower")) num1(f$CI_lower) else NA_real_
     ciU <- if (has(f, "CI_upper")) num1(f$CI_upper) else NA_real_
 
+    # v0.7.12: refuse a typed row whose test cannot exist. See
+    # `.table_row_domain_violation()`. The row is KEPT (so the table result is
+    # visibly unreadable rather than silently absent) but every typed number is
+    # withheld: there is no source sentence behind a table row, so the displayed
+    # statistic is the only thing a reader sees, and here it is a fabrication.
+    df_rej_reason <- .table_row_domain_violation(tt, stat, d1, d2)
+    if (!is.na(df_rej_reason)) {
+      stat <- NA_real_; d1 <- NA_real_; d2 <- NA_real_; nn <- NA_real_
+      ern <- NA_character_; er <- NA_real_; p_val <- NA_real_; p_sym <- NA_character_
+      ciL <- NA_real_; ciU <- NA_real_
+      p_flat_out_of_range <- FALSE
+    }
+
     # Inject the design hint into context_window for t-test rows only (the
     # t-test design detector in check.R reads context_window; F-tests have their
     # own within/between detector that should not be steered by a paired/joint
@@ -5256,7 +5298,9 @@ flattened_rows_to_parsed <- function(table_rows) {
       ciU_reported = ciU,
       from_table = TRUE,
       source_table = label,
-      table_group = grp
+      table_group = grp,
+      df_guard_rejected = !is.na(df_rej_reason),
+      df_guard_reason = df_rej_reason
     )
   })
   rows <- rows[!vapply(rows, is.null, logical(1))]
@@ -5264,4 +5308,152 @@ flattened_rows_to_parsed <- function(table_rows) {
     return(NULL)
   }
   dplyr::bind_rows(rows)
+}
+
+#' Why a typed table row describes a test that cannot exist, or NA
+#'
+#' v0.7.12. docpluck 2.4.143/2.4.144 attach the stream rows below a ruled
+#' table to that table (`_augment_lattice_with_stream_rows`), so on a page of
+#' stacked tables the NEXT table's rows are read under the FIRST table's
+#' header. A t-test row `Sleep vs Control 2.41 98 .018 0.15` under an
+#' `[F, df1, df2]` header arrives typed `{F: 98, df1: 0.018, df2: 0.15}`, and
+#' effectcheck emitted it as the statistic F(0.018, 0.15) = 98. Nothing about
+#' that row came from an F test.
+#'
+#' The test here is the DOMAIN of the statistic, not its plausibility, so it
+#' cannot fire on a correctly read table whatever the design:
+#'   * F: numerator df >= 1 (a Greenhouse-Geisser / Huynh-Feldt corrected df1
+#'     is epsilon * (k - 1) with epsilon >= 1 / (k - 1), so it never drops
+#'     below 1), denominator df > 0 (Satterthwaite / Kenward-Roger df2 may be
+#'     fractional, never non-positive), and F >= 0.
+#'   * t: df > 0. NOT df >= 1: a two-sample Welch df is at least
+#'     min(n1, n2) - 1, but a mixed-model Satterthwaite contrast has no such
+#'     floor and may legitimately print a df in (0, 1) (Sol consult seat,
+#'     2026-09-25), exactly as an F denominator df may.
+#' Fractional df alone is NOT a violation: Welch t, corrected F and mixed
+#' models all print one legitimately. The one way a paper's own number can
+#' cross the line is an author who computes a corrected df1 by hand from a
+#' rounded epsilon at its lower bound (k = 3, epsilon printed .49, df1 .98);
+#' that df is still impossible as printed, which is why the reason says "most
+#' often" a column misassignment rather than always.
+#'
+#' @param tt Test type the row was mapped to.
+#' @param stat,d1,d2 The typed statistic and degrees of freedom.
+#' @return A reason string, or `NA_character_` when the row is admissible.
+#' @keywords internal
+.table_row_domain_violation <- function(tt, stat, d1, d2) {
+  if (is.na(tt)) {
+    return(NA_character_)
+  }
+  fmt <- function(v) format(v, digits = 6)
+  bad <- character(0)
+  if (identical(tt, "F")) {
+    if (!is.na(d1) && d1 < 1) bad <- c(bad, sprintf("numerator df %s is below 1", fmt(d1)))
+    if (!is.na(d2) && d2 <= 0) bad <- c(bad, sprintf("denominator df %s is not positive", fmt(d2)))
+    if (!is.na(stat) && stat < 0) bad <- c(bad, sprintf("F = %s is negative", fmt(stat)))
+  } else if (identical(tt, "t")) {
+    if (!is.na(d1) && d1 <= 0) bad <- c(bad, sprintf("df %s is not positive", fmt(d1)))
+  }
+  if (length(bad) == 0L) {
+    return(NA_character_)
+  }
+  typed <- if (identical(tt, "F")) {
+    sprintf("F = %s, df1 = %s, df2 = %s", fmt(stat), fmt(d1), fmt(d2))
+  } else {
+    sprintf("t = %s, df = %s", fmt(stat), fmt(d1))
+  }
+  paste0(
+    "TABLE ROW REFUSED: the extractor typed this table row as ", typed,
+    ", which no ", tt, " test can produce (", paste(bad, collapse = "; "),
+    "). Most often the table's cells were assigned to the wrong columns ",
+    "during extraction, so none of the row's numbers are shown or checked. ",
+    "Check this row against the table in the paper."
+  )
+}
+
+#' Flag table rows that repeat another table's row exactly
+#'
+#' v0.7.12. docpluck can deliver one printed table twice under two
+#' `table_id`s -- 2.4.143/2.4.144 returned Table 1's three F rows both as
+#' `t1` (labelled Table 1) and inside `camelot_t0` (labelled Table 2), so each
+#' result was checked and counted twice, once under the wrong table.
+#'
+#' The rule is WHOLE-TABLE CONTAINMENT, because what is being detected is a
+#' table delivered twice, not two rows that happen to agree. A table is a
+#' `table_id` on one page. A later table's rows are dropped when an EARLIER
+#' table on the same page satisfies all of:
+#'   * it has a different, non-empty `table_id`, and both carry a page (a
+#'     missing page is no evidence that two tables share one);
+#'   * it holds at least two DISTINCT result rows -- a row whose typed fields
+#'     hold at least two numbers, one of them a t, F or r;
+#'   * EVERY one of those rows reappears in the later table with the identical
+#'     row label, group and typed fields (every name and value, p_op included).
+#' Only the later table's rows that repeat the earlier table are dropped; its
+#' other rows are kept. Anything short of full containment is kept -- the
+#' conservative direction, which only restores the pre-0.7.12 behaviour.
+#'
+#' Why containment and not "two matching rows": two genuine tables on one page
+#' (say age- and sex-adjusted models of the same outcomes) can agree on two
+#' rows after publication rounding; they almost never agree on every row. And
+#' a partial third copy (Table C repeats all of B, while B shares one row with
+#' A) is caught through B instead of being split across two sources (Sol
+#' consult seat, 2026-09-25, which found both weaknesses in the first draft).
+#'
+#' "First occurrence" assumes docpluck delivers tables in document order, which
+#' held on the reproduced case (the correctly labelled `t1` came first). If a
+#' misattached copy were ever delivered first, the kept row would carry the
+#' wrong table label -- but still the right numbers, counted once.
+#'
+#' @param table_rows docpluck flattened rows, as passed to
+#'   `flattened_rows_to_parsed()`.
+#' @return A logical vector, TRUE for a row to drop.
+#' @keywords internal
+.table_row_cross_table_duplicates <- function(table_rows) {
+  n <- length(table_rows)
+  drop <- rep(FALSE, n)
+  if (n < 4L) {
+    return(drop)
+  }
+  s1 <- function(v) {
+    if (is.null(v) || length(v) == 0L || is.na(v[[1]])) "" else trimws(as.character(v[[1]]))
+  }
+  keys <- character(n)
+  tids <- character(n)
+  pages <- character(n)
+  for (i in seq_len(n)) {
+    rec <- table_rows[[i]]
+    f <- rec$fields
+    tids[i] <- s1(rec$table_id)
+    pages[i] <- s1(rec$page)
+    keys[i] <- NA_character_
+    if (is.null(f) || length(f) == 0L || !nzchar(tids[i])) next
+    nums <- suppressWarnings(vapply(f, function(v) {
+      if (is.null(v) || length(v) == 0L) NA_real_ else as.numeric(v[[1]])
+    }, numeric(1)))
+    if (sum(!is.na(nums)) < 2L) next
+    if (!any(c("t", "F", "r") %in% names(nums)[!is.na(nums)])) next
+    fld <- vapply(sort(names(f)), function(k) paste0(k, "=", s1(f[[k]])), character(1))
+    keys[i] <- paste(s1(rec$row_label), s1(f$group), paste(fld, collapse = ";"), sep = "\r")
+  }
+  # A table is (table_id, page); ordered by its first row in delivery order.
+  # Only rows with a table id AND a page take part (Sonnet consult seat,
+  # 2026-09-25: ids repeat across pages, so the page is part of the identity).
+  ok <- nzchar(tids) & nzchar(pages)
+  block <- ifelse(ok, paste(tids, pages, sep = "\r"), NA_character_)
+  blocks <- unique(block[!is.na(block)])
+  for (a in seq_along(blocks)) {
+    ea <- which(block == blocks[a])
+    e_keys <- unique(keys[ea][!is.na(keys[ea])])
+    if (length(e_keys) < 2L) next
+    for (b in seq_along(blocks)) {
+      if (b == a) next
+      lb <- which(block == blocks[b])
+      if (min(lb) < min(ea)) next                          # only a LATER table
+      if (pages[lb[1]] != pages[ea[1]] || tids[lb[1]] == tids[ea[1]]) next
+      l_keys <- keys[lb]
+      if (!all(e_keys %in% l_keys)) next                   # whole-table containment
+      drop[lb[!is.na(l_keys) & l_keys %in% e_keys]] <- TRUE
+    }
+  }
+  drop
 }

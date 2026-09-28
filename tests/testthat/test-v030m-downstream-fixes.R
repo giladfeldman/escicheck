@@ -1,4 +1,4 @@
-# test-v030m-metaesci-fixes.R — v0.3.0m: MetaESCI batch validation fixes
+# test-v030m-downstream-fixes.R — v0.3.0m: downstream batch validation fixes
 # Issue 1: Unstandardized b vs standardized beta (153 false positive ERRORs)
 # Issue 1b: pat_eta matching "eta" inside "beta" (parser bug)
 # Issue 3: F-test NaN computation errors (27 crashes)
