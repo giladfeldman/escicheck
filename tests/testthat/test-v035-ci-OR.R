@@ -1,4 +1,4 @@
-## v0.3.5 — Odds-ratio CI (MetaESCI request 1A)
+## v0.3.5 — Odds-ratio CI (downstream request 1A)
 ## ---------------------------------------------
 ## ci_OR_all() supplies CIs from log-Wald (with SE), Fisher exact (from
 ## 2x2 cells), or Wald-on-log back-derived from a reported p-value.

@@ -138,8 +138,11 @@ on \code{"highly_ambiguous"}.}
 \item{\code{ambiguity_reason}}{Character. Human-readable explanation
 of the ambiguity. Since v0.5.11, a stable bracket-tagged category
 suffix is appended when applicable: \code{"[category: structural-design]"}
-or \code{"[category: cross-family]"}. Consumers can grep for the tag
-to programmatically split the two semantics without parsing English.}
+or \code{"[category: cross-family]"}; since v0.7.11 also
+\code{"[category: not-computed]"} when an effect size was reported but
+no variant could be computed at all (e.g. an F without df), so nothing
+was matched. Consumers can grep for the tag
+to programmatically split the semantics without parsing English.}
 \item{\code{matched_variant}}{The computed variant matched against
 the reported ES. A cross-family fallback row will name a variant
 from a different family than the reported ES type (e.g.

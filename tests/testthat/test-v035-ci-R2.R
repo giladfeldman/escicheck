@@ -1,4 +1,4 @@
-## v0.3.5 — R-squared CI (MetaESCI request 1B)
+## v0.3.5 — R-squared CI (downstream request 1B)
 ## --------------------------------------------
 ## ci_R2_all() routes through ci_etap2_all() (R^2 = partial eta^2 in
 ## one-predictor / single-omnibus regression), retagging methods.

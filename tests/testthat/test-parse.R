@@ -70,7 +70,7 @@ test_that("normalize_text: N thousands and decimal comma coexist", {
 })
 
 test_that("normalize_text strips thousand-sep commas in t-test parens (E8)", {
-  # MetaESCI E8: t(2,758) must become t(2758), not t(2.758)
+  # Downstream E8: t(2,758) must become t(2758), not t(2.758)
   # Without this fix, the decimal-comma converter would treat 2,758 as 2.758
   # and parse.R would read df=2.758 (Welch) with a garbage N estimate.
   text <- "beta = -.06, t(2,758) = -2.96, p = .003"
@@ -105,7 +105,7 @@ test_that("check_text parses t(2,758) with correct df (E8 end-to-end)", {
   expect_false(any(dfs < 10, na.rm = TRUE))
 })
 
-# MetaESCI v0.3.3 follow-up: docpluck v1.4.4 emits "t(2, 758)" with a space
+# Downstream v0.3.3 follow-up: docpluck v1.4.4 emits "t(2, 758)" with a space
 # after the comma (A4 paren spacing normalizer). The v0.3.2 pre-strip regex
 # did not allow a space, so the fix was a no-op on real PDFs. These tests
 # pin the with-space variants for t/F/chi-square.

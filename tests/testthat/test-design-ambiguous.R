@@ -109,7 +109,7 @@ test_that("F(1,df) with reported d also gets downgraded", {
 })
 
 test_that("Report test case: common independent t-test", {
-  # From the MetaESCI report — most common pattern
+  # From the downstream report — most common pattern
   res <- check_text("t(100) = 3.45, p < .001, d = 0.68")
   expect_true(nrow(res) >= 1)
   # d_ind_equalN ≈ 0.69, delta ≈ 0.01 — should PASS or be close

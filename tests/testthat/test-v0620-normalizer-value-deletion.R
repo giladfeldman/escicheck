@@ -1,4 +1,4 @@
-# v0.6.20 -- MetaESCI O-1 / O-2 and the sweep they triggered.
+# v0.6.20 -- downstream O-1 / O-2 and the sweep they triggered.
 #
 # THE DEFECT CLASS: a normalization rule that DELETES source text.
 #
@@ -8,7 +8,7 @@
 # span it skipped contained a value -- so a REPORTED STATISTIC was destroyed and
 # replaced by whatever number happened to open the next line.
 #
-# MetaESCI filed this as two unrelated defects with two different diagnoses:
+# Downstream filed this as two unrelated defects with two different diagnoses:
 #   O-1: "the effect-size capture window bleeds across the newline and takes the
 #         leading digit of a wrapped Table/Figure/Study/Experiment label"
 #   O-2: "the chi-square continuation guard is missing a newline terminator"
@@ -60,7 +60,7 @@ test_that("the captured effect size tracks the ARTICLE, not the label digit", {
 })
 
 test_that("ordinary Table / Figure / Study cross-references do not corrupt a row", {
-  # MetaESCI's corpus reconciliation found the commonest trigger is not an
+  # Downstream's corpus reconciliation found the commonest trigger is not an
   # experiment label at all but a wrapped cross-reference, which appears in APA
   # prose constantly. Each of these was verified article-text <-> shipped CSV.
   res <- effectcheck::check_text("t(48) = 2.31, p = .025, d = 0.74 (see Table\n2)")
@@ -76,7 +76,7 @@ test_that("ordinary Table / Figure / Study cross-references do not corrupt a row
 })
 
 test_that("the trigger needs no label word at all", {
-  # This is why MetaESCI's incidence figure (42 rows / 39 articles) is a floor:
+  # This is why downstream's incidence figure (42 rows / 39 articles) is a floor:
   # their locator only searched a fixed label vocabulary, but the rule keys on
   # `[a-z]+ =` plus a wrapped digit. Any prose triggers it.
   res <- effectcheck::check_text(
@@ -131,7 +131,7 @@ test_that("a line-wrapped value at the start of a line is not stripped as a sect
   # `\d+(\.\d+)+\.?[ \t]+` at line start matched "0.86 " exactly as it matched
   # "3.3.1 ", so a wrapped value was deleted and the row shipped
   # effect_reported = NA with status OK -- the silent-loss shape again, from a
-  # rule MetaESCI never looked at.
+  # rule downstream never looked at.
   res <- effectcheck::check_text(
     "The effect was large, t(30) = 2.55, p = .016, d =\n0.86 in the treatment group")
   expect_equal(res$effect_reported[1], 0.86)
@@ -141,7 +141,7 @@ test_that("a line-wrapped value at the start of a line is not stripped as a sect
 })
 
 test_that("a wrapped value that ENDS A SENTENCE is not stripped either", {
-  # Found by neither MetaESCI nor the cross-model review: the sentence period
+  # Found by neither downstream nor the cross-model review: the sentence period
   # supplies the trailing dot, so "0.86. " is shaped exactly like "3.3. ".
   # A dangling assignment operator on the previous line is the discriminator --
   # nothing numbers a section immediately after "d =".

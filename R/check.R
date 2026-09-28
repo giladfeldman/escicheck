@@ -360,6 +360,7 @@ VARIANT_METADATA <- list(
     if (col %in% names(row) && length(row[[col]]) > 0L) row[[col]][1] else default
   }
   from_table <- isTRUE(g1("from_table", FALSE))
+  df_rejected <- isTRUE(g1("df_guard_rejected", FALSE))
   tibble::tibble(
     location = g1("location", NA_integer_),
     raw_text = g1("raw_text", ""),
@@ -382,7 +383,7 @@ VARIANT_METADATA <- list(
     status = "NOTE",
     check_type = "extraction_only",
     check_scope = "extraction_only",
-    extraction_suspect = FALSE,
+    extraction_suspect = df_rejected,
     decimal_recovered = FALSE,
     result_context = if (from_table) "table" else "study",
     confidence = 1L,
@@ -431,11 +432,14 @@ VARIANT_METADATA <- list(
     effect_guard_reason = as.character(g1("effect_guard_reason", NA_character_)),
     SE_guard_rejected = isTRUE(g1("SE_guard_rejected", FALSE)),
     SE_guard_reason = as.character(g1("SE_guard_reason", NA_character_)),
+    df_guard_rejected = df_rejected,
+    df_guard_reason = as.character(g1("df_guard_reason", NA_character_)),
     ci_width_ratio = NA_real_, ci_symmetry = NA_character_,
     ci_level_mismatch   = NA_character_,
     ci_clipped_to_bound = NA_character_,
     ci_symmetry_class   = NA_character_,
     sign_ci_violation   = NA,
+    estimate_outside_ci = NA,
     effect_reported_decimals = NA_integer_,
     ciL_reported_decimals    = NA_integer_,
     ciU_reported_decimals    = NA_integer_,
@@ -550,6 +554,93 @@ VARIANT_METADATA <- list(
       }
     }
   }
+  parsed
+}
+
+#' Propose a df for a bare correlation from a uniquely-matching stated r(df)
+#'
+#' v0.7.9. A correlation printed with no df and no n of its own -- the ordinary
+#' shape of a table cell, where `r = .45` sits in one column and `[0.34, 0.54]`
+#' in the next -- falls through to the document-global N. That N is the study
+#' total, and for a table reporting one condition or one wave it is simply the
+#' wrong sample: every recomputed interval is then narrower than the published
+#' one, and the row is graded on a mismatch the tool manufactured itself.
+#'
+#' Chan & Feldman (2025, doi 10.1080/02699931.2024.2434156) is the reproduction.
+#' Its Table 9 correlations bound N = 794 where the applicable n is 263, and the
+#' published intervals settle it by an order of magnitude:
+#'
+#' \preformatted{
+#'   reported     published CI        at N = 794              at N = 263
+#'   r =  .63   [0.560, 0.700]   [0.586, 0.670] err .056  [0.551, 0.698] err .011
+#'   r =  .45   [0.340, 0.540]   [0.393, 0.504] err .089  [0.348, 0.541] err .010
+#'   r = -.43  [-0.520, -0.330] [-0.485, -0.372] err .077 [-0.524, -0.326] err .008
+#' }
+#'
+#' **The evidence is the r VALUE, never the interval.** The document states the
+#' same correlations in prose WITH their df (`r(261) = -0.43`), and an exact
+#' value match against such a clause is what licenses adopting its df -- the same
+#' evidence gate as the v0.6.18 df-compatible table-N rule, where two
+#' independently-sourced numbers agreeing exactly is the information. Selecting a
+#' df by which one makes the reported CI reproduce would be circular and would
+#' dissolve real reporting errors; this function never looks at a CI.
+#'
+#' **Uniqueness is load-bearing.** Two studies can report the same r on different
+#' samples, so a value is offered only when every stated `r(df)` carrying it
+#' agrees on one df. A value stated with two different dfs proposes nothing.
+#'
+#' Donors and recipients are both `test_type == "r"` -- a Spearman rho or
+#' Kendall tau is a different estimator and its df is not this row's df. Rows
+#' carrying a malformed two-df arity (`r(1, 261)`) are excluded as donors: their
+#' df1 is not a correlation df.
+#'
+#' **This function only proposes a hypothesis**, in the shape of
+#' `.attach_omnibus_contrast_candidate()`. `compute_and_compare_one()` adopts it
+#' only when the row has no df of its own and its N came from a scraped source,
+#' so a co-located n, an explicit `r(df)`, and the v0.6.13 target-article
+#' rebinding all outrank it.
+#'
+#' @param parsed The bound parse tibble for one document.
+#' @return `parsed` with a `matched_r_df` column (NA where nothing is proposed).
+#' @keywords internal
+.attach_matched_r_df <- function(parsed) {
+  if (is.null(parsed) || nrow(parsed) == 0L) return(parsed)
+  if (!all(c("test_type", "df1", "stat_value") %in% names(parsed))) return(parsed)
+
+  parsed$matched_r_df <- NA_real_
+
+  is_r <- !is.na(parsed$test_type) & parsed$test_type == "r"
+  if (!any(is_r)) return(parsed)
+
+  has_df2 <- if ("df2" %in% names(parsed)) !is.na(parsed$df2) else rep(FALSE, nrow(parsed))
+  bad_arity <- if ("df_arity_mismatch" %in% names(parsed)) {
+    vapply(parsed$df_arity_mismatch, isTRUE, logical(1))
+  } else {
+    rep(FALSE, nrow(parsed))
+  }
+
+  donors <- which(is_r & !is.na(parsed$df1) & parsed$df1 > 0 &
+                    !is.na(parsed$stat_value) & !has_df2 & !bad_arity)
+  recipients <- which(is_r & is.na(parsed$df1) & !is.na(parsed$stat_value))
+  if (length(donors) == 0L || length(recipients) == 0L) return(parsed)
+
+  # Key on the printed value at a fixed precision. `.45` and `0.45` are the same
+  # number; `.63` and `0.64` are not, and must not be treated as one -- Table 9
+  # of the reproduction prints .63 where the prose states .64, so that row has no
+  # match and is deliberately left alone.
+  vkey <- function(v) sprintf("%.6f", v)
+
+  dk <- vkey(parsed$stat_value[donors])
+  dv <- parsed$df1[donors]
+  agreed <- tapply(dv, dk, function(x) {
+    u <- unique(x)
+    if (length(u) == 1L) u else NA_real_
+  })
+  agreed <- agreed[!is.na(agreed)]
+  if (length(agreed) == 0L) return(parsed)
+
+  hit <- match(vkey(parsed$stat_value[recipients]), names(agreed))
+  parsed$matched_r_df[recipients] <- unname(agreed[hit])
   parsed
 }
 
@@ -697,6 +788,24 @@ VARIANT_METADATA <- list(
   parsed[!drop, , drop = FALSE]
 }
 
+# v0.7.11: ambiguity_reason for a row that reports an effect size but from which
+# NO effect-size variant could be computed (e.g. collabra.90203 Table 8, whose F
+# cells carry no df). The old text claimed a fallback to "all computed variants"
+# and was tagged cross-family, though nothing was computed and nothing matched.
+# Carries its own [category: not-computed] tag, so the category-tag block in
+# compute_and_compare_one() (idempotent on "[category:") never adds
+# cross-family to it.
+no_variants_reason <- function(reported_type) {
+  what <- if (is.na(reported_type)) {
+    "an effect size of unspecified type"
+  } else {
+    paste0("'", reported_type, "'")
+  }
+  paste0("No effect-size variants could be computed from this row for ", what,
+         " (e.g. its degrees of freedom are not reported), so the reported ",
+         "effect size was not compared to anything [category: not-computed]")
+}
+
 #' Compute effects and compare to reported values for one parsed row
 #'
 #' This function implements type-matched comparison: it compares reported effect
@@ -717,7 +826,26 @@ VARIANT_METADATA <- list(
 #' @param plausibility_filter Whether to apply plausibility bounds filter (default TRUE)
 #' @param sign_sensitive Whether sign differences affect status (default FALSE)
 #' @param method_context_action Action when method context detected in chunk ("NOTE", "WARN", "SKIP")
-#' @param design_ambiguous_action Action when design-ambiguous t-test (or F(1,df)) effect size ERROR occurs ("WARN", "NOTE", or "ERROR"; default "WARN")
+#' @param design_ambiguous_action Action when a design-ambiguous t-test (or
+#'   F(1,df), or z with d/g) effect-size ERROR occurs ("WARN", "NOTE", or
+#'   "ERROR"; default "WARN").
+#'
+#'   \strong{It has one exception, and it is deliberate.} The downgrade is
+#'   applied only where design ambiguity is a candidate EXPLANATION for the
+#'   discrepancy -- that is, where the reported effect lies within the range
+#'   of the computed independent and paired variants plus a 50\% margin. A
+#'   reported effect matching NEITHER design is not explained by not knowing
+#'   which design was used, so it keeps its ERROR and this parameter is inert
+#'   on that row. Same principle as the v0.6.18 omnibus-df rule: an effect
+#'   matching neither candidate keeps its flag. The row states the reason
+#'   ("Extreme discrepancy ... likely reflects data extraction error").
+#'
+#'   Documented in v0.7.9 after a downstream consumer probed the parameter and found 2
+#'   rows in 148,984 where a caller asking for "WARN" got "ERROR". The
+#'   behaviour was correct and the SILENCE was the defect: a policy knob
+#'   whose exception is not documented reads, from outside, exactly like a
+#'   policy knob that does not work. Pinned by
+#'   \code{test-v079-design-ambiguous-action-scope.R}, both directions.
 #' @param unknown_groups_action Action when d/g ERROR occurs with unknown group sizes n1/n2 ("WARN", "NOTE", or "ERROR"; default "WARN")
 #' @return A tibble with comparison results
 #' @keywords internal
@@ -847,7 +975,7 @@ compute_and_compare_one <- function(row,
     FALSE
   }
 
-  # v0.6.20 (MetaESCI O-1 request 2): the parse-time plausibility guard reports
+  # v0.6.20 (downstream O-1 request 2): the parse-time plausibility guard reports
   # what it suppressed. Read here so the row can say so out loud -- see the
   # uncertainty/extraction_suspect wiring in Phase 2 below.
   effect_guard_rejected <- if ("effect_guard_rejected" %in% names(row) &&
@@ -883,7 +1011,7 @@ compute_and_compare_one <- function(row,
   ciL_rep <- if (length(row$ciL_reported) > 0) as.numeric(row$ciL_reported[1]) else NA_real_
   ciU_rep <- if (length(row$ciU_reported) > 0) as.numeric(row$ciU_reported[1]) else NA_real_
 
-  # v0.3.5 (MetaESCI 2A): Decimal-place precision tracking from parse.R raw match strings
+  # v0.3.5 (downstream 2A): Decimal-place precision tracking from parse.R raw match strings
   effect_reported_decimals <- if ("effect_reported_decimals" %in% names(row) && length(row$effect_reported_decimals) > 0) as.integer(row$effect_reported_decimals[1]) else NA_integer_
   ciL_reported_decimals    <- if ("ciL_reported_decimals" %in% names(row) && length(row$ciL_reported_decimals) > 0) as.integer(row$ciL_reported_decimals[1]) else NA_integer_
   ciU_reported_decimals    <- if ("ciU_reported_decimals" %in% names(row) && length(row$ciU_reported_decimals) > 0) as.integer(row$ciU_reported_decimals[1]) else NA_integer_
@@ -1106,11 +1234,14 @@ compute_and_compare_one <- function(row,
       effect_guard_reason = effect_guard_reason,
       SE_guard_rejected = SE_guard_rejected,
       SE_guard_reason = SE_guard_reason,
+      df_guard_rejected = FALSE,
+      df_guard_reason = NA_character_,
       ci_width_ratio = NA_real_, ci_symmetry = NA_character_,
       ci_level_mismatch   = NA_character_,
       ci_clipped_to_bound = NA_character_,
       ci_symmetry_class   = NA_character_,
       sign_ci_violation   = NA,
+      estimate_outside_ci = NA,
       effect_reported_decimals = NA_integer_,
       ciL_reported_decimals    = NA_integer_,
       ciU_reported_decimals    = NA_integer_,
@@ -1266,10 +1397,10 @@ compute_and_compare_one <- function(row,
     }
   }
 
-  # v0.6.20 (MetaESCI O-1 request 2): say so when the parse-time plausibility
+  # v0.6.20 (downstream O-1 request 2): say so when the parse-time plausibility
   # guard suppressed a reported effect size. Without this the row is
   # indistinguishable from a statistic that legitimately reported no effect
-  # size -- a false all-clear, and by MetaESCI's count the majority (27 of 42)
+  # size -- a false all-clear, and by downstream's count the majority (27 of 42)
   # of the O-1 corruptions took exactly this silent-loss path.
   if (effect_guard_rejected) {
     uncertainty <- c(uncertainty, effect_guard_reason)
@@ -1308,7 +1439,7 @@ compute_and_compare_one <- function(row,
     F = c("eta2", "etap2", "omega2", "cohens_f", "R2", "f2"), # F-tests: ANOVA effects
     r = c("r", "R2"), # Correlation tests
     chisq = c("phi", "V", "h"), # Chi-square tests (h: one-proportion / GOF chi-square)
-    # v0.6.20 (MetaESCI O-5) -- RULING: a z-test reporting an odds ratio is NOT
+    # v0.6.20 (downstream O-5) -- RULING: a z-test reporting an odds ratio is NOT
     # anomalous, and the WARN it used to raise was a false positive.
     #
     # The two commonest z-tests in this literature both take the OR as their
@@ -1319,7 +1450,7 @@ compute_and_compare_one <- function(row,
     #   * the z-test of a pooled log-OR in a meta-analysis.
     # Reporting "z = 2.45, p = .014, OR = 1.83" is textbook practice, so the old
     # message ("Reported effect size 'OR' is unusual for z-test") asserted a
-    # methodological problem that does not exist. MetaESCI measured it driving
+    # methodological problem that does not exist. Downstream measured it driving
     # 56.5% of z rows into an anomaly category versus 11.2% for t-tests; that gap
     # was this list, not the literature.
     z = c("r", "d", "g", "beta", "h", "OR"), # z-tests: various, incl. two-proportion h and logistic/meta OR
@@ -1365,7 +1496,52 @@ compute_and_compare_one <- function(row,
   # verdict to cap the status at UNVERIFIABLE. See collabra.57785 loc 170.
   paired_ci_independent_approx_only <- FALSE
 
-  # v0.6.20 (MetaESCI O-3): which estimate the reported CI is centred on --
+  # v0.7.9 (supersedes the 962b910 rebinding): TRUE when a bare correlation could
+  # be read on TWO different samples -- the N actually bound, and the N implied by
+  # a uniquely-matching `r(df)` stated elsewhere in the document. The two are
+  # genuinely ambiguous: a two-decimal r is not a sample identifier, and the
+  # document offers no evidence that settles which sample this row is on.
+  #
+  # We do NOT pick. Picking is what 962b910 did, and it could move the published
+  # verdict in BOTH directions -- measured on Chan & Feldman (2025), doi
+  # 10.1080/02699931.2024.2434156: a correctly reported independent-sample CI was
+  # graded INCONSISTENT (a correct paper accused), and a genuinely wrong CI was
+  # graded MATCH (a real reporting error silenced) purely because its r value
+  # recurred elsewhere in the paper.
+  #
+  # Read at the Phase-6 CI verdict to cap the status at UNVERIFIABLE, the same
+  # mechanism as `paired_ci_independent_approx_only` above. Both candidate sample
+  # sizes are reported in `uncertainty_reasons` so the reader can settle it; the
+  # bound N is left exactly as the scraped evidence had it.
+  corr_matched_df_ambiguous <- FALSE
+  corr_matched_df_alt_N <- NA_real_
+
+  # v0.7.9 (same ruling, chi-square family): TRUE when the sample size used to
+  # recompute the effect was itself DERIVED FROM the reported effect -- or when a
+  # stated N and the reported effect disagree about what N must be.
+  #
+  # WHY THIS MATTERS MORE THAN IT LOOKS. `V_from_chisq(chisq, N, m)` is
+  # sqrt(chisq/(N*m)) and the back-calculation `N = chisq/(V^2 * m)` is its exact
+  # algebraic inverse. So recomputing V from a back-solved N returns the reported
+  # V *identically*: delta is 0 by construction and PASS is guaranteed no matter
+  # what the paper says. Measured 2026-09-04 on a document stating N = 500 and
+  # chi-square(4) = 20.00 -- which fix V at 0.10 and nothing else:
+  #
+  #     reported V = 0.20 -> PASS (N kept 500)
+  #     reported V = 0.35 -> PASS (N silently replaced by 163)
+  #     reported V = 0.60 -> PASS (N silently replaced by  56)
+  #     reported V = 0.90 -> PASS (N silently replaced by  25)
+  #
+  # Four wrong values, four passes, and a published N of 25 for a study that says
+  # 500 -- with `N_source` still naming the document's own text. The check could
+  # not fail. That is a pass emitted for something never checked.
+  #
+  # Read after the effect-size verdict to keep a confident status off a comparison
+  # that is not independent. Both readings go to `uncertainty_reasons`.
+  effect_n_not_independent <- FALSE
+  effect_n_conflict_note <- NA_character_
+
+  # v0.6.20 (downstream O-3): which estimate the reported CI is centred on --
   # "b_coeff", "standardized_beta", "effect_reported",
   # "ambiguous_b_equals_effect" or "unknown". Set in the regression branch;
   # stays NA for every other test type, where the question does not arise.
@@ -1382,6 +1558,32 @@ compute_and_compare_one <- function(row,
   computed_beta_for_output <- NA_real_  # v0.3.0m: for unstandardized-b masquerade
   n_much_larger_than_df <- FALSE   # v0.2.9d: N >> df+1 detection flag
   phi_to_v_reinterpreted <- FALSE  # v0.2.9: initialized for all test types
+
+  # v0.7.9: `N_source` is ASSIGNED in ten places in this function and, at one
+  # site, READ -- but it was never initialized, so that read was of a variable
+  # that does not exist.
+  #
+  #     if (!is.na(N) && !is.na(N_source) && N_source %in% .SCRAPED_N_SOURCES)
+  #        -- the robust / modern-nonparametric branch (wts, ats,
+  #           brunner_munzel, yuen), added v0.7.0
+  #
+  # R evaluates the second conjunct only when the first is TRUE, so the error
+  # fired exactly when the row HAD an N: every WTS / ATS / Brunner-Munzel / Yuen
+  # statistic in a document that states a sample size raised "object 'N_source'
+  # not found", was swallowed by check_text()'s per-row tryCatch, and published
+  # status = "ERROR" with check_type = NA. A document reporting a robust test
+  # without ever stating its N -- the shape all nine v0.7.0 fixtures happened to
+  # use -- short-circuited and looked healthy, which is why a green suite and a
+  # zero-ERROR corpus both missed it.
+  #
+  # Initialized here, unconditionally, for ALL test types: the same discipline
+  # the v0.6.18 comment below states for N_from_df_inference, and the reason
+  # those two carry `exists()` guards at output assembly.
+  N_source <- if ("N_source" %in% names(row) && length(row$N_source) > 0) {
+    as.character(row$N_source[1])
+  } else {
+    NA_character_
+  }
 
   if (tt == "t") {
     # ------ T-TEST COMPUTATIONS ------
@@ -2019,7 +2221,7 @@ compute_and_compare_one <- function(row,
         # v0.2.7: Compute Hedges-corrected paired variants (gz, gav, grm)
         # gz = dz * J(n-1), gav = dav * J(n-1), grm = drm * J(n-1)
         # These are declared in EFFECT_SIZE_FAMILIES but were never computed.
-        # Fixes 52/112 (46%) Hedges' g ERRORs from MetaESCI audit.
+        # Fixes 52/112 (46%) Hedges' g ERRORs from downstream audit.
         df_paired <- n_paired - 1
         if (df_paired > 0) {
           J_paired <- hedges_J(df_paired)
@@ -2198,6 +2400,12 @@ compute_and_compare_one <- function(row,
   } else if (tt == "r") {
     # ------ CORRELATION COMPUTATIONS ------
 
+    # v0.7.9: initialized unconditionally, before any branch can set it, so a
+    # later read can never see a value left behind by an earlier row -- the same
+    # discipline v0.6.18 states for N_from_df_inference, and the discipline whose
+    # absence made `N_source` an undefined-variable read for the robust family.
+    df1_from_N <- FALSE
+
     # Derive df from N for Pearson r (df = N - 2)
     # When multiple N values were found in context, try each to find best p-match
     if (is.na(df1) && !is.na(N) && N > 2) {
@@ -2236,6 +2444,12 @@ compute_and_compare_one <- function(row,
         }
       }
       df1 <- N - 2
+      # v0.7.9: remember that this df is a DERIVATION from the bound N, not
+      # something the paper printed. Every rule below that wants to know "does
+      # this correlation state its own df?" must ask this flag: by the time it
+      # runs, df1 is populated either way, and the v0.6.12 rule below can only
+      # tell the difference because a derived df makes `N == df1 + 2` exactly.
+      df1_from_N <- TRUE
       assumptions <- c(assumptions,
         sprintf("df=%d inferred from N=%d (Pearson r: df = N - 2)",
                 as.integer(df1), as.integer(N)))
@@ -2264,6 +2478,13 @@ compute_and_compare_one <- function(row,
                 as.integer(N_ctx_mismatch), as.integer(df1),
                 as.integer(df1 + 2), as.integer(df1 + 2)))
       N_source <- "corr_df_plus_2"
+      # v0.7.9: the output tibble reads provenance from row$N_source, so the
+      # line above was DEAD from v0.6.12 until now -- "corr_df_plus_2" appeared
+      # exactly once in R/, as this assignment, and never as a read. Every row
+      # this rule corrected published its df-derived N under "global_text", the
+      # provenance of the number the rule had just discarded. Mutate the row
+      # column too, as the md_hl (v0.6.10) and cochran_q blocks already do.
+      if ("N_source" %in% names(row)) row$N_source[1] <- "corr_df_plus_2"
     }
 
     # v0.6.13 (E-corr-target-article-N): a correlation explicitly attributed to the
@@ -2303,6 +2524,11 @@ compute_and_compare_one <- function(row,
           N <- tgt_n
           df1 <- N - 2
           N_source <- "target_article_n"
+          # v0.7.9: dead since v0.6.13 for the same reason as corr_df_plus_2
+          # above -- assigned, never read. A correlation rebound to the TARGET
+          # article's sample size published "global_text", which points at the
+          # host study's N, the exact number this rule exists to reject.
+          if ("N_source" %in% names(row)) row$N_source[1] <- "target_article_n"
           uncertainty <- c(uncertainty,
             sprintf(paste0("Correlation attributed to the target/original article; N ",
                            "rebound to the target article's stated sample size (%d), not ",
@@ -2310,6 +2536,62 @@ compute_and_compare_one <- function(row,
                     as.integer(tgt_n),
                     if (is.na(N_tgt_prev)) "NA" else as.character(as.integer(N_tgt_prev))))
         }
+      }
+    }
+
+    # v0.7.9 (N-binding family, item 5a.4 of the 2026-08-04 queue): a correlation
+    # printed with NO df and NO n of its own binds whatever N the context offered,
+    # and every interval is then recomputed on that sample. When the SAME r value
+    # is stated elsewhere in the document as `r(df)`, that df implies a DIFFERENT
+    # sample -- and the document gives no evidence for which of the two this row
+    # is on. See `.attach_matched_r_df()` for how the candidate is proposed.
+    #
+    # THIS RULE DELIBERATELY DOES NOT CHOOSE. Gilad's ruling, 2026-09-04: "We
+    # should never just correct things, the aim is highest transparency and
+    # accuracy." An earlier form of this rule (962b910) adopted the matched df and
+    # rebound N. Three independent model reviews and two local reproductions on the
+    # real document showed that moves the PUBLISHED verdict in both directions:
+    #   - a correctly reported independent-sample CI (its own stated N = 80) was
+    #     rebound to 263 and graded INCONSISTENT -- a correct paper accused;
+    #   - a genuinely wrong CI on a stated N = 50 was rebound to 263, where the
+    #     reported interval reproduces, and graded MATCH -- a real reporting error
+    #     silenced, with no test failing.
+    # A two-decimal r is not a sample identifier, so neither candidate can be
+    # preferred on the evidence available. We report BOTH and verify NEITHER.
+    #
+    # Fires only on a row that:
+    #   - has no df of its own          (`df1_from_N`: the df above is a
+    #                                    derivation from N, not a printed value,
+    #                                    so v0.6.12 has already declined it)
+    #   - still carries a SCRAPED N     (v0.6.12's corr_df_plus_2 and v0.6.13's
+    #                                    target_article_n both relabel, so a
+    #                                    still-scraped source means no stronger
+    #                                    rule claimed this row)
+    #   - is Pearson                    (a rho / tau df is a different estimator)
+    if ((is.na(corr_method) || corr_method == "pearson") &&
+        isTRUE(df1_from_N) &&
+        !is.na(N_source) && N_source %in% .SCRAPED_N_SOURCES &&
+        "matched_r_df" %in% names(row) && length(row$matched_r_df) > 0 &&
+        !is.na(row$matched_r_df[1])) {
+      df_matched <- as.numeric(row$matched_r_df[1])
+      if (!is.na(df_matched) && df_matched > 0 &&
+          (is.na(N) || abs((df_matched + 2) - N) > 0.5)) {
+        # N, df1, df1_from_N and N_source are all left EXACTLY as the scraped
+        # evidence had them. Nothing is rebound. The alternative is recorded so a
+        # reader -- and a downstream consumer -- can see both readings.
+        corr_matched_df_ambiguous <- TRUE
+        corr_matched_df_alt_N <- df_matched + 2
+        uncertainty <- c(uncertainty,
+          sprintf(paste0("AMBIGUOUS SAMPLE: this correlation prints no df and no n of ",
+                         "its own. The sample size bound from context is N=%s (source: ",
+                         "%s). The same r value is stated elsewhere in this document as ",
+                         "r(%d), which would imply N=%d instead. Nothing in the document ",
+                         "settles which sample this row is on, so no sample size was ",
+                         "assumed and the CI was NOT verified against either. Both ",
+                         "readings are reported; please check the source table."),
+                  if (is.na(N)) "unknown" else as.character(as.integer(N)),
+                  as.character(N_source),
+                  as.integer(df_matched), as.integer(corr_matched_df_alt_N)))
       }
     }
 
@@ -2364,14 +2646,14 @@ compute_and_compare_one <- function(row,
 
       # r\u00b2 -- the variance explained by a bivariate correlation.
       #
-      # v0.6.20 (MetaESCI O-4): PROMOTE this to a computed variant when the paper
+      # v0.6.20 (downstream O-4): PROMOTE this to a computed variant when the paper
       # actually reported an R2, exactly as cohens_f2 is promoted for a reported
       # f2 and d_from_r for a reported d/g just below. It used to be an
       # `alternatives` entry unconditionally, so a reported R2 had no same-type
       # computed counterpart to match against and the matcher fell through to
       # Cohen's f2 = r2/(1-r2) -- a DIFFERENT SCALE. "r(1526) = .32, R2 = 0.10"
       # (r2 = .1024, a correct APA-rounded report) was matched to f2 = .1141 and
-      # shipped WARN, and a hand-perfect "R2 = 0.1024" WARNed too. MetaESCI's
+      # shipped WARN, and a hand-perfect "R2 = 0.1024" WARNed too. Downstream's
       # note attributes this to the `r = c("r", "R2")` validity list at the
       # effect/test compatibility check; that list is right -- R2 IS a legitimate
       # thing to report for a correlation -- the defect was the missing variant.
@@ -3029,12 +3311,30 @@ compute_and_compare_one <- function(row,
       }
     }
 
-    # Back-calculate N from reported effect size when N is missing
+    # Back-calculate N from reported effect size when N is missing.
+    #
+    # v0.7.9: the back-calculation STAYS -- with no stated N this is the only way
+    # to get one, and it is needed for the CI and for downstream variants. What
+    # changes is that it no longer counts as VERIFICATION of the effect size.
+    # `phi_from_chisq` / `V_from_chisq` are the algebraic inverses of these two
+    # formulas, so recomputing the effect from this N reproduces the reported
+    # effect identically -- delta 0, PASS, for any reported value whatsoever. The
+    # flag keeps a confident status off that comparison; see
+    # `effect_n_not_independent` where it is declared.
     if (is.na(N) && !is.na(effect_reported) && !is.na(stat) && stat > 0) {
       if (!is.na(canonical_type) && canonical_type == "phi" && abs(effect_reported) > 0) {
         N_back <- round(stat / (effect_reported^2))
         if (N_back >= 4 && N_back <= 1e6) {
           N <- N_back
+          effect_n_not_independent <- TRUE
+          effect_n_conflict_note <- sprintf(
+            paste0("SAMPLE SIZE DERIVED FROM THE REPORTED EFFECT: the document states no N ",
+                   "for this test, so N=%d was back-calculated from the reported phi=%.3f and ",
+                   "chi-square=%.2f. Recomputing phi from that N returns the reported value by ",
+                   "construction, so the effect size could NOT be independently verified. The ",
+                   "N shown is an inference from the paper's own claim, not a reported figure."),
+            as.integer(N), effect_reported, stat)
+          uncertainty <- c(uncertainty, effect_n_conflict_note)
           assumptions <- c(assumptions,
             sprintf("N=%d back-calculated from reported phi=%.2f and chi2=%.2f", as.integer(N), effect_reported, stat))
         }
@@ -3053,6 +3353,19 @@ compute_and_compare_one <- function(row,
         N_back <- round(stat / (effect_reported^2 * m_val))
         if (N_back >= 4 && N_back <= 1e6) {
           N <- N_back
+          # v0.7.9: same reasoning as the phi branch above -- V_from_chisq is the
+          # exact inverse of this line, so the effect cannot be verified against
+          # an N derived from it.
+          effect_n_not_independent <- TRUE
+          effect_n_conflict_note <- sprintf(
+            paste0("SAMPLE SIZE DERIVED FROM THE REPORTED EFFECT: the document states no N ",
+                   "for this test, so N=%d was back-calculated from the reported Cramer's ",
+                   "V=%.3f and chi-square=%.2f (m=%d). Recomputing V from that N returns the ",
+                   "reported value by construction, so the effect size could NOT be ",
+                   "independently verified. The N shown is an inference from the paper's own ",
+                   "claim, not a reported figure."),
+            as.integer(N), effect_reported, stat, as.integer(m_val))
+          uncertainty <- c(uncertainty, effect_n_conflict_note)
           assumptions <- c(assumptions,
             sprintf("N=%d back-calculated from reported V=%.2f and chi2=%.2f (m=%d)",
                     as.integer(N), effect_reported, stat, as.integer(m_val)))
@@ -3083,14 +3396,47 @@ compute_and_compare_one <- function(row,
         min_N_chisq <- if (!is.na(df1)) df1 + 1 else 4
 
         if (N_back >= min_N_chisq && N_back <= N && N_back < 0.8 * N) {
-          N_original_chisq <- N
-          N <- N_back
-          assumptions <- c(assumptions,
-            sprintf("N=%d back-calculated from V=%.3f (was %d from %s, m=%d)",
-                    as.integer(N), effect_reported, as.integer(N_original_chisq),
-                    n_source_val, as.integer(m_back)))
-          uncertainty <- c(uncertainty,
-            sprintf("N overridden by back-calculation from reported Cramer's V (was %s)", n_source_val))
+          # v0.7.9: THE N IS NO LONGER OVERRIDDEN. Gilad's ruling, 2026-09-04:
+          # "We should never just correct things, the aim is highest transparency
+          # and accuracy."
+          #
+          # What this branch means is that the document's stated N and the
+          # document's reported V CANNOT BOTH BE TRUE -- chi-square and N together
+          # fix V exactly. That is a genuine conflict in the paper, and it is
+          # exactly the kind of thing this tool exists to surface.
+          #
+          # Replacing N with the value back-solved from V (what v0.2.7 through
+          # v0.7.8 did) resolved the conflict in the paper's favour and then graded
+          # the paper against its own claim, which cannot fail. It also published a
+          # sample size the document never states -- N=25 for a study reporting 500
+          # -- while `N_source` still credited the document's text.
+          #
+          # So: keep the stated N and report both readings. The effect comparison
+          # then runs on the DOCUMENT'S OWN number and is genuinely independent,
+          # so its verdict stands -- an inconsistency here is a true finding and
+          # must not be softened.
+          #
+          # NOTE TO A FUTURE EDITOR: do NOT set `effect_n_not_independent` here.
+          # An earlier draft of this fix did, and the two-sided control caught it:
+          # a plainly wrong V=0.90 against a stated N=500 on an unambiguous 2x2
+          # table came back NOTE instead of ERROR. That is the same silencing this
+          # change exists to remove, reintroduced by over-correcting. The flag is
+          # only for a sample size DERIVED FROM the effect being graded, where the
+          # comparison cannot fail; a stated N that merely disagrees with the
+          # reported effect is evidence, not circularity.
+          effect_n_conflict_note <- sprintf(
+            paste0("CONFLICTING SAMPLE SIZE: the document states N=%d (source: %s), but the ",
+                   "reported %s of %.3f with chi-square=%.2f (m=%d) would require N=%d. ",
+                   "Chi-square and N together determine %s exactly, so these cannot both be ",
+                   "correct. No sample size was substituted and the effect size was NOT ",
+                   "verified against either reading -- verifying it against the N implied by ",
+                   "the reported value would grade the paper against its own claim. Please ",
+                   "check which sample the table refers to."),
+            as.integer(N), n_source_val,
+            as.character(canonical_type), effect_reported, stat,
+            as.integer(m_back), as.integer(N_back),
+            as.character(canonical_type))
+          uncertainty <- c(uncertainty, effect_n_conflict_note)
         }
       }
     }
@@ -3151,21 +3497,47 @@ compute_and_compare_one <- function(row,
         # This handles cases where df allows multiple table dimensions
         # (e.g., df=4 could be 5x2 with m=1 or 3x3 with m=2).
         V_val <- NA_real_
+        m_used <- m_candidates[1]
         if (length(m_candidates) > 1 && !is.na(canonical_type) &&
             canonical_type == "V" && !is.na(effect_reported)) {
+          # v0.7.9: THE TABLE SHAPE IS NO LONGER CHOSEN BY FIT TO THE REPORTED V.
+          #
+          # df alone does not determine the shape -- df=4 is a 5x2 table (m=1) or a
+          # 3x3 table (m=2), and V differs between them. Until v0.7.8 this picked
+          # whichever m brought the computed V closest to the value being graded,
+          # which is the circularity `.attach_matched_r_df()`'s own docstring
+          # refuses: "selecting a df by which one makes the reported CI reproduce
+          # would be circular". Measured 2026-09-04: N=500, chi-square(4)=20.00,
+          # reported V=0.20 -- m=1 gives exactly 0.20 and m=2 gives 0.141, so the
+          # fit picked m=1 and published PASS on a shape it had no evidence for.
+          #
+          # Now: compute every candidate, use the first ENUMERATED one (a
+          # deterministic choice that does not look at the reported value), and
+          # when the candidates disagree materially, report all of them and let
+          # the status cap keep a confident verdict off it.
           v_vals <- sapply(m_candidates, function(m) {
             tryCatch(V_from_chisq(stat, N, m), error = function(e) NA_real_)
           })
           valid <- !is.na(v_vals)
           if (any(valid)) {
-            diffs <- abs(v_vals[valid] - abs(effect_reported))
-            best_idx <- which(valid)[which.min(diffs)]
-            V_val <- v_vals[best_idx]
-            if (best_idx != 1) {
-              assumptions <- c(assumptions,
-                sprintf("Cramer's V: best match with m=%d (tried m=%s)",
-                        m_candidates[best_idx],
-                        paste(m_candidates, collapse = ",")))
+            first_valid <- which(valid)[1]
+            V_val <- v_vals[first_valid]
+            m_used <- m_candidates[first_valid]
+            spread <- max(v_vals[valid]) - min(v_vals[valid])
+            if (sum(valid) > 1 && spread > 0.01) {
+              effect_n_not_independent <- TRUE
+              effect_n_conflict_note <- sprintf(
+                paste0("AMBIGUOUS TABLE SHAPE: df=%.0f does not determine the table's ",
+                       "dimensions, and Cramer's V differs between them. The candidates are ",
+                       "%s. V was computed at m=%d; the reported value was NOT used to choose ",
+                       "among them, because picking the shape that best fits the reported V ",
+                       "would grade the paper against its own claim. Please supply the table ",
+                       "dimensions to resolve this."),
+                df1,
+                paste(sprintf("m=%d gives V=%.3f", m_candidates[valid], v_vals[valid]),
+                      collapse = "; "),
+                as.integer(m_used))
+              uncertainty <- c(uncertainty, effect_n_conflict_note)
             }
           }
         } else {
@@ -3173,9 +3545,13 @@ compute_and_compare_one <- function(row,
         }
 
         if (!is.na(V_val)) {
-          # Compute CI for Cramer's V
+          # Compute CI for Cramer's V.
+          # v0.7.9: at `m_used`, the SAME shape the point estimate was computed at.
+          # It was previously always `m_candidates[1]`, so whenever the old fit
+          # picked a different m the published interval described a different table
+          # than the published estimate.
           v_ci_result <- tryCatch(
-            ci_V(V_val, N, m_candidates[1], ci_level_used),
+            ci_V(V_val, N, m_used, ci_level_used),
             error = function(e) list(success = FALSE))
 
           if (!is.na(canonical_type) && canonical_type == "V") {
@@ -3323,7 +3699,7 @@ compute_and_compare_one <- function(row,
       }
     }
 
-    # v0.6.20 (MetaESCI O-5): an odds ratio reported with a z is VERIFIABLE when
+    # v0.6.20 (downstream O-5): an odds ratio reported with a z is VERIFIABLE when
     # the OR carries its own confidence interval, and only then.
     #
     # The OR alone tells us nothing about z: OR = exp(b) fixes b, but z = b/SE
@@ -3357,7 +3733,7 @@ compute_and_compare_one <- function(row,
         # `matched_value = 2.460` (a z) with `delta_effect = 0.630` (an odds
         # ratio minus a z-statistic). Meaningless, and it moved with the CI
         # level: the same row at a 90% CI gave 0.234. Caught by /ship review;
-        # `delta_effect` is precisely the field MetaESCI's pipeline reads.
+        # `delta_effect` is precisely the field downstream's pipeline reads.
         #
         # The variant also carries no CI of its own, so it contributed nothing
         # to the CI-candidate collector either -- it was pure liability. The
@@ -4144,6 +4520,11 @@ compute_and_compare_one <- function(row,
     if (!is.na(N) && !is.na(N_source) && N_source %in% .SCRAPED_N_SOURCES) {
       N <- NA_real_
       N_source <- NA_character_
+      # v0.7.9: the output tibble reads N_source from row$N_source, so clear the
+      # row column too -- exactly as the md_hl (v0.6.10) and cochran_q blocks
+      # do. Without this the N is NA while the provenance still reads
+      # "global_text", the self-contradiction those two blocks exist to avoid.
+      if ("N_source" %in% names(row)) row$N_source[1] <- NA_character_
     }
 
   } else if (tt == "cochran_q") {
@@ -4808,7 +5189,16 @@ compute_and_compare_one <- function(row,
       # picks this up; the [category: cross-family] tag is appended to
       # ambiguity_reason just before the tibble is built. See LESSONS.md.
       ambiguity_level <- "highly_ambiguous"
-      ambiguity_reason <- paste0("No same-type variants available for '", canonical_type, "' - using all computed variants")
+      # v0.7.11: when NOTHING was computed (e.g. an F table cell printed without
+      # its df -- collabra.90203 Table 8) there is no fallback to describe, so
+      # the reason must not claim one; it is tagged [category: not-computed]
+      # below instead of cross-family. The level is deliberately unchanged, so
+      # design_ambiguous / confidence / uncertainty_level do not move.
+      ambiguity_reason <- if (length(computed_variants) > 0) {
+        paste0("No same-type variants available for '", canonical_type, "' - using all computed variants")
+      } else {
+        no_variants_reason(canonical_type)
+      }
 
       if (length(computed_variants) > 0) {
         diffs <- sapply(computed_variants, function(v) {
@@ -4834,7 +5224,11 @@ compute_and_compare_one <- function(row,
     # reported but its type couldn't be parsed. The [category: cross-family]
     # tag is appended to ambiguity_reason just before the output tibble.
     ambiguity_level <- "highly_ambiguous"
-    ambiguity_reason <- "Effect size type not specified - compared to all computed variants"
+    ambiguity_reason <- if (length(computed_variants) > 0) {
+      "Effect size type not specified - compared to all computed variants"
+    } else {
+      no_variants_reason(NA_character_)  # v0.7.11: see the same-type branch above
+    }
 
     if (length(computed_variants) > 0) {
       diffs <- sapply(computed_variants, function(v) {
@@ -4873,6 +5267,12 @@ compute_and_compare_one <- function(row,
   }
 
   ci_match <- as.logical(NA)
+  # Hoisted: the CI escalation is decided in Phase 7 but status is
+  # reassigned afterwards, so the floor is re-applied late (see the
+  # ci_exhausted block beside impossible_value).
+  ci_exhausted <- FALSE
+  .ci_level_stated <- FALSE
+  .ci_scale_comparable <- FALSE
   ci_delta_lower <- NA_real_
   ci_delta_upper <- NA_real_
   computed_ciL <- NA_real_
@@ -4881,12 +5281,13 @@ compute_and_compare_one <- function(row,
   ci_method_match <- NA_character_
   ci_width_ratio <- NA_real_
   ci_symmetry <- NA_character_
-  # v0.3.5 (MetaESCI 2C/2D/2E): CI metadata
+  # v0.3.5 (downstream 2C/2D/2E): CI metadata
   ci_level_mismatch <- NA_character_
   ci_clipped_to_bound <- NA_character_
   ci_symmetry_class <- NA_character_
   # v0.6.3 (R-0007): dropped-minus sign-error flag (estimate-in-CI invariant)
   sign_ci_violation <- FALSE
+  estimate_outside_ci <- FALSE
 
   # Helper: collect all CI candidates from a variant
   collect_ci_candidates <- function(variant, name_prefix) {
@@ -4894,8 +5295,22 @@ compute_and_compare_one <- function(row,
     if (!is.null(variant$ci_all) && length(variant$ci_all) > 0) {
       for (m in names(variant$ci_all)) {
         entry <- variant$ci_all[[m]]
+        # v0.7.9: name the candidate after the method that ACTUALLY produced the
+        # bounds, not the list key. `ci_d_ind_all()`/`ci_dz_all()` store under a
+        # hardcoded `noncentral_t` key while setting `method` from
+        # `.ci_method_from_engine()`, which correctly reports
+        # `large_sample_approx` when `ci_*_noncentral_t()` falls through (|ncp| >
+        # 37.62, or MBESS absent). Reading the key republished the very claim
+        # v0.7.8 removed one layer down: measured, d = 6.00 / n1 = n2 = 100
+        # published `ci_method_match = "d_ind_equalN:noncentral_t"` against
+        # bounds [5.3477, 6.6533] that the approximation produced. API.md
+        # documents this column as "the method that produced" the CI, so the key
+        # made it a false provenance claim. Falls back to the key when an entry
+        # carries no method, so any helper not using `ci_result()` is unchanged.
+        meth <- if (!is.null(entry$method) && length(entry$method) == 1L &&
+                    !is.na(entry$method) && nzchar(entry$method)) entry$method else m
         if (!is.null(entry$bounds) && !any(is.na(entry$bounds)))
-          candidates[[paste0(name_prefix, ":", m)]] <- entry$bounds
+          candidates[[paste0(name_prefix, ":", meth)]] <- entry$bounds
       }
     } else if (!is.null(variant$ci) && !any(is.na(variant$ci))) {
       candidates[[paste0(name_prefix, ":primary")]] <- variant$ci
@@ -4904,7 +5319,7 @@ compute_and_compare_one <- function(row,
   }
 
   # ==========================================================================
-  # v0.6.20 (MetaESCI O-3): CI REFERENT DETECTION
+  # v0.6.20 (downstream O-3): CI REFERENT DETECTION
   #
   # A row carrying a regression coefficient can print an interval on either of
   # two different scales:
@@ -4917,13 +5332,13 @@ compute_and_compare_one <- function(row,
   # Nothing in the APA string says which. Before this, the CI check compared the
   # reported interval against the computed STANDARDIZED-beta (or Cohen's d)
   # interval in both cases, so every b-referenced row was graded across scales
-  # and failed for a reason that had nothing to do with the paper. MetaESCI
+  # and failed for a reason that had nothing to do with the paper. Downstream
   # measured 601/1,048 regression rows mis-dispatched this way, with correctly
   # referenced rows agreeing at 68.1% against a 5.9% pooled headline.
   #
   # The interval itself settles it: a Wald interval is symmetric about its own
   # estimate, so its MIDPOINT identifies the referent. Matching that midpoint
-  # against the candidate estimates (tolerance 5e-3, per MetaESCI's spec)
+  # against the candidate estimates (tolerance 5e-3, per downstream's spec)
   # classifies the row without guessing. When the referent is the b, the correct
   # comparison interval is the Wald-t interval on b itself,
   # b +/- t_{1-alpha/2, df} * SE, added as a computed variant so the existing CI
@@ -5174,6 +5589,74 @@ compute_and_compare_one <- function(row,
       ci_check_status <- "UNVERIFIABLE"
     }
 
+    # v0.7.9: the sample this correlation is on is genuinely ambiguous -- see
+    # `corr_matched_df_ambiguous` where it is set. The CI verdict just computed
+    # rests on ONE of two candidate sample sizes, chosen by the context scraper
+    # rather than by evidence, so it cannot be published as a finding in EITHER
+    # direction. Capping here (after the whole if/else chain, not inside it) is
+    # deliberate: a MATCH is as unsafe as an INCONSISTENT, because the measured
+    # failure went both ways. Both candidate Ns are already in
+    # `uncertainty_reasons`.
+    if (isTRUE(corr_matched_df_ambiguous) &&
+        !is.na(ci_check_status) &&
+        ci_check_status %in% c("MATCH", "PLAUSIBLE", "INCONSISTENT")) {
+
+      # Cap ONLY when the ambiguity actually changes the answer. Grade the row a
+      # second time against the OTHER candidate sample size, using the package's
+      # own `ci_r()` and the same tolerance, and compare the two verdicts.
+      #
+      # WHY THIS REFINEMENT EXISTS -- a control caught the simpler version losing a
+      # real finding. Chan & Feldman (2025) Table 9 row 2bii prints r = -.43 with
+      # [-0.52, 0.33]: the authors dropped a minus sign. That interval still
+      # CONTAINS -0.43, so the estimate-outside-CI check does not see it
+      # (`estimate_outside_ci` is FALSE, correctly); the CI recomputation is the
+      # only thing that catches it. Both candidate Ns call it INCONSISTENT -- 794
+      # and 263 disagree about the sample but agree about the verdict -- so capping
+      # unconditionally suppressed a true positive for an ambiguity that changes
+      # nothing. Report the answer when both readings give it; report the
+      # ambiguity only when they diverge.
+      alt_status <- NA_character_
+      if (!is.na(corr_matched_df_alt_N) && corr_matched_df_alt_N > 3 &&
+          !is.na(stat) && abs(stat) < 1 &&
+          !is.na(ciL_rep) && !is.na(ciU_rep)) {
+        alt_ci <- tryCatch(ci_r(stat, corr_matched_df_alt_N, ci_level_used),
+                           error = function(e) NULL)
+        if (!is.null(alt_ci) && isTRUE(alt_ci$success) &&
+            length(alt_ci$bounds) == 2L && all(is.finite(alt_ci$bounds))) {
+          alt_dL <- abs(alt_ci$bounds[1] - ciL_rep)
+          alt_dU <- abs(alt_ci$bounds[2] - ciU_rep)
+          alt_status <- if (alt_dL <= tol_ci && alt_dU <= tol_ci) {
+            "MATCH"
+          } else if (max(alt_dL, alt_dU) <= 3 * tol_ci) {
+            "PLAUSIBLE"
+          } else {
+            "INCONSISTENT"
+          }
+        }
+      }
+
+      if (is.na(alt_status) || !identical(alt_status, ci_check_status)) {
+        # The two readings disagree (or the alternative could not be evaluated,
+        # which is itself a not-verified state). Publish neither.
+        ci_check_status <- "UNVERIFIABLE"
+        # `ci_match` is a SEPARATE contract column (schema-stability test) that a
+        # consumer can read on its own. Leaving it TRUE while the status says
+        # UNVERIFIABLE would put the confident answer back in the output through a
+        # different field -- exactly the leak this change exists to close. NA is
+        # its documented "not determined" value (initialised at line ~5114).
+        ci_match <- as.logical(NA)
+      } else {
+        # Both candidate sample sizes give the SAME verdict, so the ambiguity does
+        # not affect this row's answer. Publish it, and say why it still stands.
+        uncertainty <- c(uncertainty, sprintf(
+          paste0("The sample size is ambiguous for this row, but both candidate readings ",
+                 "(N=%s and N=%d) give the same CI verdict (%s), so the ambiguity does not ",
+                 "change this result."),
+          if (is.na(N)) "unknown" else as.character(as.integer(N)),
+          as.integer(corr_matched_df_alt_N), ci_check_status))
+      }
+    }
+
     # CI diagnostics
     reported_width <- ciU_rep - ciL_rep
     if (!is.na(computed_ciL) && !is.na(computed_ciU) &&
@@ -5182,10 +5665,45 @@ compute_and_compare_one <- function(row,
       ci_width_ratio <- round(computed_width / reported_width, 3)
     }
 
+    # v0.7.9: for a correlation the point estimate IS the test statistic and the
+    # effect family IS "r", but the r branch does not adopt `stat` into
+    # `effect_reported` / `reported_type` until ~400 lines BELOW this block (the
+    # "adopt r as its own effect when there is either a p or a reported CI"
+    # gate). So at THIS point both are NA on every r row, and the two CI-shape
+    # diagnostics that read them were inert on exactly the rows they exist for:
+    # a correlation reporting an interval is the canonical case for a symmetry
+    # check, and it was the one case that never got one.
+    #
+    # Measured on the unfixed code, 2026-09-02, with the control that makes it
+    # precise: `r = -.43, 95% CI [-0.52, 0.33]` (arms 0.09 and 0.76 -- the
+    # authors' dropped minus on Chan & Feldman doi 10.1080/02699931.2024.2434156)
+    # gave ci_symmetry NA and ci_symmetry_class NA, while `ci_width_ratio`, which
+    # is computed six lines above and needs no estimate, gave 0.243. The block
+    # was entered; only the estimate was missing.
+    #
+    # Read locally rather than moving the adoption: the adoption sits behind a
+    # check_type gate that decides whether the r is verified against itself, and
+    # hoisting it would change routing for every correlation. These two lines
+    # change nothing but what the two diagnostics can see.
+    sym_estimate <- if (!is.na(effect_reported)) {
+      effect_reported
+    } else if (!is.na(tt) && tt == "r" && !is.na(stat)) {
+      stat
+    } else {
+      NA_real_
+    }
+    sym_canonical <- if (!is.na(canonical_type)) {
+      canonical_type
+    } else if (!is.na(tt) && tt == "r") {
+      "r"
+    } else {
+      NA_character_
+    }
+
     # Symmetry check
-    if (!is.na(effect_reported) && !is.na(ciL_rep) && !is.na(ciU_rep)) {
-      lower_arm <- abs(effect_reported - ciL_rep)
-      upper_arm <- abs(ciU_rep - effect_reported)
+    if (!is.na(sym_estimate) && !is.na(ciL_rep) && !is.na(ciU_rep)) {
+      lower_arm <- abs(sym_estimate - ciL_rep)
+      upper_arm <- abs(ciU_rep - sym_estimate)
       if (lower_arm > 0 && upper_arm > 0) {
         ratio <- min(lower_arm, upper_arm) / max(lower_arm, upper_arm)
         ci_symmetry <- if (ratio > 0.95) "symmetric" else "asymmetric"
@@ -5193,7 +5711,7 @@ compute_and_compare_one <- function(row,
     }
 
     # ------------------------------------------------------------------
-    # v0.3.5 (MetaESCI 2C): ci_level_mismatch
+    # v0.3.5 (downstream 2C): ci_level_mismatch
     # ------------------------------------------------------------------
     # Source for "reported" level: parse-time ci_level_source ("explicit_with_bounds",
     # "inferred_from_context", "assumed_95", "implausible_level"). Numeric reported
@@ -5234,7 +5752,7 @@ compute_and_compare_one <- function(row,
     }
 
     # ------------------------------------------------------------------
-    # v0.3.5 (MetaESCI 2D): ci_clipped_to_bound for bounded ES families
+    # v0.3.5 (downstream 2D): ci_clipped_to_bound for bounded ES families
     # ------------------------------------------------------------------
     {
       bounded_family <- !is.na(canonical_type) &&
@@ -5255,18 +5773,23 @@ compute_and_compare_one <- function(row,
     }
 
     # ------------------------------------------------------------------
-    # v0.3.5 (MetaESCI 2E): ci_symmetry_class -- categorical refinement
+    # v0.3.5 (downstream 2E): ci_symmetry_class -- categorical refinement
     # ------------------------------------------------------------------
     {
-      expects_asym <- (!is.na(canonical_type) &&
-                         canonical_type %in% c("d", "g") &&
-                         !is.na(effect_reported) &&
-                         abs(effect_reported) > 0.5) ||
-                      (!is.na(canonical_type) && canonical_type == "r" &&
-                         !is.na(effect_reported) &&
-                         abs(effect_reported) > 0.5) ||
+      # v0.7.9: `sym_canonical` / `sym_estimate` rather than canonical_type /
+      # effect_reported. Both are NA on an r row at this point (see the note at
+      # the symmetry check above), so the `canonical_type == "r"` arm below --
+      # the one that says a Fisher-z interval on |r| > 0.5 is EXPECTED to be
+      # asymmetric -- could never be reached by the test type it names.
+      expects_asym <- (!is.na(sym_canonical) &&
+                         sym_canonical %in% c("d", "g") &&
+                         !is.na(sym_estimate) &&
+                         abs(sym_estimate) > 0.5) ||
+                      (!is.na(sym_canonical) && sym_canonical == "r" &&
+                         !is.na(sym_estimate) &&
+                         abs(sym_estimate) > 0.5) ||
                       isTRUE(bounded_family) ||
-                      (!is.na(canonical_type) && canonical_type == "OR")
+                      (!is.na(sym_canonical) && sym_canonical == "OR")
       ci_symmetry_class <- if (is.na(ci_symmetry)) {
         NA_character_
       } else if (ci_symmetry == "symmetric"  &&  expects_asym) {
@@ -5337,6 +5860,38 @@ compute_and_compare_one <- function(row,
                  "invariant). Value left unchanged -- verify the sign in the source."),
           format(reported_estimate), format(ciL_rep), format(ciU_rep),
           format(-reported_estimate)))
+      } else if (!pos_in && !neg_in) {
+        # v0.7.9: the SAME invariant, violated with NO sign explanation.
+        #
+        # The v0.6.3 branch above deliberately covered only the dropped-minus
+        # signature, and its comment said so: "both-in / both-out is a
+        # different defect, left alone". The defect was that nothing else
+        # covered it either, while the caller's message (the r_ci_surfaced
+        # branch below) told the user "the estimate-in-CI invariant was
+        # checked". So a row whose estimate lies OUTSIDE its own interval
+        # produced output byte-identical to one where it lies comfortably
+        # inside -- same status, same ci_check_status, same reasons. A check
+        # that runs, finds a violation and says nothing, while advertising that
+        # it looked, is the "No pretending" class.
+        #
+        # Found 2026-09-02 on a real published paper, and established by
+        # RASTERIZING the page rather than by asking any extractor: Chan &
+        # Feldman (2025), Cognition and Emotion 39(6), p. 1238, Table 9 row 2a
+        # prints `r = .70, 95% CI [0.73, 0.76]`. The interval excludes its own
+        # point estimate. Surfacing that is the product.
+        #
+        # FLAG ONLY, exactly like its sibling: the parsed value is never
+        # mutated. Unlike the sibling it names no cause, because there is no
+        # evidence of one -- "a minus was dropped" is a specific, testable
+        # hypothesis, and this branch is precisely where that hypothesis fails.
+        estimate_outside_ci <- TRUE
+        uncertainty <- c(uncertainty, sprintf(
+          paste0("IMPOSSIBLE VALUE: reported estimate %s lies outside its ",
+                 "reported CI [%s, %s], and so does its sign-flip, so this is ",
+                 "not a dropped-minus error (estimate-in-CI invariant). At ",
+                 "least one of the three published numbers is wrong. Value ",
+                 "left unchanged -- check the source."),
+          format(reported_estimate), format(ciL_rep), format(ciU_rep)))
       }
     }
   }
@@ -5446,6 +6001,25 @@ compute_and_compare_one <- function(row,
     }
   }
 
+  # v0.7.9: the sample size behind this effect-size comparison was not independent
+  # of the effect being compared -- either it was back-solved from that effect, or
+  # the document's stated N and its reported effect contradict each other. See
+  # `effect_n_not_independent` where it is set for the measurement.
+  #
+  # Placed AFTER the whole verdict chain, and it removes BOTH directions:
+  #   * PASS is unsafe because the delta is 0 by construction (the recomputation
+  #     is the algebraic inverse of the back-calculation) -- the historical bug;
+  #   * ERROR is unsafe because when a stated N conflicts with a reported effect
+  #     we do not know which is wrong. The stated N may belong to a different
+  #     table, and asserting the paper is wrong would be the same overreach in the
+  #     opposite direction.
+  # NOTE is the existing "surfaced for human review" status, so this adds no new
+  # value to the `status` vocabulary that consumers would have to learn.
+  if (isTRUE(effect_n_not_independent) &&
+      !is.na(status) && status %in% c("PASS", "WARN", "ERROR", "OK")) {
+    status <- "NOTE"
+  }
+
   # v0.3.0n: Multi-predictor regression downgrade
   # When a regression row reports both b and beta with materially different
   # values AND the status is ERROR, it's almost certainly a multi-predictor
@@ -5465,12 +6039,156 @@ compute_and_compare_one <- function(row,
   }
 
   # CI affects status (controlled by ci_affects_status parameter)
+  #
+  # v0.7.9: KEY ON THE TIER, NOT ON THE BOOLEAN. The block above enumerates the
+  # whole universe of CI candidates (every computed variant and every
+  # alternative), finds the best match, and grades three tiers into
+  # `ci_check_status`: MATCH / PLAUSIBLE / INCONSISTENT. `ci_match` collapses
+  # that to `delta <= tol_ci`, so until now PLAUSIBLE and INCONSISTENT produced
+  # the IDENTICAL published status -- a CI wrong by 0.07 and one wrong by 8.0
+  # both read NOTE, while the effect-size arm grades PASS / WARN (3x) / ERROR
+  # (5x) on the same row. Downstream, SciMeto maps NOTE to severity "info" by
+  # design, so an interval contradicting every computable method reached the
+  # author as a neutral chip that counted toward no issue.
+  #
+  # INCONSISTENT is an EARNED claim, not a near-miss: it means the reported
+  # interval matched NOTHING we know how to compute, after the candidate
+  # universe was exhausted. That is the point at which the conservative reading
+  # has been spent, and it is exactly where the effect-size arm escalates.
+  #
+  # The caution that produced the old behaviour is preserved deliberately:
+  # PLAUSIBLE still only downgrades PASS -> NOTE, and UNVERIFIABLE is untouched
+  # (the within-subjects guard at ~5169 sets it precisely so a paired design
+  # whose only candidates are independent-samples approximations is never called
+  # INCONSISTENT). Escalation is reserved for the exhausted-universe case.
   if (!is.na(ci_match) && !ci_match) {
-    if (ci_affects_status && status == "PASS") status <- "NOTE"
+    # Escalate only when this row actually PERFORMED an effect-size check.
+    # `matched_value` is NA on extraction-only rows -- `mcnemar_or` and
+    # `mediation_indirect` surface a reported OR/indirect effect with its CI but
+    # deliberately verify nothing, and their tests say so in terms ("extraction-only,
+    # never SKIP/PASS/WARN"). Raising a WARN off a CI comparison there would assert
+    # a confidence the row explicitly disclaims, and it is the same principle that
+    # keeps UNVERIFIABLE out of the escalation. Measured: both mcnemar_or fixtures
+    # carry matched_value = NA while an ordinary t-row carries 0.5422.
+    #
+    # AND the confidence LEVEL must be the paper's, not ours. When the level is
+    # not stated, `ci_level_used` falls back to the 0.95 default (~1013) and every
+    # candidate is computed at that ONE level -- so the universe was explored
+    # along the method axis only, never along the level axis. A paper reporting a
+    # 90% or 99% interval then mismatches every candidate, and the paper is not
+    # wrong: our assumption is. An INCONSISTENT verdict there is partly a
+    # statement about OUR inference, so it stays NOTE. Raised by a downstream consumer
+    # (2026-09-05) with the measurement that makes it concrete: across their
+    # stored results an assumed level appears on 42% of INCONSISTENT rows against
+    # 18% of MATCH rows -- more than twice as enriched among the mismatches,
+    # which is what an assumption manufacturing mismatches looks like.
+    .ci_level_stated <- {
+      src <- if ("ci_level_source" %in% names(row) && length(row$ci_level_source) > 0) {
+        as.character(row$ci_level_source[1])
+      } else NA_character_
+      !is.na(src) &&
+        # implausible_level: parse.R rewrote an out-of-range stated level
+        # (e.g. "263.95% CI") to 0.95. That substitution is OURS, exactly like
+        # assumed_95, so the universe is again explored at one level we chose
+        # and the escalation premise fails. Grok 4.6, 2026-09-05.
+        !src %in% c("assumed_95", "inferred_from_context", "implausible_level")
+    }
+    # AND the candidate universe must be on the REPORTED effect's own SCALE.
+    # `collect_ci_candidates()` (~4898) builds the universe out of
+    # `computed_variants`, so when `ambiguity_level` is "highly_ambiguous" -- set
+    # at ~4811 and ~4837 precisely because the reported effect type has NO
+    # same-family computed variant -- every candidate belongs to a different
+    # family. Exhausting it says nothing about the reported interval; it says we
+    # never computed one that could match. Same structural failure as the
+    # assumed-level case above: the axis that would have produced a match was
+    # never explored.
+    #
+    # Measured 2026-09-06, two-sided against 444fe39. "F(2, 57) = 4.20, p = .020,
+    # d = 0.55, 95% CI [0.02, 1.08]" went NOTE -> WARN, and that interval is
+    # CORRECT -- ci_d_ind(0.55, 30, 30, .95) = [0.0319, 1.0635]. The row published
+    # `matched_variant = "eta"` and `ci_method_match = "cohens_f:primary"` against
+    # a reported d. A false alarm on a correctly reported paper is the one outcome
+    # this arm must never produce. Raised by Grok 4.6 (2026-09-05) as a possible
+    # promotion of the `cross_type_action` NOTE at ~5445; it is that, and the
+    # good-interval case is worse than the one they described.
+    .ci_scale_comparable <- !identical(ambiguity_level, "highly_ambiguous")
+    ci_exhausted <- identical(ci_check_status, "INCONSISTENT") &&
+      !is.na(matched_value) && .ci_level_stated && .ci_scale_comparable
+
+    # ------------------------------------------------------------------
+    # THE ESCALATION IS WITHDRAWN. `ci_exhausted` no longer moves `status`.
+    #
+    # v0.7.9 escalated INCONSISTENT to WARN on the premise that the candidate
+    # universe had been exhausted, so a non-matching interval was the PAPER's
+    # error. MEASURED 2026-09-06 against the 49 corpus texts in article-finder
+    # custody (704 of 923 rows joining uniquely between arms), that premise is
+    # false often enough to make the check worthless and then harmful:
+    #
+    #   the escalation fired on 3 rows.   ALL THREE WERE FALSE ALARMS.
+    #   precision: 0 of 3. There were no true findings.
+    #
+    #   10.1080/02699931.2024.2434156  NOTE -> WARN   graded against a PAIRED
+    #       dz interval, for a between-groups Welch d
+    #   10.3389/fpsyg.2024.1303262     PASS -> WARN   graded against a SPEARMAN
+    #       interval, for a paper that says "A Pearson's correlation was computed"
+    #   10.3389/fpsyg.2024.1303262     PASS -> WARN   same
+    #
+    # Each paper's interval was recomputed independently of this package, from
+    # its own reported numbers, recovering n by inverting the t test where it was
+    # not stated. All three match the published interval to three decimals:
+    # [-0.00, 0.34] vs [-0.0018, 0.3418]; [-0.060, 0.539] vs [-0.0597, 0.5390];
+    # [-0.033, 0.545] vs [-0.0324, 0.5456]. Every accused author was right, and
+    # two of the three had been PASS.
+    #
+    # Four independent ways the premise fails were found by THREE providers
+    # (Grok 4.6, Sonnet 5, Sol) -- cross-family scale, an assumed confidence
+    # level, an assumed equal-N split, a one-sided interval, and a CI whose
+    # referent is not the reported effect. Sonnet and Sol found the split case
+    # INDEPENDENTLY of each other. Enumerating exemptions was losing: the ways
+    # "we computed a comparable interval" can be false are open-ended, which is
+    # the signature of an inverted default rather than of missing special cases.
+    #
+    # A check that fires on correct input is worse than no check. An author who
+    # follows a flag and finds nothing behind it learns to ignore the next one,
+    # and the next one may be real -- so a false alarm does not merely waste a
+    # reader, it spends the credibility of every true flag around it.
+    #
+    # WHAT REPLACES IT, and why nothing is actually lost: the three tiers are
+    # ALREADY PUBLISHED, in `ci_check_status` (built into the output row at the
+    # tibble site, documented in API.md), which carries MATCH / PLAUSIBLE /
+    # INCONSISTENT / UNVERIFIABLE / MISSING. The muted-verdict complaint that
+    # motivated the escalation was that a downstream consumer maps `status` only
+    # and ignores that column. Surfacing an existing field costs nothing and can
+    # accuse nobody; moving `status` is a contract change read by three projects
+    # that turned out to be wrong three times out of three.
+    #
+    # The one genuine catch from the whole exercise -- a correlation reporting an
+    # interval outside [-1, 1] -- survives, moved to the `impossible_value`
+    # family where it belongs, because THAT is recognisable without knowing the
+    # right answer. See the bounded-CI check beside the reversed-interval one.
+    #
+    # `ci_exhausted` is kept because it is a true and useful record of how far
+    # the comparison got. Do not re-wire it to `status` without a NEW corpus
+    # measurement showing a precision better than 0 of 3.
+    if (ci_affects_status && status == "PASS") {
+      status <- "NOTE"
+    }
     uncertainty <- c(uncertainty, sprintf(
       "CI bounds mismatch: lower diff=%.3f, upper diff=%.3f",
       ci_delta_lower, ci_delta_upper
     ))
+    if (ci_exhausted) {
+      # Reworded 2026-09-06. This said "every candidate was checked, so this is
+      # a mismatch rather than an inability to verify" -- which is precisely the
+      # claim the corpus refuted. What we can honestly say is what WE did, not
+      # what the paper did.
+      uncertainty <- c(uncertainty, paste0(
+        "Reported CI matches none of the interval methods computed here",
+        if (!is.na(ci_method_match)) paste0(" (closest: ", ci_method_match, ")") else "",
+        " -- the reported interval may still be correct for a design, ",
+        "allocation, tail or estimand not computed here, so this is a limit of ",
+        "the check rather than a finding about the paper."))
+    }
   }
 
   # Determine check_type (Issue 4): what drove the status classification
@@ -5628,8 +6346,18 @@ compute_and_compare_one <- function(row,
              "Only partial eta-squared is computable from F and df."))
   }
 
-  # CI mismatch overrides check_type when it downgrades status
-  if (ci_affects_status && !is.na(ci_match) && !ci_match && status == "NOTE" && has_effect_reported) {
+  # CI mismatch overrides check_type when the CI arm is what moved the status.
+  #
+  # v0.7.9: this used to test `status == "NOTE"`, which was the ONLY status the
+  # CI arm could produce. Now that an exhausted-universe mismatch escalates to
+  # WARN, testing NOTE alone silently dropped the relabel for exactly the rows
+  # with the STRONGEST CI finding -- and `ci_expected` reads
+  # `check_type %in% c("effect_size", "ci")`, so an OR row with a contradicted
+  # interval reported `ci_expected = FALSE`, i.e. "no CI was expected here",
+  # about a row whose CI we had just contradicted. Caught by
+  # test-v035-ci-metadata.R, which is why that test is left as it was.
+  if (ci_affects_status && !is.na(ci_match) && !ci_match && has_effect_reported &&
+      status %in% c("NOTE", "WARN")) {
     check_type <- "ci"
   }
 
@@ -5643,7 +6371,7 @@ compute_and_compare_one <- function(row,
 
   # Extreme delta flag (Issue 5): flag likely extraction errors
   extraction_suspect <- FALSE
-  # v0.6.20 (MetaESCI O-1 request 2): a value the parse-time plausibility guard
+  # v0.6.20 (downstream O-1 request 2): a value the parse-time plausibility guard
   # threw away IS an extraction suspicion -- that is precisely what the guard
   # concluded. Surfacing it here means a downstream consumer filtering on
   # extraction_suspect sees the row, instead of reading the empty
@@ -5720,10 +6448,32 @@ compute_and_compare_one <- function(row,
   }
 
   # DF plausibility (v0.2.4): flag zero, negative, or impossibly large df
+  # v0.7.12: `%.0f` printed a df1 of 0.018 as "0", so the message misstated the
+  # very value it flagged; print it as read. The same release adds the F-test
+  # domain: an F's numerator df is never below 1 and its denominator df never
+  # non-positive (see `.table_row_domain_violation()` for why no corrected or
+  # mixed-model df can cross either line). Prose values stay VISIBLE here -- the
+  # reader has the source sentence beside them -- unlike a table row, whose
+  # numbers are withheld outright because there is no sentence to check.
   if (!is.na(df1) && (df1 <= 0 || df1 > 50000)) {
     extraction_suspect <- TRUE
     uncertainty <- c(uncertainty,
-      sprintf("Degrees of freedom df1 = %.0f appears implausible \u2014 possible extraction artifact", df1))
+      sprintf("Degrees of freedom df1 = %s appears implausible \u2014 possible extraction artifact",
+              format(df1, digits = 6)))
+  } else if (identical(tt, "F") && !is.na(df1) && df1 < 1) {
+    extraction_suspect <- TRUE
+    uncertainty <- c(uncertainty,
+      sprintf("IMPOSSIBLE DF: an F test's numerator df is at least 1, but df1 = %s \u2014 extraction artifact",
+              format(df1, digits = 6)))
+  }
+  # A t df in (0, 1) is deliberately NOT flagged: a mixed-model Satterthwaite
+  # contrast can print one (Sol consult seat, 2026-09-25). A t df <= 0 is
+  # already caught by the df1 branch above, which is the whole t domain rule.
+  if (identical(tt, "F") && !is.na(df2) && df2 <= 0) {
+    extraction_suspect <- TRUE
+    uncertainty <- c(uncertainty,
+      sprintf("IMPOSSIBLE DF: an F test's denominator df is positive, but df2 = %s \u2014 extraction artifact",
+              format(df2, digits = 6)))
   }
 
   # v0.3.0f: d-vs-t cross-check for extraction artifacts
@@ -5794,6 +6544,54 @@ compute_and_compare_one <- function(row,
             "meaningful against a reversed interval, so treat this row's",
             "interval as unverified and check the source document."),
       format(ciL_rep), format(ciU_rep)))
+  }
+
+  # v0.7.9: a REPORTED interval whose bounds lie outside the effect's own
+  # mathematical range. Same class as the two checks around it -- a shape anomaly
+  # recognisable WITHOUT knowing the right answer. A correlation is bounded
+  # [-1, 1], so "r(198) = .34, 95% CI [8.00, 9.00]" cannot be right under any
+  # design, allocation, tail or estimand, and no correct paper can trip this.
+  #
+  # This is the one genuine catch salvaged from the withdrawn INCONSISTENT->WARN
+  # escalation (see the long note at the Phase 7 CI gate). That escalation tried
+  # to infer "the paper is wrong" from "our computed intervals did not match",
+  # and measured 0 of 3 on the corpus because the intervals we compute are often
+  # for a different quantity than the one printed. This check makes no such
+  # inference: it compares the paper's interval against a mathematical bound, not
+  # against anything we computed, so it is immune to every premise failure that
+  # sank the escalation.
+  #
+  # Uses the SAME `.bounded` table as the computed-value check above, so the two
+  # cannot drift apart. Keyed on the REPORTED effect's family: a bound is only
+  # impossible relative to the quantity actually being reported.
+  {
+    .ci_fam <- if (!is.na(effect_reported_name) && effect_reported_name %in% names(.bounded)) {
+      effect_reported_name
+    } else if (!is.na(canonical_type) && canonical_type %in% names(.bounded)) {
+      canonical_type
+    } else if (!is.na(tt) && tt == "r") {
+      "r"
+    } else NA_character_
+    if (!is.na(.ci_fam) && !is.na(ciL_rep) && !is.na(ciU_rep) &&
+        is.finite(ciL_rep) && is.finite(ciU_rep)) {
+      .lim <- .bounded[[.ci_fam]]
+      # Non-negative families (eta2, R2, V, ...) are bounded [0, lim]; signed
+      # ones (r, cliffs_delta, ...) are bounded [-lim, lim].
+      .signed <- .ci_fam %in% c("r", "rank_biserial_r", "cliffs_delta")
+      .lo_ok <- if (.signed) ciL_rep >= -.lim - 1e-9 else ciL_rep >= -1e-9
+      .hi_ok <- ciU_rep <= .lim + 1e-9
+      if (!.lo_ok || !.hi_ok) {
+        extraction_suspect <- TRUE
+        impossible_value <- TRUE
+        uncertainty <- c(uncertainty, sprintf(
+          paste("IMPOSSIBLE VALUE: the reported interval [%s, %s] for %s lies",
+                "outside its mathematical range [%s%s, %s]. The statistic cannot",
+                "take those values, so the interval was damaged in extraction or",
+                "misreported. Shown rather than hidden so it can be recognised."),
+          format(ciL_rep), format(ciU_rep), .ci_fam,
+          if (.signed) "-" else "", .lim, .lim))
+      }
+    }
   }
 
   # U and W are counts of pairwise wins, hence integers. A fractional value is
@@ -6452,7 +7250,7 @@ compute_and_compare_one <- function(row,
   # systematic direction of N/2 inflation). When equal-split assumption is used,
   # computed d/g is LARGER than actual because the minority group is smaller
   # than N/2. This triggers extraction_suspect for large deltas, but these are
-  # NOT extraction errors -- they are N/2 assumption artifacts (MetaESCI audit:
+  # NOT extraction errors -- they are N/2 assumption artifacts (downstream audit:
   # 84.8% of g errors from this pattern). However, when reported > computed
   # (the opposite direction), keep extraction_suspect guard since the error
   # pattern is inconsistent with N/2 inflation and may be a genuine extraction issue.
@@ -7490,6 +8288,30 @@ compute_and_compare_one <- function(row,
     status <- "WARN"
   }
 
+  # v0.7.9: re-apply the CI escalation for the same reason as the block above.
+  # `ci_exhausted` is decided in Phase 7, but several later rules REASSIGN status
+  # -- notably the r-as-stat upgrade, which adopts r as the effect and sets PASS,
+  # silently overwriting the escalation. Measured (Grok 4.6, 2026-09-05):
+  # r(198) = .34 reporting 95% CI [8.00, 9.00] published PASS with
+  # ci_check_status = INCONSISTENT, indistinguishable from the same row with a
+  # correct interval -- and a correlation is bounded [-1, 1], so that interval is
+  # impossible under every method.
+  #
+  # Deliberately does NOT touch WARN or ERROR: this is a floor, not an override,
+  # and the later NOTE-setting rules ("cannot verify") still win, because a row
+  # that could not be checked must not carry an alarm.
+  # Re-evaluated against the FINAL matched_value, not Phase 7's. The r-as-stat
+  # upgrade adopts r as the effect only afterwards, so at the CI gate
+  # matched_value is still NA and the extraction-only exclusion (correctly) fired
+  # there. By this point the row HAS a verified effect, so the escalation applies.
+  # WITHDRAWN 2026-09-06 with the escalation it existed to re-apply. The floor
+  # lifted OK/PASS to WARN after later rules reassigned `status`; with the
+  # escalation gone there is nothing to re-apply. Its own motivating case -- a
+  # correlation reporting 95% CI [8.00, 9.00] publishing PASS -- is NOT lost: it
+  # is handled by the bounded-CI check in the `impossible_value` family above,
+  # which is scale-free and cannot fire on a correct paper. See the long note at
+  # the Phase 7 gate for the 0-of-3 corpus measurement behind the withdrawal.
+
   # v0.2.4: non-inequality p > 0.5 with large computed discrepancy.
   # v0.6.21: this is a |p_reported - p_computed| MAGNITUDE test, which is
   # exactly the comparison a resampling p cannot support -- the two come from
@@ -7752,7 +8574,7 @@ compute_and_compare_one <- function(row,
   standardized_beta <- if ("standardized_beta" %in% names(computed_variants)) computed_variants$standardized_beta$value else if ("standardized_beta" %in% names(alternatives)) alternatives$standardized_beta$value else if (!is.na(computed_beta_for_output)) computed_beta_for_output else NA_real_
   partial_r <- if ("partial_r" %in% names(alternatives)) alternatives$partial_r$value else NA_real_
 
-  # v0.3.5 (MetaESCI 2B): CI expectation flags
+  # v0.3.5 (downstream 2B): CI expectation flags
   # ci_expected: TRUE when this row carries an effect size from a family for
   #   which CIs are normative reporting (d/g/r/eta2/etap2/R2/OR/cramers_v).
   #   Pipeline check_type can be "effect_size" or "ci" (the latter is a
@@ -7796,6 +8618,14 @@ compute_and_compare_one <- function(row,
   #                                     cross-falls to a different family
   #                                     and the row cannot be independently
   #                                     verified within its declared family.
+  #
+  #   [category: not-computed]       -- v0.7.11: an effect size was reported
+  #                                     but NO variant could be computed at
+  #                                     all (e.g. an F printed without df), so
+  #                                     no fallback happened. Written by
+  #                                     no_variants_reason() with the tag
+  #                                     already attached, which this block's
+  #                                     idempotency guard then leaves alone.
   #
   # The block is idempotent (won't double-tag) and additive (existing reason
   # substrings remain intact, so downstream substring matches like the
@@ -7934,13 +8764,13 @@ compute_and_compare_one <- function(row,
     ciL_reported = ciL_rep,
     ciU_reported = ciU_rep,
 
-    # v0.3.5 (MetaESCI 2A): Reported-value precision tracking
+    # v0.3.5 (downstream 2A): Reported-value precision tracking
     effect_reported_decimals = effect_reported_decimals,
     ciL_reported_decimals    = ciL_reported_decimals,
     ciU_reported_decimals    = ciU_reported_decimals,
     stat_value_decimals      = stat_value_decimals,
 
-    # v0.3.5 (MetaESCI 2B): CI expectation flags
+    # v0.3.5 (downstream 2B): CI expectation flags
     ci_expected = ci_expected,
     ci_reported = ci_reported,
 
@@ -8034,7 +8864,7 @@ compute_and_compare_one <- function(row,
     ci_delta_upper = ci_delta_upper,
     ci_check_status = ci_check_status,
     ci_method_match = ci_method_match,
-    # v0.6.20 (MetaESCI O-3 and O-1 request 2). These MUST reach the output
+    # v0.6.20 (downstream O-3 and O-1 request 2). These MUST reach the output
     # tibble, not just the internal uncertainty message: request 2 was
     # explicitly so a consumer can DISTINGUISH a suppressed effect size from
     # an absent one, which needs a column to filter on.
@@ -8043,14 +8873,19 @@ compute_and_compare_one <- function(row,
     effect_guard_reason = effect_guard_reason,
     SE_guard_rejected = SE_guard_rejected,
     SE_guard_reason = SE_guard_reason,
+    df_guard_rejected = FALSE,
+    df_guard_reason = NA_character_,
     ci_width_ratio = ci_width_ratio,
     ci_symmetry = ci_symmetry,
-    # v0.3.5 (MetaESCI 2C/2D/2E)
+    # v0.3.5 (downstream 2C/2D/2E)
     ci_level_mismatch   = ci_level_mismatch,
     ci_clipped_to_bound = ci_clipped_to_bound,
     ci_symmetry_class   = ci_symmetry_class,
     # v0.6.3 (R-0007): dropped-minus sign-error flag (estimate-in-CI invariant)
     sign_ci_violation   = sign_ci_violation,
+    # v0.7.9: the SAME invariant violated with no sign explanation --
+    # estimate outside its CI and its negation outside it too.
+    estimate_outside_ci = estimate_outside_ci,
     # Status and metadata
 
     # REPRO code generation
@@ -8291,7 +9126,7 @@ compute_and_compare_one <- function(row,
     # v0.6.0: per-arm cells from pat_two_props_slash (RR / rdpct rows).
     # NA on any row where the slash-count clause was absent or test_type is
     # not RR / rdpct. Surfaced for downstream visibility (frontend table,
-    # MetaESCI audit).
+    # Downstream audit).
     arm1_events = if ("arm1_events" %in% names(row)) row$arm1_events[1] else NA_real_,
     arm1_total  = if ("arm1_total"  %in% names(row)) row$arm1_total[1]  else NA_real_,
     arm2_events = if ("arm2_events" %in% names(row)) row$arm2_events[1] else NA_real_,
@@ -8325,7 +9160,26 @@ compute_and_compare_one <- function(row,
 #' @param plausibility_filter Whether to apply plausibility bounds filter (default TRUE)
 #' @param sign_sensitive Whether sign differences affect status (default FALSE)
 #' @param method_context_action Action when method context detected in chunk ("NOTE", "WARN", or "SKIP"; default "NOTE")
-#' @param design_ambiguous_action Action when design-ambiguous t-test (or F(1,df)) effect size ERROR occurs ("WARN", "NOTE", or "ERROR"; default "WARN")
+#' @param design_ambiguous_action Action when a design-ambiguous t-test (or
+#'   F(1,df), or z with d/g) effect-size ERROR occurs ("WARN", "NOTE", or
+#'   "ERROR"; default "WARN").
+#'
+#'   \strong{It has one exception, and it is deliberate.} The downgrade is
+#'   applied only where design ambiguity is a candidate EXPLANATION for the
+#'   discrepancy -- that is, where the reported effect lies within the range
+#'   of the computed independent and paired variants plus a 50\% margin. A
+#'   reported effect matching NEITHER design is not explained by not knowing
+#'   which design was used, so it keeps its ERROR and this parameter is inert
+#'   on that row. Same principle as the v0.6.18 omnibus-df rule: an effect
+#'   matching neither candidate keeps its flag. The row states the reason
+#'   ("Extreme discrepancy ... likely reflects data extraction error").
+#'
+#'   Documented in v0.7.9 after a downstream consumer probed the parameter and found 2
+#'   rows in 148,984 where a caller asking for "WARN" got "ERROR". The
+#'   behaviour was correct and the SILENCE was the defect: a policy knob
+#'   whose exception is not documented reads, from outside, exactly like a
+#'   policy knob that does not work. Pinned by
+#'   \code{test-v079-design-ambiguous-action-scope.R}, both directions.
 #' @param unknown_groups_action Action when d/g ERROR occurs with unknown group sizes n1/n2 ("WARN", "NOTE", or "ERROR"; default "WARN")
 #' @param min_confidence Minimum confidence score (0-10) for results to be included in output (default 0)
 #' @param table_rows Optional list of docpluck structured table rows
@@ -8381,8 +9235,11 @@ compute_and_compare_one <- function(row,
 #'     \item{\code{ambiguity_reason}}{Character. Human-readable explanation
 #'       of the ambiguity. Since v0.5.11, a stable bracket-tagged category
 #'       suffix is appended when applicable: \code{"[category: structural-design]"}
-#'       or \code{"[category: cross-family]"}. Consumers can grep for the tag
-#'       to programmatically split the two semantics without parsing English.}
+#'       or \code{"[category: cross-family]"}; since v0.7.11 also
+#'       \code{"[category: not-computed]"} when an effect size was reported but
+#'       no variant could be computed at all (e.g. an F without df), so nothing
+#'       was matched. Consumers can grep for the tag
+#'       to programmatically split the semantics without parsing English.}
 #'     \item{\code{matched_variant}}{The computed variant matched against
 #'       the reported ES. A cross-family fallback row will name a variant
 #'       from a different family than the reported ES type (e.g.
@@ -8395,6 +9252,20 @@ compute_and_compare_one <- function(row,
 #'       is never mutated; the violation is also surfaced in
 #'       \code{uncertainty_reasons}. NA on error/short-circuit rows, FALSE
 #'       otherwise.}
+#'     \item{\code{estimate_outside_ci}}{Logical (since v0.7.9). TRUE when the
+#'       same estimate-in-CI invariant is violated with NO sign explanation:
+#'       the reported estimate lies outside its reported CI \emph{and so does
+#'       its sign-flip}, so a dropped minus cannot account for it and at least
+#'       one of the three published numbers is wrong. Mutually exclusive with
+#'       \code{sign_ci_violation}, which keeps its own, more specific
+#'       diagnosis. Added because the invariant was evaluated but only ever
+#'       REPORTED the dropped-minus shape, so a row whose estimate lay outside
+#'       its own interval was indistinguishable from one where it lay inside --
+#'       while the row's message said the invariant had been checked. Real
+#'       instance: Chan \& Feldman (2025), \emph{Cognition and Emotion} 39(6),
+#'       p. 1238, Table 9 row 2a prints \code{r = .70, 95\% CI [0.73, 0.76]}.
+#'       FLAG ONLY: the parsed value is never mutated. NA on
+#'       error/short-circuit rows, FALSE otherwise.}
 #'   }
 #'   Plus all other columns: \code{location}, \code{raw_text}, test
 #'   identification (\code{test_type}, \code{chisq_subtype}, \code{df1},
@@ -8542,7 +9413,10 @@ check_text <- function(text,
     design_ambiguous_action = design_ambiguous_action,
     unknown_groups_action = unknown_groups_action,
     min_confidence = min_confidence,
-    n_table_rows = if (is.null(table_rows)) 0L else length(table_rows)
+    n_table_rows = if (is.null(table_rows)) 0L else length(table_rows),
+    # v0.7.13: rows set aside as docpluck "uncaptioned_candidate" (never checked)
+    n_table_rows_uncaptioned_dropped = if (is.null(table_rows)) 0L else
+      sum(.table_rows_uncaptioned(table_rows))
   )
 
   parsed <- parse_text(text)
@@ -8614,6 +9488,14 @@ check_text <- function(text,
   # row's own reported effect size is better explained by it than by df + 2.
   parsed <- .attach_omnibus_contrast_candidate(parsed)
 
+  # v0.7.9: propose a df for a bare correlation from a uniquely-matching stated
+  # r(df) elsewhere in the SAME document. See `.attach_matched_r_df()` -- this
+  # only ATTACHES a hypothesis; compute_and_compare_one() adopts it solely when
+  # the row has no df of its own and its N came from a scraped source. Attached
+  # after the table rows are bound and deduplicated, so a flattened table cell
+  # can be a recipient.
+  parsed <- .attach_matched_r_df(parsed)
+
   rows <- split(parsed, seq_len(nrow(parsed)))
   res <- purrr::map_dfr(seq_along(rows), function(i) {
     rw <- rows[[i]]
@@ -8628,7 +9510,12 @@ check_text <- function(text,
         # v0.6.4: a docpluck table row carrying only a point estimate + CI
         # (no test statistic) cannot be recomputed -> honest extraction-only
         # NOTE that surfaces est / CI / p as extracted.
-        if (!is.null(rw$test_type) && length(rw$test_type) > 0 &&
+        # v0.7.12: a table row whose typed test cannot exist (see
+        # `.table_row_domain_violation()`) carries no numbers any more; it
+        # surfaces as a NOTE naming the refusal, never as a checked result.
+        if ("df_guard_rejected" %in% names(rw) && isTRUE(rw$df_guard_rejected[1])) {
+          out_row <- .note_only_row(rw, as.character(rw$df_guard_reason[1]))
+        } else if (!is.null(rw$test_type) && length(rw$test_type) > 0 &&
             identical(as.character(rw$test_type[1]), "table_estimate")) {
           ci_msg <- if (!is.null(rw$ciL_reported) && length(rw$ciL_reported) > 0 &&
                         !is.na(rw$ciL_reported[1])) {
@@ -8752,18 +9639,20 @@ check_text <- function(text,
           ci_check_status = NA_character_, ci_method_match = NA_character_, ci_referent = NA_character_,
           effect_guard_rejected = FALSE, effect_guard_reason = NA_character_,
           SE_guard_rejected = FALSE, SE_guard_reason = NA_character_,
+          df_guard_rejected = FALSE, df_guard_reason = NA_character_,
           ci_width_ratio = NA_real_, ci_symmetry = NA_character_,
-          # v0.3.5 (MetaESCI 2C/2D/2E)
+          # v0.3.5 (downstream 2C/2D/2E)
           ci_level_mismatch   = NA_character_,
           ci_clipped_to_bound = NA_character_,
           ci_symmetry_class   = NA_character_,
           sign_ci_violation   = NA,
-          # v0.3.5 (MetaESCI 2A): decimal precision tracking
+          estimate_outside_ci = NA,
+          # v0.3.5 (downstream 2A): decimal precision tracking
           effect_reported_decimals = NA_integer_,
           ciL_reported_decimals    = NA_integer_,
           ciU_reported_decimals    = NA_integer_,
           stat_value_decimals      = NA_integer_,
-          # v0.3.5 (MetaESCI 2B): CI expectation flags
+          # v0.3.5 (downstream 2B): CI expectation flags
           ci_expected              = FALSE,
           ci_reported              = FALSE,
           # v0.3.6: df_arity_mismatch flag (FALSE on error path)
@@ -9168,7 +10057,7 @@ check_text <- function(text,
   # v0.7.6: attach the document-level upstream provenance to every row.
   #
   # Repeated per row rather than held as an attribute because every consumer of
-  # this package reads COLUMNS -- MetaESCI joins on them, the worker serialises
+  # this package reads COLUMNS -- downstream joins on them, the worker serialises
   # them, the CSV/JSON exports carry them. An attribute would be silently lost
   # at the first `as.data.frame()` and would then be a field we declare and
   # never deliver.

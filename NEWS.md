@@ -1,3 +1,266 @@
+# effectcheck 0.7.13
+
+**Rows from a table no caption claimed are no longer checked.** docpluck 2.4.145 (released and
+live in production on 2026-09-27, while 0.7.12 was serving) starts including rows from grids that no table caption claims -- docpluck measured
+about half of those as page furniture such as flow-diagram boxes and author blocks -- and marks
+them `caption_status = "uncaptioned_candidate"`. Measured 2026-09-27 on the 27 papers of the
+end-to-end seam set, effectcheck 0.7.12 against local docpluck 2.4.144 and the 2.4.145 candidate:
+85 result rows gained, 0 lost, PASS 377 -> 377 and OK 268 -> 268 (the new rows verified nothing),
+and **two new false WARNs** on 10.1016/j.jesp.2022.104372, where a questionnaire-item grid was
+read as t-tests on 2 and 6 degrees of freedom, each with an INCONSISTENT CI. Those rows are now
+dropped before any other table-row step, so an uncaptioned grid cannot displace a captioned table
+that repeats it. On that paper the output is again exactly what docpluck 2.4.144 produces.
+The docpluck boundary golden is refreshed at the v2.4.145 tag (deb69ae): the t-test keys `t`,
+`d`, `df` that 2.4.144 dropped are back, the fixture yields the 5 rows the page prints (the 2.4.141
+golden recorded 8, two of them invented), and `caption_status` is the one new field. The contract
+gate is green again; the owner waiver recorded in 0.7.12 is closed.
+The boundary contract now also ASSERTS which docpluck build answered (fleet thread T-0009): the
+golden's recorded `docpluck_identity` must equal the live service's, and the live
+`version_crosscheck` must read `agreed`. Before this the identity block was write-only, so a docpluck
+release that renamed no field passed the contract silently; now it fails until the capture is
+reviewed and the golden refreshed (`worker/tests/test-docpluck-contract-identity.R`).
+Nothing changes on docpluck 2.4.144, which does not send these rows. A real statistical table
+printed without a caption is therefore not checked -- as it is not today. The count set aside is
+recorded as `n_table_rows_uncaptioned_dropped` in the result's `settings` (a Sonnet review
+pointed out that `n_table_rows` alone counted rows that were never looked at).
+
+The docpluck version-comparison harness (`tests/harness/diff_endtoend_versions.py`) no longer
+crashes on a Windows console when a row label holds a character outside cp1252.
+
+# effectcheck 0.7.12
+
+**A table row the extractor typed as an impossible test no longer publishes that test.**
+docpluck 2.4.143 and 2.4.144 (the version production serves) attach the rows printed below a
+ruled table to that table, so on a page of stacked tables the next table's rows are read under
+the first table's header. On the boundary-contract fixture a t-test row
+`Sleep vs Control 2.41 98 .018 0.15` arrived as `F = 98, df1 = 0.018, df2 = 0.15`, and 0.7.11
+published **F(0.018, 0.15) = 98** -- on a SKIP row, which does not suppress values. A structured
+table row is now refused when its typed test cannot exist: an F with numerator df below 1, a
+non-positive denominator df or a negative F; a t with a non-positive df. These are the statistics'
+domains, not plausibility limits -- no Greenhouse-Geisser, Huynh-Feldt, Welch or mixed-model df
+crosses them. (A t or F-denominator df between 0 and 1 is deliberately admitted: a mixed-model
+Satterthwaite df can legitimately print one.)
+The row is **kept**, so a reader can see that a table result could not be read, but every number on
+it is withheld; it is a NOTE with `extraction_suspect = TRUE` and two new columns,
+`df_guard_rejected` and `df_guard_reason`, saying why. Kept rather than dropped because a dropped
+row makes a paper with an unreadable table look fully checked.
+
+**One table delivered twice is checked once.** The same upstream bug returned Table 1's three F rows
+a second time inside the misattached table, labelled "Table 2", so each result was checked and
+counted twice, once under the wrong table. The rule is whole-table containment: a later table's rows
+are dropped only when EVERY result row of an earlier table on the same page (at least two distinct
+rows, each with at least two numbers one of which is a t, F or r) reappears in it field for field --
+row label, group, every typed value including `p_op`. Only the repeated rows are dropped; the first
+occurrence, in delivery order, is kept. Two genuine tables that agree on some rows, a repeat on
+another page, rows without a table id or a page -- all kept, the conservative direction.
+
+**Prose gets the same domain, flagged rather than withheld.** An F with df1 below 1 or df2 at or
+below 0 in body text is now `extraction_suspect` with an "IMPOSSIBLE DF" reason (a df at or below 0
+was already flagged); its values stay visible because the reader has the source sentence beside them. The
+existing df1 message printed its value with `%.0f`, so a df1 of 0.018 read "df1 = 0"; it now prints
+the value as read.
+
+**Prevalence, measured 2026-09-25 on the end-to-end corpus through a clean local docpluck 2.4.144:**
+27 papers, 26 extracted with the table step `ok` (10.5334/irsp.945 extracts zero characters, a known
+separate defect). Across 2,578 flattened table rows -- 54 typed F rows, 179 typed t rows -- there is
+**no** fractional or non-positive F numerator df, no non-positive denominator df, no negative F and
+no t df below 1; the final code refuses 0 rows and drops 0 duplicates, and the 990 result rows
+`check_text()` builds from those papers carry `df_guard_rejected = FALSE` throughout. The same code on
+the same service refuses 2 rows and drops 3 duplicates on the contract fixture, so the zeros are real
+zeros, not a guard that cannot fire. The defect shape needs stacked tables on one page with a ruled
+table above; none of the corpus papers delivered it, which is also why no corpus-level gate caught it.
+
+Measured against a clean local docpluck 2.4.144 before the fix: the boundary contract exits 1 with
+`flattened_row_field_keys: REMOVED/RENAMED upstream: d, df, t` and 9 rows where the golden has 8. The
+golden is deliberately **not** refreshed: the upstream fix (docpluck commit 28e0b8f) is on docpluck's
+main branch but in no tagged release yet, and the contract says to refresh only once the t/df/d keys
+return. Note the golden itself is not ground truth: it records 8 flattened rows where the page prints
+5 results, i.e. it was captured with Table 1 already delivered twice (at 2.4.141). A correct upstream
+fix will therefore move the count 8 -> 5, and that change must not be read as a regression.
+
+**Released with the boundary contract RED, by explicit owner waiver (2026-09-25).** `/escicheck-qa`
+reported the contract BROKEN against docpluck 2.4.144 (`d, df, t` keys missing; 9 rows vs 8). That red
+describes what production docpluck sends whether or not this release ships, and this release is the
+mitigation for it; the only way to turn it green from this side -- refreshing the golden to 2.4.144 --
+would record the broken rows as correct. The waiver covers exactly that one red and nothing else.
+docpluck 2.4.145 (announced, not yet tagged) fixes the rows and also adds `caption_status` to every
+flattened row, including rows from uncaptioned grids (about half page furniture); ESCImate must decide
+how to treat `caption_status == "uncaptioned_candidate"` rows before production moves to 2.4.145. The first draft was reviewed by two other models (Sonnet, then Sol), and every defect they
+found was reproduced by a test that failed first: single matches on different pages pooling into a
+"block of two" (Sonnet); a t-df floor of 1 that would have hidden a legitimate mixed-model result,
+and a "two matching rows" dedup rule that could merge two genuine tables and missed a partial third
+copy (Sol) -- which is why the rule is now full containment. New regression test
+`test-v0712-table-row-domain-and-cross-table-dup.R`.
+
+# effectcheck 0.7.11
+
+**A row from which no effect size could be recomputed no longer claims a cross-family
+fallback that never ran.** When a results table prints `F`, `p`, `η²p` and a CI but no
+degrees of freedom (10.1525/collabra.90203 Table 8), nothing can be recomputed from the `F`,
+so the set of computed variants is empty. The row nevertheless said *"No same-type variants
+available for 'etap2' - using all computed variants [category: cross-family]"* -- describing a
+fallback to variants that did not exist, under the category API.md defines as "the matcher
+cross-falls to the closest computed variant in a different family". It now reads *"No
+effect-size variants could be computed from this row for 'etap2' (e.g. its degrees of freedom
+are not reported), so the reported effect size was not compared to anything [category:
+not-computed]"*. The same correction applies when the effect-size type itself was not stated.
+
+**Text only, deliberately.** `ambiguity_level` stays `"highly_ambiguous"`, so
+`design_ambiguous`, `confidence`, `uncertainty_level` and `status` are unchanged on every row;
+setting the level to `"clear"` instead would have raised `confidence` by 6 points on rows where
+nothing was verified. A genuine cross-family fallback (e.g. `F(2, 30) = 5.00, d = 0.60`) keeps
+its `[category: cross-family]` tag. `[category: not-computed]` is a new, third tag; consumers
+splitting on the two existing tags see it as neither.
+
+Found by the escicheck-iterate canary audit of 10.1525/collabra.90203 on 2026-09-23, confirmed
+in triage by three models (Opus, Sonnet 5, Fable 5). The same audit's seven reported findings
+were all triaged to other owners or to documented behaviour -- none was an effectcheck defect:
+the missing partial-eta-squared labels are drawn as vector shapes in the PDF and never reach the
+text (a docpluck extraction limit); the absent "Target article" rows are the original study's
+statistics, excluded on purpose since 0.6.6; and `design_ambiguous = FALSE` on prose F rows is
+the documented contract (it describes matching ambiguity, which `design_inferred` does not).
+New regression test `test-v0711-no-variants-not-cross-family.R`.
+
+# effectcheck 0.7.10
+
+**`R CMD check --as-cran` regained a 0-warning build**: one em-dash literal in a
+`check.R` uncertainty message (introduced by **0.7.9's** CI-escalation reword) tripped
+"checking code files for non-ASCII characters" -- the check flags non-ASCII in R *code*
+(string literals, identifiers) but tolerates it in *comments*, so the rest of that same
+message and every other non-ASCII comment in the file were never the issue. Replaced with
+ASCII `--`; **no message text or behaviour changed** beyond the glyph. New regression test
+`test-ascii-source-discipline.R` runs `tools::showNonASCIIfile()` over `effectcheck/R/` so this
+class cannot recur silently.
+
+**This release exists as a SEPARATE version rather than as an amendment to 0.7.9, and that is
+the point.** 0.7.9 was already serving in production, and `/health` reports
+`packageVersion("effectcheck")` -- so shipping a changed `R/check.R` under the same number
+would have made two different builds both answer `0.7.9`, leaving
+`deploy-drift-check.sh` and `/ship`'s own Phase 5.0 "did the deploy land?" gate **structurally
+unable to distinguish them**. That is the v0.7.3 failure shape, where a rolled-back release
+answered `status:healthy` for 15 hours. A version string is the only identity those gates have;
+changing the artifact without changing the string disarms them silently.
+
+**No parsing, computation, or verdict logic changed in this release** beyond the ASCII fix
+above. The AI-gold regeneration of three papers (`10.1371__journal.pmed.1004323`,
+`10.1098__rsos.250908`, `10.1016__j.joep.2020.102349`) that also landed this cycle is
+test-CORPUS work, not a code change -- it corrected ground truth that had been transcribed in
+the parser's own notation rather than the paper's printed form (see `TODO.md` 2026-09-08/09 and
+`tests/harness/gold.lock.json` `history[]`), and moved the replay harness's accuracy readout
+from 28.8% to 29.7% CORRECTLY VERDICTED with zero behavioural change on this side of the seam.
+
+# effectcheck 0.7.9
+
+**A confidence-interval check that fired only on correct papers was built, measured, and
+withdrawn inside one release.** It escalated a row to WARN when the reported interval matched
+none of the intervals this package computes, on the premise that the candidate universe had
+been exhausted so the paper must be wrong. Measured over 704 rows of real published text (the
+49-paper corpus in article-finder custody, 0.7.8 against the escalating build, 219 duplicate
+keys dropped identically from both arms), it fired **three times and every one was a correct
+paper** -- two of which had been PASS. In each case the author's interval had been graded
+against an interval for a *different quantity*: a paired `dz` interval for a between-groups
+Welch `d`, and a **Spearman** interval for a paper whose own sentence reads "A Pearson's
+correlation was computed". Each interval was recomputed independently of this package from the
+paper's own numbers, recovering *n* by inverting the *t* test where unstated, and all three
+match to three decimals (`[-0.00, 0.34]` vs `[-0.0018, 0.3418]`; `[-0.060, 0.539]` vs
+`[-0.0597, 0.5390]`; `[-0.033, 0.545]` vs `[-0.0324, 0.5456]`).
+
+**Five independent ways the premise fails were found by three model providers** -- cross-family
+scale, an assumed confidence level, an assumed equal-N group split, a one-sided interval, and a
+CI whose referent is not the reported effect. Two providers found the split case independently
+of each other. One exemption was written for the first; the next four arrived within the hour.
+The ways "we computed a comparable interval" can be false are open-ended, which is an inverted
+default rather than a list of missing special cases. **A check that fires on correct input is
+worse than no check:** an author who follows a flag and finds nothing behind it learns to
+ignore the next one, and the next one may be real.
+
+**Nothing was lost by withdrawing it, because the severity was already published.**
+`ci_check_status` grades `MATCH` / `PLAUSIBLE` / `INCONSISTENT` / `UNVERIFIABLE` / `MISSING` on
+every row and always has, and `ci_method_match` names the method the interval was actually
+compared against -- the field that makes an `INCONSISTENT` interpretable, and the one that
+reveals the Pearson-graded-against-Spearman case. The complaint that motivated the escalation
+was that a downstream consumer maps `status` only and ignores both. `API.md` now says to read
+them, and records the measurement so this is not re-proposed. **`status` behaviour for a
+mismatched interval is identical to 0.7.8.**
+
+**The one genuine catch is kept, in a form that cannot misfire.** A reported interval lying
+outside its effect's *mathematical* range -- a correlation outside [-1, 1], an eta-squared
+above 1 -- now joins the `impossible_value` family beside the reversed-interval check, reusing
+the same bounds table so the two cannot drift. It compares the paper against a bound rather
+than against anything computed here, so it is immune to all five premise failures. The control
+that defines its scope: a correlation interval of `[0.90, 0.99]`, badly wrong for `r = .34` but
+*possible*, correctly stays PASS.
+
+**`API.md` documented five row statuses and omitted `SKIP`,** which the code emits. A consumer
+building a status map from the published documentation wrote exactly the incomplete map behind
+a downstream "insufficient data" defect; a second consumer confirmed the same gap. All six are
+now documented, with what `SKIP` means (`check.R`: an extraction-only row with nothing checked
+and nothing worth surfacing) and an explicit note that **`OK` verifies the p-value, never the
+effect size** -- all six `OK` write sites are in the p-value branch, and `PASS` is the status
+that structurally requires a matched value.
+
+**`.effectcheck_version()` no longer falls back to a hardcoded `"0.2.0"`** (deferred from the
+previous release): it returns explicit `not-installed` / `unreadable` markers instead, so a
+lookup failure can never be mistaken for a real version. No published artifact was ever
+affected -- the worker's version lookup is an unguarded top-level call at startup, so any
+process that served a result had already proved the lookup succeeded.
+
+Also in this release: the project's own cleanup skill read as permission to delete without
+asking (its delete recipe sat ~30 lines above the rule reserving deletion to the user, and it
+named a gate string printed by a different command than the scans that produce the hit list),
+and the merged fix-queue work from the sibling branch -- a robust-family crash, an
+estimate-outside-CI check, CI symmetry on correlations, correlation N-provenance reaching the
+output, and a chi-square back-solve that could not fail.
+
+# effectcheck 0.7.8
+
+**A build that reported success shipped a different image, and a confidence interval
+changed under a method label that did not move.** Both were measured on 2026-09-02 while
+verifying -- for the first time -- that the 2026-08-09 build pin does what its comment
+claims. It does: a local rebuild three weeks later reproduced production's engine set
+exactly (R 4.6.1, effectsize 1.0.3, MBESS 5.0.1, stringi 1.8.9, stringr 1.6.0, ICU 74.2)
+and the 30-document corpus came back **byte-identical, 505 rows / 2,343,217 normalized
+characters**. What was NOT deterministic was the build around it.
+
+**Two cold-cache builds of the identical Dockerfile produced 158 and 140 packages.**
+`remotes::install_local(dependencies = TRUE)` planned 49; in the second build 18 failed to
+download, each emitting only `Warning: download of package 'x' failed`. R continued, the
+`RUN` step exited 0, and the image shipped without `statcheck`, `testthat`, `shiny`, `DT`,
+`ggplot2` and 13 others. Nothing caught it. `/health` was byte-identical to the healthy
+image, because `statcheck` was not among the packages it names; and the test suite could
+not run, because `testthat` was one of the casualties. The user-visible consequence,
+measured: `POST /api/v1/compare-text` returned **one row instead of two** -- statcheck's
+entire second opinion silently absent, HTTP 200, no error. The core statistical path was
+unaffected (that image also produced 30/30 byte-identical corpus output), and **production
+was verified healthy**, so nothing published was wrong. The exposure was the next rebuild.
+
+The build now **fails** rather than shipping a quietly different image: an explicit
+required-package assertion after `install_local`, proven three ways -- it passes on a
+healthy image (21 required of 158 installed), fails when a package is removed, and fails
+on the actually-degraded image naming `statcheck` and `testthat`.
+
+**`ci_d_ind()` reported `noncentral_t` for bounds it did not compute that way.**
+`ci_d_ind_noncentral_t()` falls through to `ci_d_ind_approx()` -- a large-sample
+approximation -- on two paths: `|ncp|` beyond R's noncentral-t accuracy limit (~37.62),
+and MBESS not installed. Both were labelled `noncentral_t`. Measured in two fresh R
+processes on `d = 0.67, n1 = n2 = 25`: `[0.0964533619, 1.2369531589]` with MBESS,
+`[0.0996671786, 1.2403328214]` without -- **the interval moved and the label did not**.
+MBESS is a `Suggests`, installed through the step that was dropping packages silently, so
+this was reachable from a build that reported success. Bounds now carry a `ci_engine`
+attribute and the label is derived from it. `uniroot_nct` still reports `noncentral_t`
+because it *is* a noncentral-t inversion; only the genuinely approximate engine reports
+differently, so **every row that was correct before is byte-identical after** -- verified
+on the full 30-document corpus, 0 changes.
+
+Also: `statcheck` is now reported in `/health`'s `engine_versions`, derived rather than
+hand-listed by a test that scans the computation sources for `Suggests` called via `::`;
+`CRAN_SNAPSHOT` moved from `ARG` to a committed literal, closing a one-flag `--build-arg`
+hole in the line whose whole purpose is to be un-overridable; and an ICU assertion pins
+the one part of the deliberately-unpinned apt layer that can move a published number
+(measured inert across both builds, but ICU drives stringi's Unicode normalization, which
+is the exact mechanism behind the 49,091 vs 50,101 character incident). Suite 1236
+`test_that` blocks across 145 files.
+
 # effectcheck 0.7.7
 
 **A retry that skipped its own second chance, a test that guarded a branch
@@ -303,7 +566,7 @@ a reader of the output could not tell that a permutation p had been reported.
 
 New sibling **column** `p_reported_secondary` (plus `p_secondary_symbol`), never a
 second row: a new row would change `nrow()` for every consumer and silently shift
-every downstream index, and MetaESCI's field registry is frozen at v0.4.0, so it
+every downstream index, and downstream's field registry is frozen at v0.4.0, so it
 already tolerates unknown columns and cannot tolerate unknown rows. Scoped to the
 GLUED qualifier only, which is the whole safety argument -- a glued qualifier is
 *provably* invisible to `pat_p`, so what this captures is provably not what
@@ -470,7 +733,7 @@ failure instead of hiding it.
 
 ## Filed to docpluck, not fixed here
 
-**DP-14** (`docs/DOCPLUCK_HANDOFF_2026-08-09.md`): `bmj_1`'s supplementary table
+**DP-14** (the 2026-08-09 extraction-tool defect log): `bmj_1`'s supplementary table
 arrives **column-major** -- one cell per line, no row grouping, and a header split
 mid-word (`Odds Ratio or Coefficien` / `t for Treatmen t Group`). Reassembling it
 means guessing which estimate pairs with which interval, and a wrong guess there
@@ -805,7 +1068,7 @@ whitelist of four syntactic contexts. Everything outside that list was corrupted
 | `1,234/5,678` | arm counts NA | risk-ratio verification silently skipped |
 | `M = 1,234.56`, `SE = 1,234.5`, `AIC = 12,345.6`, `H(2) = 1,234.56` | two decimal points | unparseable |
 
-The whitelist had already failed three times — MetaESCI E8 (47 rows lost in one
+The whitelist had already failed three times — downstream E8 (47 rows lost in one
 article), the `N =` case, and a resample-count case in v0.6.22 — each fix adding one
 more entry. It was an enumeration, not a rule, and `nobs` (a *documented* sample-size
 token since v0.5.5) was never in it.
@@ -1085,7 +1348,7 @@ texts, 192 rows: **byte-identical**, 0 rows gained, 0 lost, 0 verdict changes.
 
 # effectcheck 0.6.20
 
-**A normalization rule was deleting reported statistics.** MetaESCI filed two
+**A normalization rule was deleting reported statistics.** downstream filed two
 apparently unrelated defects (O-1, O-2) with two different diagnoses. Both traced to
 one line in `normalize_text()`, and neither diagnosis was right. The sweep that
 followed found four more defects of the same class — one of them destroying a real
@@ -1118,7 +1381,7 @@ Two invariants now govern every bridging rule:
    integer `n =\n120` is legitimate — is handled by the whitespace-only joiner, which
    deletes nothing.
 
-Corrections to the filed diagnoses, since MetaESCI is writing this up:
+Corrections to the filed diagnoses, since downstream is writing this up:
 
 - **O-1 is not a capture bleed.** No effect-size capture pattern is involved; every
   one already terminates at its own value. `normalize_text` deletes the value before
@@ -1153,12 +1416,12 @@ Corrections to the filed diagnoses, since MetaESCI is writing this up:
   into range. A malformed p is now detected and reported honestly.
 - **The parse-time plausibility guard nulled values silently.** A suppressed effect
   size was indistinguishable downstream from a statistic that reported none — the
-  more dangerous of the two O-1 failure modes, and by MetaESCI's count the majority
+  more dangerous of the two O-1 failure modes, and by downstream's count the majority
   (27 of 42) of the corrupted rows. The guard now records
   `effect_guard_rejected` / `effect_guard_reason`, surfaced as an uncertainty message
-  with `extraction_suspect = TRUE` (MetaESCI O-1 request 2).
+  with `extraction_suspect = TRUE` (downstream O-1 request 2).
 
-## MetaESCI O-3, O-4, O-5
+## downstream O-3, O-4, O-5
 
 - **O-3 — `ci_referent`** (new column). A row carrying a regression coefficient can
   print its interval on the unstandardized `b` scale or the standardized `beta` scale,
@@ -1176,7 +1439,7 @@ Corrections to the filed diagnoses, since MetaESCI is writing this up:
   through to Cohen's `f2 = r^2/(1-r^2)`, a different scale. `r(1526) = .32, R2 = 0.10`
   (r^2 = .1024, a correct APA-rounded report) shipped WARN, and a hand-perfect
   `R2 = 0.1024` WARNed too. Now promoted to a computed variant when an `R2` is
-  reported, and both PASS. MetaESCI attributes this to the `r = c("r", "R2")` validity
+  reported, and both PASS. Downstream attributes this to the `r = c("r", "R2")` validity
   list; that list is right — R-squared is a legitimate thing to report for a
   correlation — the defect was the missing variant.
 - **O-5 — RULING: a z-test reporting an odds ratio is not anomalous**, and the WARN
@@ -1196,8 +1459,8 @@ Corrections to the filed diagnoses, since MetaESCI is writing this up:
   `263.95% CI` yielded `ci_level = 2.6395`, `ci_level_mismatch = NA` and status PASS.
   A coverage probability of 1 or more is not implausible but impossible. A plausibility
   guard on a two-sided quantity has to be two-sided.
-- **Two deferred MetaESCI E9 items re-verified at 0.6.20.** Pipe-delimited table rows
-  parse to one clean PASS row (confirms MetaESCI's finding that this closed silently).
+- **Two deferred downstream E9 items re-verified at 0.6.20.** Pipe-delimited table rows
+  parse to one clean PASS row (confirms downstream's finding that this closed silently).
   The trailing `BF10 > 100)` dedup produces no duplicate across four constructed
   shapes; the original input was never filed, so this is as far as it can be taken
   from this side.
@@ -1211,7 +1474,7 @@ two cross-model reviews complete).
 - **QA — `effect_guard_rejected` / `effect_guard_reason` were write-only columns.**
   The parser produced them and `check.R` consumed them internally (uncertainty message
   and `extraction_suspect`), but they never reached `check_text()`'s output — while
-  `API.md` documented them as columns. That is MetaESCI's O-1 request 2 only
+  `API.md` documented them as columns. That is downstream's O-1 request 2 only
   half-delivered: the point was to let a consumer *filter* on suppression, which needs
   a column to filter on. Now emitted at every output constructor, carrying the real
   values wherever they are in scope, and added to the E3 schema contract so a future
@@ -1222,7 +1485,7 @@ two cross-model reviews complete).
   computed variant — so it matched the implied z against the reported **odds ratio**
   and published `matched_value = 2.460` with `delta_effect = 0.630`: an odds ratio
   minus a z-statistic. It also moved with the confidence level (0.234 at a 90% CI),
-  which no effect-size delta can do, and `delta_effect` is exactly the field MetaESCI's
+  which no effect-size delta can do, and `delta_effect` is exactly the field downstream's
   pipeline reads. The variant carried no CI of its own, so it contributed nothing to
   the CI-candidate collector either — pure liability. The diagnostic now lives only in
   the uncertainty message. The sibling `b_coeff` variant was tested for the same
@@ -1234,7 +1497,7 @@ two cross-model reviews complete).
 
 - **Test suite: 2849 passing, 0 failures** (was 2751 / 1054 blocks; now 1084 blocks).
   30 new `test_that` blocks in `test-v0620-normalizer-value-deletion.R` and
-  `test-v0620-metaesci-o3-o4-o5.R`, **every one authored against the unfixed code and
+  `test-v0620-downstream-o3-o4-o5.R`, **every one authored against the unfixed code and
   watched to fail first** (26, 27 and 6 failures across the three rounds).
 - **Cross-model review of the diff**, both reviewers instructed to find wrong numbers
   rather than to approve. Codex raised three surviving paths and Sonnet three more;
@@ -1244,7 +1507,7 @@ two cross-model reviews complete).
   silently rewrote to `0.33`; and sentence-final `p = 1.` being rejected as
   out-of-range). Both are fixed and pinned.
 - **Whole-corpus row-count delta** (11 cached real-article texts, 215 rows): **0 rows
-  gained, 0 lost, 1 verdict change** — reinstating the per-release practice MetaESCI
+  gained, 0 lost, 1 verdict change** — reinstating the per-release practice downstream
   notes lapsed after 0.3.1. The single change is the defect caught in the wild:
   `spps.txt` loc 216 is a two-column merge where 0.6.19's bridging rule deleted the
   article's stated `d = 0.33, 95% CI [0.09, 0.57]` and manufactured
@@ -1307,7 +1570,7 @@ phrases, so correcting them would have looked like a regression. Both now pin
 **behaviour plus semantic content** and add an explicit `expect_false` on the
 retracted phrase — verified RED against the old wording before being restored.
 
-Full report: `docs/FINDINGS_2026-08-05_rejection_reaudit.md`.
+Full report: `communications/FINDINGS_2026-08-05_rejection_reaudit.md`.
 
 # effectcheck 0.6.18
 
@@ -1535,7 +1798,7 @@ honest design labels E2, self-consistent deltas E4, Cochran-Q sample-size guard
 E5, multiplicity-adjusted-p guard E6, own-clause N binding E7, reproducible
 repro-code E8, and two recovered PARSE-MISS classes E10/E11). Two further audit
 findings were REFUTED by local reproduction and documented rather than "fixed"
-(see `docs/TRIAGE_iterate_2026-08-03.md`).
+(see `communications/TRIAGE_iterate_2026-08-03.md`).
 
 - **E7 / E-zrow-subsample-n** — a clause stating its own denominator
   (`"113/133 ... versus 20/133 ..., z = 7.98"`) now binds that N instead of a
@@ -1774,7 +2037,7 @@ re-audit over the fixed-3 + rotating set).**
   routinely an inequality; the reported CI is authoritative). Whole-corpus zero-FP sweep: 0 spurious
   `hazard_ratio` rows on all 12 papers. **Scope note:** s41598-023-50401-z's 58 hazard ratios are ALL
   in a docpluck-column-shredded survival table with no clean prose form, filed as docpluck DP-5
-  (`docs/DOCPLUCK_HANDOFF_2026-07-02.md`) — a docpluck extraction defect, not an effectcheck parse gap.
+  (the 2026-07-02 extraction-tool defect log) — a docpluck extraction defect, not an effectcheck parse gap.
   Regression tests in `tests/testthat/test-v0613-hazard-ratio.R`.
 
 - **E-mcnemar-chisq-OR** (cycle-2 canary re-audit, collabra.37122 loc 305) — a 1-df chi-square whose
@@ -1833,7 +2096,7 @@ are documented in API.md. Cycle-3's HR feature is orthogonal to the canary paper
 renders were byte-IDENTICAL to their cycle-2 PASS renders (a deterministic diff carries the prior
 verdict), and cog_emo was re-audited PASS. Full suite 964 test_that blocks / 0 fail, `R CMD check
 --as-cran` 0E/0W. Residual canary findings are all docpluck-boundary and filed to
-`docs/DOCPLUCK_HANDOFF_2026-07-02.md` (DP-4 collabra.37122 loc-202 figure-caption CI truncation; DP-5
+the 2026-07-02 extraction-tool defect log (DP-4 collabra.37122 loc-202 figure-caption CI truncation; DP-5
 s41598 shredded survival table; DP-6 cog_emo garbled Table-7 duplicate; DP-3
 collabra.57785 Table-8 Importance d/CI+design re-confirmed).
 
@@ -1883,7 +2146,7 @@ Purchases replication+extension of Carter & Gilovich 2012).**
 
 Full suite **924 test_that blocks / 0 fail**; `R CMD check --as-cran` 0E/0W. Regression tests in
 `tests/testthat/test-v0612-ownclause-n-and-repcol-dedup.R`. Two docpluck text-extraction defects
-were filed (NOT effectcheck defects) to `docs/DOCPLUCK_HANDOFF_2026-07-02.md`: DP-1 (collabra.77859
+were filed (NOT effectcheck defects) to the 2026-07-02 extraction-tool defect log: DP-1 (collabra.77859
 `camelot_t10` Study-1 Table-1 binds the wrong column as t/d/df/CI — delivered `t = 0.6` where the
 gold reads `t = 5.65`, so effectcheck faithfully rendered docpluck's wrong values), DP-2
 (collabra.77859 "Expensive" manipulation-check row `t = 15.57` not delivered as a flattened_row). A
@@ -1891,7 +2154,7 @@ standalone-Bayes-factor gap on collabra.90203 (bare `BF01 = 0.11` / `1.24` not e
 surfaced for a product decision rather than fixed — the paper reports 13 `BF01 =` values of which
 the gold wants only 2 as standalone results, and no parse-pattern rule reliably separates the 2
 primary-analysis Bayes factors from the 11 supporting/companion ones (see
-`docs/TRIAGE_iterate_2026-07-02.md` F1).
+`communications/TRIAGE_iterate_2026-07-02.md` F1).
 
 # effectcheck 0.6.11
 
@@ -1931,7 +2194,7 @@ Sonnet-watches-Opus over the v0.6.10 canary set).**
   silently dropped. New `test_type = "mcnemar_or"` + `pat_mcnemar_or` (case-insensitive, "McNemar"
   + an "OR = …" anchor within one sentence) routes the row to an extraction-only NOTE surfacing
   the OR + CI + p. Recovers 3 of the 4; the 4th has its "McNemar" anchor severed from its OR
-  clause by a docpluck paragraph-break (filed to docs/DOCPLUCK_HANDOFF_2026-07-01.md DP-1).
+  clause by a docpluck paragraph-break (filed to the 2026-07-01 extraction-tool defect log DP-1).
 
 Full suite 917 test_that blocks / 0 fail, `R CMD check --as-cran` 0E/0W. Regression tests
 in `tests/testthat/test-v0611-origcol-and-mdhl-n.R`. Surfaced alongside three new corpus
@@ -1996,7 +2259,7 @@ participants") is NOT rewritten. This is the same class of character-level norma
 the existing U+2212-minus and U+FFFD-eta-squared recovery. +11 results recovered on the SPPS
 paper; ZERO change on the canary + sweep corpus (they contain no U+00BC). Regression tests in
 `tests/testthat/test-v068-equals-glyph-u00bc.R`. The corruption is also filed to docpluck
-(`docs/DOCPLUCK_HANDOFF_2026-06-29.md` §5) as the preferred upstream fix so all consumers
+(the 2026-06-29 extraction-tool defect log §5) as the preferred upstream fix so all consumers
 benefit. Full suite 904 test_that blocks / 0 fail; `R CMD check --as-cran` 0E/0W.
 
 The same SPPS new-corpus audit filed four docpluck table-extraction defects (sign-stripped
@@ -2073,7 +2336,7 @@ which are effectcheck defects; see the handoff §5.
 Full suite 901 test_that blocks / 0 fail; `R CMD check --as-cran` 0E/0W. Regression tests
 in `tests/testthat/test-v068-*.R` (6 files). One residual item filed (non-canary): collabra.23443
 Table-5's 4 one-sample-vs-mu=0 rows arrive as docpluck flattened rows whose one-sample design
-lives only in surrounding body prose (not on the row) — routed to `docs/DOCPLUCK_HANDOFF_2026-06-29.md`
+lives only in surrounding body prose (not on the row) — routed to the 2026-06-29 extraction-tool defect log
 (docpluck enhancement: carry the table's introducing design onto the flattened row), alongside the
 docpluck table-shred / untyped-est handoffs.
 
@@ -2103,7 +2366,7 @@ the AI stats gold. Full suite 877 test_that blocks / 0 fail, `R CMD check --as-c
   reason is **refuted** — the symbol is 4 filled vector curves with no char object, not a
   mis-encoded font glyph — and "confirmed" rested on a circular check (counting `η` in the
   extracted text, i.e. asking the extractor under suspicion whether its own output was
-  complete). See `docs/REPLY_FROM_DOCPLUCK_2026-06-25.md`.)*
+  complete). See `communications/REPLY_FROM_DOCPLUCK_2026-06-25.md`.)*
   An effect-only ANOVA cell (typed `eta2` + CI, blank F) becomes a `table_estimate` row
   named `etap2`. An UNtyped `est` is still left unbound (no regression).
 
@@ -2111,7 +2374,7 @@ the AI stats gold. Full suite 877 test_that blocks / 0 fail, `R CMD check --as-c
   NOTE (r + CI shown, estimate-in-CI invariant checked) instead of collapsing to a bare
   SKIP.** docpluck's typed Table-10-style r-cells (DP-5) arrive with their CI but no usable
   N — docpluck mis-binds the per-row `n` to the comparison column (filed back to docpluck in
-  `docs/REPLY_TO_DOCPLUCK_2026-06-26.md`). Such a row adopts the r as its own effect and its
+  `communications/REPLY_TO_DOCPLUCK_2026-06-26.md`). Such a row adopts the r as its own effect and its
   reported CI is consistency-checked (a dropped-minus / r-outside-CI is flagged via
   `sign_ci_violation`), so SKIP ("nothing was checked") understated it; it now stays NOTE.
   An r-cell with neither a CI nor df/N is unchanged (conservative no-CI route).
@@ -2298,7 +2561,7 @@ Regression tests in `tests/testthat/test-v064-docpluck-table-rows.R`.
 # effectcheck 0.6.3
 
 Three fixes from the 2026-06-16 escicheck-iterate canary audit
-(`docs/TRIAGE_iterate_2026-06-16.md`):
+(`communications/TRIAGE_iterate_2026-06-16.md`):
 
 - **Clinical-trial N now sums the per-arm totals (E1).** For
   `test_type %in% {RR, rdpct}`, when both per-arm totals are parsed, `N` is
@@ -2441,7 +2704,7 @@ follow-through promised in the v0.5.16-18 NEWS entries.
 * **New per-row columns**: `arm1_events`, `arm1_total`, `arm2_events`,
   `arm2_total` -- the captured per-arm cells (NA for any row not parsed
   as RR or rdpct, or where the slash-count clause was absent). Additive
-  schema change; does not break MetaESCI-critical columns.
+  schema change; does not break downstream-critical columns.
 
 Regression tests in `tests/testthat/test-v060-rr-rdpct-mdhl-verification.R`.
 Closes the `2026-05-25-v06x-clinical-trial-compute-branches` handoff.
@@ -2881,7 +3144,7 @@ Working R reference implementation in the ESCImate web-app repo at
   recomputation paths (`p_computed`, effect sizes, `decision_error` are all NA).
 
 * New tier-5 verification fixture (`tests/testthat/test-deception-arena.R`)
-  documents the ScienceArena `stats-extraction-v1` adapter contract: every row
+  documents the `stats-extraction-v1` adapter contract: every row
   corresponding to a deceptive stat is flagged by at least one of
   `decision_error`, `extraction_suspect`, `insufficient_data`, `df_arity_mismatch`,
   `ambiguity_level == "highly_ambiguous"`, or `status %in% c("WARN", "ERROR")`.
@@ -2894,7 +3157,7 @@ Working R reference implementation in the ESCImate web-app repo at
 
 # effectcheck 0.3.5
 
-Addresses MetaESCI v0.3.5 request: CI-audit feature pack. Adds CI computation
+Addresses downstream v0.3.5 request: CI-audit feature pack. Adds CI computation
 coverage for previously-uncomputable effect-size families (OR, R², standardized
 β, partial r, semi-partial r) and new per-row metadata for characterizing CI
 reporting quality at scale (precision tracking, completeness flags, level
@@ -2907,15 +3170,15 @@ Purely additive — no v0.3.4 behavior changes.
 * `ci_OR_all()` — odds-ratio CI via Wald-on-log(OR). Three sources for SE:
   (1) supplied `SE_logOR`, (2) Fisher exact CI from a 2×2 cell vector,
   (3) Wald inversion back-derived from a reported p-value when neither is
-  available. Resolves MetaESCI 1A.
+  available. Resolves downstream 1A.
 * `ci_R2_all()` — R² CI routed through `ci_etap2_all()` (R² ≡ partial η² in
   one-predictor / single-omnibus regression). Methods retagged with
   `_via_etap2` suffix so the matcher distinguishes R²-routed from native
-  η²-routed CIs. Resolves MetaESCI 1B.
+  η²-routed CIs. Resolves downstream 1B.
 * `ci_standardized_beta_all()` — normal-approximation CI on standardized β.
   Uses supplied `SE_beta` when available, else back-derives from t-stat.
 * `ci_partial_r_all()` and `ci_semi_partial_r_all()` — Fisher-z transform
-  CIs for partial and semi-partial correlations. Resolves MetaESCI 1C.
+  CIs for partial and semi-partial correlations. Resolves downstream 1C.
 
 ## Parse: decimal-place precision tracking
 
@@ -2923,23 +3186,23 @@ Purely additive — no v0.3.4 behavior changes.
   raw regex match strings *before* `numify()` (which loses trailing zeros).
 * Four new output columns capture APA-7 precision: `effect_reported_decimals`,
   `ciL_reported_decimals`, `ciU_reported_decimals`, `stat_value_decimals`.
-  Resolves MetaESCI 2A.
+  Resolves downstream 2A.
 
 ## Check: CI audit metadata (Phase 6)
 
 * `ci_expected` (logical) — TRUE when row carries an effect size from a
   family for which CIs are normative reporting (d/g/r/η²/η_p²/R²/OR/V/φ).
 * `ci_reported` (logical) — TRUE when both bounds parsed (F-test df
-  artifact already excluded at parse time). Resolves MetaESCI 2B.
+  artifact already excluded at parse time). Resolves downstream 2B.
 * `ci_level_mismatch` (character) — categorical `{match, 90_vs_95_anova,
   implausible, unstated_assumed_95, NA}`. Compares parsed level against
-  the APA-95% canonical default. Resolves MetaESCI 2C.
+  the APA-95% canonical default. Resolves downstream 2C.
 * `ci_clipped_to_bound` (character) — `{none, lower_0, upper_1, both, NA}`
   for bounded ES families (η², η_p², R², ω², ε², generalized η², V, φ).
-  Resolves MetaESCI 2D.
+  Resolves downstream 2D.
 * `ci_symmetry_class` (character) — categorical refinement of the existing
   `ci_symmetry` ratio: `{symmetric_expected, asymmetric_expected,
-  symmetric_unexpected, asymmetric_unexpected, NA}`. Resolves MetaESCI 2E.
+  symmetric_unexpected, asymmetric_unexpected, NA}`. Resolves downstream 2E.
 
 ## Frontend (escimate.app)
 
@@ -2955,7 +3218,7 @@ Purely additive — no v0.3.4 behavior changes.
 
 # effectcheck 0.3.4
 
-Addresses MetaESCI v0.3.4 request: 42 Category A ERROR false positives where
+Addresses downstream v0.3.4 request: 42 Category A ERROR false positives where
 reported eta2/etap2 was cross-matched to cohens_f/cohens_f2 without detection.
 
 ## Check: Phase 8D Signal 14 — eta/f cross-family detection (E11)
@@ -2968,12 +3231,12 @@ reported eta2/etap2 was cross-matched to cohens_f/cohens_f2 without detection.
   both eta2 and cohens_f are deterministic from F, so any mismatch means the
   reported value came from a different analysis.
 * Symmetric: also handles cohens_f reported + eta variant matched.
-* Expected impact: MetaESCI Category A ERRORs 42 -> ~6, raw ERROR rate
+* Expected impact: downstream Category A ERRORs 42 -> ~6, raw ERROR rate
   0.128% -> ~0.06%.
 
 # effectcheck 0.3.3
 
-Follow-up to 0.3.2 addressing MetaESCI v0.3.3 request: the E8 pre-strip
+Follow-up to 0.3.2 addressing downstream v0.3.3 request: the E8 pre-strip
 was a no-op on real docpluck output.
 
 ## Parse: thousand-sep comma strip now handles spaces after comma (E8 follow-up)
@@ -2981,7 +3244,7 @@ was a no-op on real docpluck output.
 * The v0.3.2 regexes in `parse.R` required `t(2,758)` with no space —
   but docpluck v1.4.4's A4 paren-spacing normalizer always emits
   `t(2, 758)` with a space. The fix matched the pre-A4 raw text we'd
-  been shown in the MetaESCI report, not the actual post-normalizer
+  been shown in the downstream report, not the actual post-normalizer
   input. Net effect in v0.3.2: zero rows recovered on the PSPB article
   `10.1177/0146167220905712`.
 * Fix: add `\s*` after the comma in all three pre-strip regexes
@@ -2992,14 +3255,14 @@ was a no-op on real docpluck output.
 
 # effectcheck 0.3.2
 
-Follow-up to 0.3.1 addressing MetaESCI requests E8 and E10.
+Follow-up to 0.3.1 addressing downstream requests E8 and E10.
 
 ## Parse: thousand-separator commas in test-statistic parens (E8, HIGH)
 
 * `parse.R` / `normalize_text()` previously let the decimal-comma
   converter mis-normalize `t(2,758)` as `t(2.758)`, after which `parse.R`
   silently read it as Welch df=2.758 and back-computed N≈5. In the
-  MetaESCI 339-PDF pre-test, PSPB article `10.1177/0146167220905712`
+  downstream 339-PDF pre-test, PSPB article `10.1177/0146167220905712`
   dropped 47 rows due to this, since every subsequent check treated the
   garbage df as genuine and the results were rejected downstream.
 * Fix: `normalize_text()` now strips thousand-separator commas from
@@ -3027,7 +3290,7 @@ Follow-up to 0.3.1 addressing MetaESCI requests E8 and E10.
   solves for the noncentrality parameters whose α/2 and 1−α/2 quantiles
   equal the observed t = dz·√n. The normal-approximation fallback is
   unchanged and still available when inversion fails.
-* MetaESCI reported 20 divergent rows between the legacy
+* Downstream reported 20 divergent rows between the legacy
   `run_escicheck.R` pipeline and 0.3.1. Under 0.3.2 the new
   implementation agrees with MBESS on the fixture
   `dz = 0.55, n = 9, 95% CI`, which is what legacy `ci.sm` returned —
@@ -3065,8 +3328,8 @@ Follow-up to 0.3.1 addressing MetaESCI requests E8 and E10.
 ## E9 — Smaller parse.R gaps (deferred, needs repro bundle)
 
 * The 13-row residual across 5 PSPB/JESP/RSOS/MP sources needs the
-  staged `.txt` files from MetaESCI's
-  `data/results/subset_metaesci_regression_textstaging/` directory,
+  staged `.txt` files from downstream's
+  `data/results/subset_downstream_regression_textstaging/` directory,
   which was not available at the time of triage. Will investigate when
   repro bundle is attached.
 
@@ -3075,7 +3338,7 @@ Follow-up to 0.3.1 addressing MetaESCI requests E8 and E10.
 This is a housekeeping release packaging the v0.3.0f → v0.3.0n bug-fix
 wave with a stable CRAN-style version number, batch-stdout hygiene, a
 schema stability test, and a new `decision_error_reason` diagnostic
-column. Addresses MetaESCI requests E1–E4 and E7.
+column. Addresses downstream requests E1–E4 and E7.
 
 ## DESCRIPTION version sync (E2)
 
@@ -3103,7 +3366,7 @@ column. Addresses MetaESCI requests E1–E4 and E7.
 ## Schema stability test (E3)
 
 * Added `tests/testthat/test-schema-stability.R`. The test asserts
-  that `check_text()` returns a tibble containing every MetaESCI-
+  that `check_text()` returns a tibble containing every downstream-
   critical column (`source`, `check_scope`, `check_type`, `status`,
   `uncertainty_level`, `uncertainty_reasons`,
   `unknown_groups_downgraded`, `r2_cross_pairing_detected`,
@@ -3129,20 +3392,20 @@ column. Addresses MetaESCI requests E1–E4 and E7.
     * `ns_label_vs_computed_sig` — paper reports "ns"/"not
       significant" but recomputed p < alpha.
     * `other` — catch-all for future decision-error variants.
-* Downstream analysis (e.g. MetaESCI `analysis.Rmd`) can now break
+* Downstream analysis (e.g. Downstream `analysis.Rmd`) can now break
   decision errors down by mechanism without reparsing `raw_text`.
 
-## Expected row-count delta vs v0.3.0f (E4 — MetaESCI batch guidance)
+## Expected row-count delta vs v0.3.0f (E4 — downstream batch guidance)
 
-On the MetaESCI `metaesci_regression` 200-PDF frozen benchmark (seed 42),
+On the downstream `downstream_regression` 200-PDF frozen benchmark (seed 42),
 comparing v0.3.0f (last full batch) to v0.3.0n / 0.3.1:
 
 | subset               | v0.3.0f rows | v0.3.0n rows | delta          | v0.3.0f ERRORs | v0.3.0n ERRORs |
 |----------------------|-------------:|-------------:|---------------:|---------------:|---------------:|
 | meta_psychology (139)|          464 |          464 |             0  |              0 |              0 |
-| metaesci_regression  |        2,209 |        3,385 |  +1,176 (+53%) |             13 |              0 |
+| downstream_regression  |        2,209 |        3,385 |  +1,176 (+53%) |             13 |              0 |
 
-The +53% row-count delta on `metaesci_regression` is driven by
+The +53% row-count delta on `downstream_regression` is driven by
 **parser gains**, not a config-default change (`plausibility_filter`
 and `try_tables` defaults are unchanged). The new rows come from:
 
@@ -3154,7 +3417,7 @@ and `try_tables` defaults are unchanged). The new rows come from:
 
 Downstream consumers **must** re-derive all aggregate numbers from a
 fresh v0.3.1 batch — old v0.3.0f aggregates are not directly
-comparable. The 13 → 0 ERROR reduction on `metaesci_regression` is
+comparable. The 13 → 0 ERROR reduction on `downstream_regression` is
 real (v0.3.0n's F ≈ 0 crash fix + multi-predictor-beta fix), not
 artefactual.
 
@@ -3163,7 +3426,7 @@ No columns were added or removed vs v0.3.0n other than the new
 
 # effectcheck 0.3.0n
 
-## Bug fixes (MetaESCI v0.3.0m batch deep-dive)
+## Bug fixes (downstream v0.3.0m batch deep-dive)
 
 * Fixed ~100 F-test crashes (`'list' object cannot be coerced to type
   'double'`) for `F` near zero. The v0.3.0m defensive guard covered Phase 5
@@ -3180,7 +3443,7 @@ No columns were added or removed vs v0.3.0n other than the new
 
 # effectcheck 0.3.0m
 
-## Bug fixes (MetaESCI batch validation)
+## Bug fixes (downstream batch validation)
 
 * Fixed 153 false positive ERRORs from unstandardized regression
   coefficients (`b = 0.29`) being compared to computed standardized beta.
@@ -3264,7 +3527,7 @@ No columns were added or removed vs v0.3.0n other than the new
 
 ## Parser fixes and artifact detection
 
-Addresses 13 false positive ERRORs from MetaESCI v0.3.0c validation
+Addresses 13 false positive ERRORs from downstream v0.3.0c validation
 (132,537 results, 24 ERRORs). Expected: 24 -> ~10 ERRORs.
 
 ### Bug fixes
@@ -3312,7 +3575,7 @@ Addresses 13 false positive ERRORs from MetaESCI v0.3.0c validation
 
 ## Design ambiguity improvements
 
-Addresses 399 remaining ERRORs from MetaESCI v0.2.7 audit (132,499 results).
+Addresses 399 remaining ERRORs from downstream v0.2.7 audit (132,499 results).
 Philosophy: compute ALL plausible alternatives under different design assumptions;
 if ANY alternative matches, downgrade severity.
 
@@ -3359,7 +3622,7 @@ if ANY alternative matches, downgrade severity.
 
 ### Documentation
 
-* Removed working documents from public repo (FEEDBACK_RESPONSE, METAESCI_REPORT,
+* Removed working documents from public repo (FEEDBACK_RESPONSE, a consumer report,
   DEVELOPMENT, testingai) — moved to archive/
 * Updated API.md to version 0.2.7 with `unknown_groups_action` and `min_confidence`
   parameter documentation
@@ -3371,7 +3634,7 @@ if ANY alternative matches, downgrade severity.
 
 ## Design ambiguity + decision error fixes
 
-Based on MetaESCI analysis of 132,499 results from 8,415 articles. These changes
+Based on downstream analysis of 132,499 results from 8,415 articles. These changes
 reduce the ERROR false positive rate from ~3.9% to ~0.8%.
 
 ### Design-ambiguous t-test downgrade (check.R)
@@ -3403,7 +3666,7 @@ reduce the ERROR false positive rate from ~3.9% to ~0.8%.
 
 ## PDF extraction quality improvements
 
-Based on MetaESCI extraction analysis of 121,040 results from 8,415 PDFs across 7 journals.
+Based on downstream extraction analysis of 121,040 results from 8,415 PDFs across 7 journals.
 These changes reduce PDF extraction artifacts affecting statistical parsing from ~6.5% to ~0.6%.
 
 ### Header/footer stripping (utils-pdf.R)
@@ -3452,7 +3715,7 @@ These changes reduce PDF extraction artifacts affecting statistical parsing from
 
 ## Validation-driven improvements
 
-Based on comprehensive validation of 19,690 results across 7 journals (MetaESCI).
+Based on comprehensive validation of 19,690 results across 7 journals (downstream).
 
 ### Bug fixes (Category A — 673 results)
 

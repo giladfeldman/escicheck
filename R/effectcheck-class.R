@@ -3,12 +3,63 @@
 #' This file defines the effectcheck S3 class and its associated methods
 #' for printing, summarizing, and plotting results.
 
-# Safe version getter - works both as installed package and when source()'d
+# Version getter - works both as an installed package and when source()'d.
+#
+# A FAILED LOOKUP MUST NEVER LOOK LIKE A VERSION (2026-09-04).
+#
+# This used to fall back to the literal "0.2.0". DESCRIPTION has said 0.7.x for
+# five minor versions, so any result produced under a failed lookup -- a
+# source()'d checkout, a broken install, stale dist metadata -- was stamped
+# `effectcheck_version = "0.2.0"` and no consumer could distinguish that from a
+# genuine 0.2.0 run. A wrong provenance value is worse than an absent one
+# precisely because it looks like provenance, and this package's numbers go
+# into manuscripts.
+#
+# Bumping the literal to the current version would re-arm the identical trap at
+# the next release, so the fallback is an explicit marker instead: a package
+# that is not installed reports "not-installed", and one whose version cannot
+# be read reports "unreadable". Neither can be mistaken for a release, and the
+# two causes stay distinguishable from each other. Same rule, same vocabulary,
+# as a sibling R service's version-reporting module (T-0003).
+#
+# The presence check is `find.package()`, deliberately, and NOT the
+# `system.file()` that the sibling implementation uses: pkgload SHIMS
+# `system.file` into a package's imports environment during `load_all()`
+# (measured 2026-09-04 -- shim env "pkgload"), so under the dev/test loader
+# that call answers about the source tree rather than about an install, and the
+# discriminator would silently mean different things depending on which loader
+# was active. `find.package` is unshimmed, is what `packageVersion` itself
+# resolves through, and with `quiet = TRUE` returns character(0) rather than
+# signalling, so the two branches stay independent.
+#
+# Pinned by tests/testthat/test-version-fallback-honesty.R, which also greps
+# R/ for any version literal returned from an error handler.
 .effectcheck_version <- function() {
   tryCatch(
-    as.character(utils::packageVersion("effectcheck")),
-    error = function(e) "0.2.0"
+    {
+      if (length(find.package("effectcheck", quiet = TRUE)) == 0L) {
+        "not-installed"
+      } else {
+        as.character(utils::packageVersion("effectcheck"))
+      }
+    },
+    error = function(e) "unreadable"
   )
+}
+
+# The markers above are correct as data and wrong as display text: a footer
+# reading "EffectCheck vunreadable" looks like a corrupted version string
+# rather than a statement that the version could not be determined. Every site
+# that glues a literal "v" in front of the version uses this instead.
+.EFFECTCHECK_VERSION_MARKERS <- c("not-installed", "unreadable")
+
+.effectcheck_version_display <- function() {
+  ver <- .effectcheck_version()
+  if (ver %in% .EFFECTCHECK_VERSION_MARKERS) {
+    paste0("(version ", ver, ")")
+  } else {
+    paste0("v", ver)
+  }
 }
 
 #' Create an effectcheck object

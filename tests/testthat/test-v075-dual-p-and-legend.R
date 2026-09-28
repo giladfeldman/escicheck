@@ -8,7 +8,7 @@
 # A reader of the output could not tell a permutation p had been reported at
 # all. It now lands in `p_reported_secondary`, a sibling COLUMN: a second ROW
 # would change nrow() for every consumer and silently shift every downstream
-# index, and MetaESCI's field registry is frozen at v0.4.0, so it already
+# index, and downstream's field registry is frozen at v0.4.0, so it already
 # tolerates unknown columns and cannot tolerate unknown rows.
 #
 # THE LEGEND DEFECT. Found while verifying Issue D against the source. PNAS

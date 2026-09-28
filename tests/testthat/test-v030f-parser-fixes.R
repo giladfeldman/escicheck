@@ -1,7 +1,7 @@
 # test-v030f-parser-fixes.R
 # Tests for v0.3.0f fixes: capital D, generalized eta-squared,
 # d-vs-t artifact detection, d>10 guard
-# Source: MetaESCI v0.3.0c error analysis (132K results, 24 ERRORs)
+# Source: downstream v0.3.0c error analysis (132K results, 24 ERRORs)
 
 library(testthat)
 
@@ -291,7 +291,7 @@ test_that("t-test + eta2 not confused with d", {
 # =========================================================================
 # Fix 7: F-test df falsely parsed as CI bounds (pat_CI4 false positive)
 # F(df1, df2) = val matches pat_CI4's (number, number) pattern
-# Bug: 53,780 false CIs in MetaESCI where ciL=df1, ciU=df2
+# Bug: 53,780 false CIs in downstream where ciL=df1, ciU=df2
 # =========================================================================
 
 test_that("F-test df NOT parsed as CI bounds", {

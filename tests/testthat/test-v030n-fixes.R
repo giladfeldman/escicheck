@@ -1,5 +1,5 @@
 # test-v030n-fixes.R
-# Regression tests for v0.3.0n fixes (MetaESCI batch deep-dive 2026-04-07)
+# Regression tests for v0.3.0n fixes (downstream batch deep-dive 2026-04-07)
 #   Bug 1: F ~= 0 crash via list-to-double coercion in CI fallback path
 #   Bug 2: Beta masquerade — multi-predictor regression (b != beta, both populated)
 

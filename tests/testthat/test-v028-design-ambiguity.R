@@ -182,18 +182,31 @@ test_that("F-test with R2 and small delta is unaffected (Fix D regression guard)
 # Fix E: Cramer's V multi-m
 # ===========================================================================
 
-test_that("Chi-square V tries multiple m values when df allows (Fix E)", {
-  # chi2(4, N=200) = 20.0: df=4 could be m=1 (5×2), m=2 (3×3), m=4 (5×5)
-  # V with m=1: sqrt(20/(200*1)) = 0.316
-  # V with m=2: sqrt(20/(200*2)) = 0.224
-  # V with m=4: sqrt(20/(200*4)) = 0.158
-  # Report V=0.22 → should match m=2 best
+test_that("Chi-square V REPORTS every m the df allows, and does not pick by fit (v0.7.9)", {
+  # BEHAVIOUR CHANGED v0.7.9 on Gilad's ruling of 2026-09-04. The original "Fix E"
+  # asserted that the table shape should be chosen by whichever m brought the
+  # computed V closest to the REPORTED V. That is circular: it selects the
+  # parameter using the number being graded, which is the same reasoning
+  # `.attach_matched_r_df()`'s docstring already refuses ("selecting a df by which
+  # one makes the reported CI reproduce would be circular").
+  #
+  # Measured consequence, 2026-09-04: N=500, chi-square(4)=20.00, reported V=0.20
+  # -- m=1 yields exactly 0.20 -- passed as a clean match on a table shape the
+  # document never states.
+  #
+  # df=4 is a 5x2 table (m=1, V=0.316), a 3x3 (m=2, V=0.224) or a 5x5 (m=4,
+  # V=0.158) for N=200. The document does not say which. So the tool now reports
+  # all of them and publishes no confident verdict.
   r <- check_text("chi2(4, N = 200) = 20.0, p < .001, V = 0.22")
   df <- as.data.frame(r)
-  if (nrow(df) > 0 && !is.na(df$matched_value)) {
-    expect_true(abs(df$matched_value - 0.224) < abs(df$matched_value - 0.316),
-      info = "Should use m=2 (V≈0.224) rather than m=1 (V≈0.316) for best match")
-  }
+  expect_equal(nrow(df), 1)
+
+  expect_identical(as.character(df$status[1]), "NOTE",
+    info = "an effect computed on an undetermined table shape must not publish PASS")
+  reasons <- as.character(df$uncertainty_reasons[1])
+  expect_true(grepl("AMBIGUOUS TABLE SHAPE", reasons, fixed = TRUE))
+  expect_true(grepl("m=1", reasons, fixed = TRUE) && grepl("m=2", reasons, fixed = TRUE),
+    info = "every candidate shape and the V it implies must be shown to the reader")
 })
 
 # ===========================================================================

@@ -166,7 +166,7 @@ generate_report <- function(res, out,
       "</title></head><body><h1>", htmlEscape(title),
       "</h1><p>No statistics detected.</p>",
       "<footer style='margin-top:40px;padding-top:10px;border-top:1px solid #ccc;color:#999;font-size:12px;'>",
-      "Checked with EffectCheck v", .effectcheck_version(), " on ", Sys.Date(),
+      "Checked with EffectCheck ", .effectcheck_version_display(), " on ", Sys.Date(),
       "</footer></body></html>"
     )
     writeLines(html, out)
@@ -339,7 +339,7 @@ paste(sprintf("<th>%s</th>", key_cols), collapse = ""),
   }
 
   html <- paste0(html,
-    '<footer>Checked with EffectCheck v', .effectcheck_version(),
+    '<footer>Checked with EffectCheck ', .effectcheck_version_display(),
     ' on ', Sys.Date(), '</footer>
 </body>
 </html>')
@@ -544,7 +544,7 @@ function toggleCard(id){var d=document.getElementById("card-details-"+id);d.clas
   }
 
   html <- paste0(html,
-    '<footer>Checked with EffectCheck v', .effectcheck_version(),
+    '<footer>Checked with EffectCheck ', .effectcheck_version_display(),
     ' on ', Sys.Date(), '</footer>
 </body>
 </html>')

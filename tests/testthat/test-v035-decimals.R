@@ -1,4 +1,4 @@
-## v0.3.5 — Decimal-place precision tracking (MetaESCI request 2A)
+## v0.3.5 — Decimal-place precision tracking (downstream request 2A)
 ## ----------------------------------------------------------------
 ## count_decimal_places() must return the trailing-digit count from
 ## the raw matched string (preserving trailing zeros), and the four

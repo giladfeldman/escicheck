@@ -1,4 +1,4 @@
-# v0.6.20 -- MetaESCI O-3, O-4, O-5, plus the honesty fixes the O-1 sweep found.
+# v0.6.20 -- downstream O-3, O-4, O-5, plus the honesty fixes the O-1 sweep found.
 # Every test authored against the UNFIXED code and watched to fail first.
 
 # ---------------------------------------------------------------------------
@@ -8,7 +8,7 @@
 test_that("a CI centred on the unstandardized b is graded on the b scale", {
   # Before this, the reported interval was compared against the computed
   # STANDARDIZED-beta interval whatever it referred to, so a b-referenced row
-  # failed for a reason with nothing to do with the paper. MetaESCI measured
+  # failed for a reason with nothing to do with the paper. Downstream measured
   # 601/1,048 regression rows mis-dispatched (68.1% agreement when correctly
   # referenced vs a 5.9% pooled headline).
   #
@@ -60,7 +60,7 @@ test_that("an R2 correctly reported for a correlation matches r^2 and passes", {
   # this WARNed, because r_squared was only ever an `alternatives` entry: with no
   # same-type computed counterpart the matcher fell through to Cohen's
   # f2 = r^2/(1-r^2) = .1141, a DIFFERENT SCALE. Even a hand-perfect R2 = 0.1024
-  # WARNed. MetaESCI attributes this to the `r = c("r", "R2")` validity list;
+  # WARNed. Downstream attributes this to the `r = c("r", "R2")` validity list;
   # that list is right -- R2 is a legitimate thing to report for a correlation --
   # the defect was the missing variant.
   res <- effectcheck::check_text("r(1526) = .32, p < .001, R2 = 0.10")
@@ -87,7 +87,7 @@ test_that("an odds ratio on a z-test is not called unusual", {
   # RULING: a Wald z of a logistic coefficient is BY CONSTRUCTION
   # z = ln(OR)/SE(ln OR), and a meta-analytic z tests a pooled log-OR. The OR is
   # the natural effect size in both. The old message asserted a methodological
-  # problem that does not exist, and MetaESCI measured it driving 56.5% of z rows
+  # problem that does not exist, and downstream measured it driving 56.5% of z rows
   # into an anomaly category against 11.2% for t-tests.
   res <- effectcheck::check_text("z = 2.45, p = .014, OR = 1.83")
   reasons <- paste(res$uncertainty_reasons, collapse = " ")
@@ -112,7 +112,7 @@ test_that("the implied z is a message, NEVER an effect-size match", {
   # no same-type variant available the matcher falls back to ANY computed
   # variant, so it matched the implied z against the reported ODDS RATIO and
   # published matched_value = 2.460 with delta_effect = 0.630 -- an odds ratio
-  # minus a z-statistic. `delta_effect` is exactly the field MetaESCI's pipeline
+  # minus a z-statistic. `delta_effect` is exactly the field downstream's pipeline
   # reads. Worse, it moved with the CI level (0.234 at 90%), which no effect-size
   # delta can do.
   for (lvl in c("95", "90")) {
@@ -170,7 +170,7 @@ test_that("an impossible p is never published as a truncated in-range value", {
   expect_true(res$p_out_of_range[1])
 
   # A p the pattern cannot match at all is flagged too, rather than reading
-  # downstream as "this result reported no p-value".
+  # Downstream as "this result reported no p-value".
   expect_true(effectcheck::check_text("t(48) = 2.31, p = 3.3")$p_out_of_range[1])
 })
 
@@ -200,7 +200,7 @@ test_that("the guard flags REACH check_text() output, not just the internal mess
   # parser produced `effect_guard_rejected` / `effect_guard_reason` and check.R
   # consumed them internally (uncertainty message + extraction_suspect), but they
   # never reached the output tibble -- write-only columns, documented in API.md
-  # and absent from the data. MetaESCI O-1 request 2 was explicitly so a consumer
+  # and absent from the data. Downstream O-1 request 2 was explicitly so a consumer
   # could DISTINGUISH a suppressed effect size from an absent one, which needs a
   # column to filter on; the internal message alone does not satisfy it.
   res <- effectcheck::check_text("F(1, 30) = 4.42, p = .04, R2 = 52.2")
@@ -218,7 +218,7 @@ test_that("the guard flags REACH check_text() output, not just the internal mess
 test_that("a value the plausibility guard suppresses is reported as suppressed", {
   # The guard used to null the value and say nothing, leaving the row
   # indistinguishable from "this statistic reported no effect size" -- a false
-  # all-clear, and the majority (27 of 42) of MetaESCI's O-1 corruptions took
+  # all-clear, and the majority (27 of 42) of downstream's O-1 corruptions took
   # exactly this silent-loss path.
   res <- effectcheck::check_text("F(1, 30) = 4.42, p = .04, R2 = 52.2")
   expect_true(is.na(res$effect_reported[1]))

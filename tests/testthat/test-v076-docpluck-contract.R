@@ -168,7 +168,7 @@ test_that("v0.7.6: a form-feed-only chunk does not survive as a result location"
   # R's trimws() default whitespace class is "[ \t\r\n]" and does NOT strip a
   # form feed (verified: nchar(trimws("\f")) == 1), so a form-feed-only chunk
   # passed the nchar(trimws(chunk)) > 0 filters at parse.R:1667/1770/1772 and
-  # shifted every subsequent `location` ordinal. MetaESCI joins on `location`.
+  # shifted every subsequent `location` ordinal. Downstream joins on `location`.
   with_ff <- check_text("First, t(50) = 2.10, p = .04.\n\f\nSecond, t(60) = 3.10, p = .003.")
   no_ff   <- check_text("First, t(50) = 2.10, p = .04.\n\nSecond, t(60) = 3.10, p = .003.")
   expect_equal(nrow(with_ff), nrow(no_ff))

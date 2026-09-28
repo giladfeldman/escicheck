@@ -163,12 +163,30 @@ test_that("v0.2.9d Fix 2: Signal 12 fires for very small R2", {
   expect_true(r$status[1] %in% c("WARN", "NOTE"))
 })
 
-test_that("v0.2.9d Fix 3: V back-calc fires for non-global_text N_source", {
-  # Synthetic: V back-calc should fire when N is clearly wrong
+test_that("v0.7.9: a stated N that conflicts with the reported V is REPORTED, not overridden", {
+  # BEHAVIOUR CHANGED v0.7.9 on Gilad's ruling of 2026-09-04. "v0.2.9d Fix 3"
+  # asserted that the back-calculation should OVERRIDE the document's own stated
+  # N whenever the reported V disagreed with it. That silently replaced a number
+  # the paper states with one derived from the paper's own claim, and then graded
+  # the claim against it -- which cannot fail.
+  #
+  # Measured, 2026-09-04: a document stating N=500 and chi-square(4)=20.00 (which
+  # fix V at 0.10) passed on reported V of 0.20, 0.35, 0.60 AND 0.90, publishing
+  # N = 163, 56 and 25 respectively while `N_source` still credited the document.
+  #
+  # Here: V = sqrt(5.40/1409) = 0.062, but 0.22 is reported. Those cannot both be
+  # true. That is a real inconsistency and the tool now says so, keeps N = 1409,
+  # and names the alternative reading (N would have to be 112) in the output.
   r <- check_text("In the study (N = 1409), chi2(1) = 5.40, V = 0.22")
-  # V = sqrt(5.4/(N*1)). With N=1409: V=0.062. With N_back=112: V=0.220
-  # Back-calc should override N
-  expect_true(r$status[1] %in% c("PASS", "WARN"))
+
+  expect_equal(as.numeric(r$N[1]), 1409,
+    info = "the stated sample size must survive; it is evidence, not a value to be corrected")
+  expect_identical(as.character(r$status[1]), "ERROR",
+    info = "df=1 is unambiguous, so this is a genuine detected inconsistency and must NOT be softened")
+  reasons <- as.character(r$uncertainty_reasons[1])
+  expect_true(grepl("CONFLICTING SAMPLE SIZE", reasons, fixed = TRUE))
+  expect_true(grepl("N=112", reasons, fixed = TRUE),
+    info = "the N implied by the reported V must be shown, so the reader can see both readings")
 })
 
 test_that("v0.2.9d Fix 4: d cross-pairing when reported < min_variant * 0.5", {

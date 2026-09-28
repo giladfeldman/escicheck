@@ -8,6 +8,7 @@ version in the filename, not just the verdict.**
 
 | Log | Version | Environment | Status |
 |---|---|---|---|
+| `R-devel_2026-09-02_00check.log` | **0.7.8** | win-builder R-devel (2026-08-31 r90457 ucrt) | **OK** — 0 errors / 0 warnings / 0 notes; the 0.7.8 submission candidate, `checking tests ... [228s] OK` and `checking PDF version of manual ... OK` |
 | `R-devel_2026-08-06_00check.log` | **0.6.19** | win-builder R-devel (2026-08-05 r90355) | **OK** — 0 errors / 0 warnings / 0 notes |
 | `R-release_2026-08-06_00check.log` | **0.6.19** | win-builder R release (R 4.6.1) | 1 NOTE — the `docpluck` misspelling, fixed after that run |
 

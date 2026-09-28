@@ -1,12 +1,12 @@
 # ============================================================================
-# Tier-5 verification fixture — ScienceArena `stats-extraction-v1` contract
+# Tier-5 verification fixture — the `stats-extraction-v1` contract
 #
 # The arena adapter reads each row of effectcheck::check_text() output and
 # computes flagged_suspicious as the OR of six row-level signals. This file
 # pins that contract: every row corresponding to a deceptive stat in the
 # tier-5 inputs MUST be flagged by at least one of those signals.
 #
-# Source spec: $VIBE_ROOT/MetaScienceProjects/ScienceArena/
+# Source spec: the evaluation harness's adapter contract (internal).
 #              docs/deception-detection-spec-for-escimate.md
 # ============================================================================
 

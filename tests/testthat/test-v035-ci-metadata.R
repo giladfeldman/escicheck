@@ -1,4 +1,4 @@
-## v0.3.5 — CI audit metadata (MetaESCI requests 2B/2C/2D/2E)
+## v0.3.5 — CI audit metadata (downstream requests 2B/2C/2D/2E)
 ## ----------------------------------------------------------
 ## ci_expected, ci_reported, ci_level_mismatch, ci_clipped_to_bound,
 ## ci_symmetry_class — all derived in Phase 6 of check.R.
