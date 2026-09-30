@@ -2,16 +2,16 @@
   "schema": "docpluck-boundary-contract/1",
   "consumer": "ESCImate worker -- worker/docpluck_client.R",
   "what_this_pins": "The field set and statistical-symbol surface docpluck returns for two committed fixtures, captured THROUGH THE PRODUCTION CLIENT. Refresh with: Rscript worker/tests/docpluck-contract.R --refresh",
-  "captured_utc": "2026-09-27T12:38:27Z",
+  "captured_utc": "2026-09-29T14:05:06Z",
   "docpluck": {
-    "docpluck_version": "2.4.145",
-    "docpluck_identity": "2.4.145/deb69ae/clean",
+    "docpluck_version": "2.4.147",
+    "docpluck_identity": "2.4.147/f0237ba/clean",
     "version_crosscheck": "agreed",
     "service_version": "1.8.0",
     "sectioning_version": "1.2.5",
-    "table_extraction_version": "2.4.17",
-    "normalization_version": "1.9.69",
-    "library_repo_sha": "deb69ae",
+    "table_extraction_version": "2.4.18",
+    "normalization_version": "1.9.70",
+    "library_repo_sha": "f0237ba",
     "service_repo_sha": "a96fff2",
     "captured_from": "http://127.0.0.1:6117"
   },
@@ -76,7 +76,7 @@
     }
   },
   "provenance_only": {
-    "normalization_steps_applied": ["C0_furniture_control_strip", "H0_header_banner_strip", "T0_toc_dot_leader_strip", "P0_page_footer_strip", "P0r_recurring_running_header_strip", "P1_frontmatter_metadata_leak_strip", "H0b_letterspaced_label_collapse", "W0_watermark_strip", "W0b_minus_sign_recovery", "W0c_lt_operator_recovery", "W0o_lt_as_b_recovery", "W0d_minus_ci_pairing", "W0j_prose_minus_recovery", "W0q_ci_upper_detached_minus", "W0e_pua_glyph_recovery", "S1_encoding_validation", "S2_accent_recombination", "S3_ligature_expansion", "S4_quote_normalization", "S5_dash_normalization", "S5a_fffd_context_recovery", "S5b_fffd_comparison_recovery", "S6_whitespace_normalization", "S7_hyphenation_repair", "S7a_space_broken_compound_rejoin", "S8_line_break_joining", "A1_stat_linebreak_repair", "P0_standalone_page_numbers", "S9_header_footer_removal", "A3b_stat_bracket_to_paren", "A4_ci_delimiter_harmonization", "A5_math_symbol_normalization", "A6_footnote_removal", "A7_doi_rejoin", "R2_inline_pgnum_scrub", "R3_continuation_join", "LateJoin_line_break_rejoin", "H0r_header_banner_restrip", "P1r_frontmatter_leak_restrip", "P0r_page_footer_restrip", "G5c2_split_numbered_heading_rejoin"],
+    "normalization_steps_applied": ["C0_furniture_control_strip", "H0_header_banner_strip", "T0_toc_dot_leader_strip", "P0_page_footer_strip", "P0r_recurring_running_header_strip", "P1_frontmatter_metadata_leak_strip", "H0b_letterspaced_label_collapse", "W0_watermark_strip", "W0b_minus_sign_recovery", "W0c_lt_operator_recovery", "W0o_lt_as_b_recovery", "W0d_minus_ci_pairing", "W0j_prose_minus_recovery", "W0q_ci_upper_detached_minus", "W0e_pua_glyph_recovery", "S1_encoding_validation", "S2_accent_recombination", "S3_ligature_expansion", "S4_quote_normalization", "S5_dash_normalization", "S6_whitespace_normalization", "S7_hyphenation_repair", "S7a_space_broken_compound_rejoin", "S8_line_break_joining", "A1_stat_linebreak_repair", "P0_standalone_page_numbers", "S9_header_footer_removal", "A3b_stat_bracket_to_paren", "A4_ci_delimiter_harmonization", "A5_math_symbol_normalization", "A6_footnote_removal", "A7_doi_rejoin", "R2_inline_pgnum_scrub", "R3_continuation_join", "LateJoin_line_break_rejoin", "H0r_header_banner_restrip", "P1r_frontmatter_leak_restrip", "P0r_page_footer_restrip", "G5c2_split_numbered_heading_rejoin"],
     "pdf_pages": "1"
   }
 }

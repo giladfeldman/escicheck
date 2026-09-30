@@ -796,28 +796,17 @@ partial_eta2_from_F <- function(F_val, df1, df2) {
   (F_val * df1) / (F_val * df1 + df2)
 }
 
-# Generalized eta-squared (eta_G^2) from F-statistic
-# Formula: eta_G^2 = SS_effect / (SS_effect + SS_error + SS_subjects)
-# This requires more information than just F, df1, df2
-# Approximation for between-subjects: same as eta^2
-# For within-subjects: requires knowledge of design structure
-generalized_eta2_from_F <- function(F_val, df1, df2, design = "between") {
-  # Ensure scalar inputs
-  F_val <- as.numeric(F_val[1])
-  df1 <- as.numeric(df1[1])
-  df2 <- as.numeric(df2[1])
-
-  if (any(is.na(c(F_val, df1, df2))) || F_val < 0 || df1 <= 0 || df2 <= 0) {
-    return(NA_real_)
-  }
-  # For between-subjects, generalized eta^2 ~= eta^2
-  if (design == "between") {
-    return(eta2_from_F(F_val, df1, df2))
-  }
-  # For within-subjects, we need more information (SS_subjects)
-  # Return NA with note that more info needed
-  NA_real_
-}
+# Generalized eta-squared (eta_G^2) is deliberately NOT computed from F.
+# eta_G^2 = SS_effect / (SS_effect + SS_error + SS of every MEASURED factor and of
+# subjects) (Olejnik & Algina, 2003; Bakeman, 2005). Which terms enter the
+# denominator is a property of the design -- which factors were manipulated,
+# which measured, which within-subjects -- and F, df1, df2 carry none of it.
+# v0.7.14 (d-b1c193): this used to fall through to the between-subjects formula
+# for an UNCLEAR design, publishing partial eta-squared under the generalized
+# name (collabra.126266: identical on all 15 F rows) beside a row message saying
+# it could not be computed. Even a detected "between" design does not license
+# it: equality with partial eta-squared needs every factor to be manipulated,
+# which the text does not establish.
 
 # Omega-squared (omega^2) from F-statistic
 # Formula: omega^2 = (F * df1 - df1) / (F * df1 + df2 + 1)
@@ -948,19 +937,9 @@ compute_all_anova_effects <- function(F_val, df1, df2, design = "unclear") {
   results$omega2 <- omega2_from_F(F_val, df1, df2)
   results$cohens_f <- cohens_f_from_F(F_val, df1, df2)
 
-  # Generalized eta^2 depends on design
-  if (design == "between") {
-    results$generalized_eta2 <- generalized_eta2_from_F(F_val, df1, df2, "between")
-  } else if (design == "within") {
-    # Would need SS_subjects for accurate computation
-    results$generalized_eta2 <- NA_real_
-  } else if (design == "mixed") {
-    # Would need SS_subjects and design structure
-    results$generalized_eta2 <- NA_real_
-  } else {
-    # Design unclear - compute what we can
-    results$generalized_eta2 <- generalized_eta2_from_F(F_val, df1, df2, "between")
-  }
+  # Generalized eta^2 is never computable from F and df alone (see the note
+  # above omega2_from_F); `design` is kept in the signature for callers.
+  results$generalized_eta2 <- NA_real_
 
   results
 }

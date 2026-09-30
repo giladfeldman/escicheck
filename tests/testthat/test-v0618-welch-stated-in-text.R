@@ -44,10 +44,15 @@ test_that("an author-rounded Welch df stated in the text takes the Welch path", 
   n_bound <- suppressWarnings(as.numeric(row$N[1]))
   expect_gt(n_bound, 225)
 
-  # With the right N the reported d is consistent -- the WARN was a false
-  # positive produced entirely by the wrong sample size.
-  expect_lt(suppressWarnings(as.numeric(row$delta_effect[1])), 0.02)
+  # The false WARN (produced by N = 225) is gone.
   expect_false(identical(as.character(row$status[1]), "WARN"))
+  # v0.7.14 (d-48266c): this assertion used to be `delta_effect < 0.02`, i.e. a
+  # PASS -- but the N here (268) was back-solved FROM d = 0.99, so recomputing d
+  # from it reproduces 0.99 by construction and the check could not fail (a
+  # deliberately wrong d = 0.70 also passed, at N = 537). The effect size is
+  # now reported as not verified; the p-value is still checked.
+  expect_equal(as.character(row$N_source[1]), "effect_backsolved")
+  expect_equal(as.character(row$check_type[1]), "p_value")
 })
 
 test_that("a fractional df still takes the Welch path (existing behaviour intact)", {
@@ -55,7 +60,11 @@ test_that("a fractional df still takes the Welch path (existing behaviour intact
   res <- effectcheck::check_text(txt)
   rows <- res[!is.na(res$test_type) & res$test_type == "t", ]
   expect_gt(nrow(rows), 0)
-  expect_lt(suppressWarnings(as.numeric(rows$delta_effect[1])), 0.02)
+  # v0.7.14: the Welch path is taken (N back-solved above the df + 2 floor), and
+  # for that reason the effect size is honestly unverified -- see above.
+  expect_gt(suppressWarnings(as.numeric(rows$N[1])), 225)
+  expect_equal(as.character(rows$N_source[1]), "effect_backsolved")
+  expect_false(identical(as.character(rows$status[1]), "WARN"))
 })
 
 test_that("a plain integer-df t-test with no Welch wording is unaffected", {

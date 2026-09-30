@@ -1,3 +1,117 @@
+# effectcheck 0.7.14
+
+Ten open defects, re-tested on 0.7.13 first; the ones that still reproduced are fixed here. Every
+new test was watched failing on 0.7.13. **Several published values change** -- listed in full so a
+consumer can tell a fix from a regression.
+
+**A confidence-interval verdict of INCONSISTENT now requires an interval comparable with the
+paper's.** `ci_check_status = "INCONSISTENT"` says the paper's interval is wrong; 0.7.9 withdrew
+its status escalation after it accused 3 correct papers out of 3, but the column kept publishing
+INCONSISTENT on the same false premises. It is now `UNVERIFIABLE`, with the new column
+`ci_unverifiable_reason` saying why, when the row itself shows the intervals are not comparable:
+
+- `referent_not_effect` -- the interval excludes the reported estimate (and its sign-flip), or,
+  for the d family (whose intervals are near-symmetric), is centred more than a quarter of its
+  half-width from it. `ci_referent = "not_effect_reported"` can now be set on any row, not only
+  regression rows. Such a row keeps `estimate_outside_ci = TRUE`, its IMPOSSIBLE VALUE note and
+  `status = NOTE`: the finding is that at least one of the three printed numbers is wrong, not
+  that the interval specifically is. Reproduced at 0.7.13: `t(58) = 4.00, d = 1.03; the
+  unstandardized contrast had a 95% CI [9.99, 30.01]` was INCONSISTENT.
+- `no_estimate_parsed` -- no effect size was read beside the interval (none printed, or not
+  parseable), so it was never established to be a standardized interval (the 0.7.9 notes counted
+  11 of 15 such corpus rows as raw mean differences). Correlations are exempt: r is its own
+  estimate.
+- `one_sided_interval` -- stated one-sided/one-tailed in the row's own clause, or a correlation
+  interval running to 1 or -1. `r(198) = .34, one-sided 95% CI [0.23, 1.00]` was INCONSISTENT;
+  its true one-sided lower bound is 0.2326.
+- `unstated_allocation` -- group sizes unstated, graded at an equal split, and an unequal split
+  reproduces BOTH the printed d and the interval (the split is named). `t(98) = 0.30, d = 0.075,
+  95% CI [-0.415, 0.565]` is exact at n1 = 20, n2 = 80 and was INCONSISTENT.
+- `estimand_not_computable` -- an interval on generalized eta-squared (below).
+- The pre-existing UNVERIFIABLE causes are now named too: `sample_size_ambiguous`,
+  `paired_design_independent_approximation`, `one_bound_reported`,
+  `no_comparable_interval_computed`.
+
+MATCH and PLAUSIBLE are never altered (except generalized eta-squared). A genuinely wrong
+interval of each shape stays INCONSISTENT -- each rule has that control in
+`test-v0714-ci-verdict-premise.R`. `ci_match` is NA (not FALSE) on these rows. (d-cf56d6,
+d-4efdc1)
+
+**A Welch test's effect size is no longer "verified" against an N solved from it.** With group
+sizes unstated a Welch df only bounds N from below, so the Welch branch back-solved
+N = 4t^2/d^2 from the reported d and then recomputed d from that N -- reproducing it by
+construction. Measured at 0.7.13: a deliberately wrong d = 0.70 on `Welch's t(223) = 8.11` (true
+about 0.99) returned PASS at N = 537. Such a row now checks its p-value only, says the effect
+size is not verified, and publishes `N_source = "effect_backsolved"` (it said `global_text` or
+`not_found`). When the back-solve falls below the Welch floor the N is clamped to df + 2, the
+check there is real, and the label is now `df_inferred`. Stated group sizes now give
+N = n1 + n2 (`N_source = "group_sizes"`) instead of being ignored in favour of the back-solve:
+`Welch's t(222.87) = 8.11, d = 0.99` with `n1 = 131, n2 = 135` now verifies d at N = 266 as PASS.
+An integer Welch df no longer produces the note "Non-integer df (223.00)". (d-48266c; the filed
+symptom, N = 225 and a false WARN, was already gone at 0.7.13.)
+Two further Welch fixes from the /ship review (2026-09-30): a Welch test compares independent
+groups, so paired-design variants (dz, dav, drm) are no longer offered on a Welch row -- a wrong
+d = 0.70 with `n1 = 131, n2 = 135` had passed against drm = 0.685 (0.7.13 too); and a tiny,
+rounded Welch d that the Welch floor N = df + 2 reproduces within rounding is graded at that N
+instead of a scraped study total. Measured on the 27-paper seam (docpluck 2.4.147): 6 rows move,
+all in 10.1016/j.jesp.2020.104052 and 10.5334/irsp.571 -- the five jesp rows now grade at
+N = 171-203 (`df_inferred`) instead of the document total N = 827 (3 NOTE -> PASS), irsp.571
+stays WARN against the independent-groups d. A row whose effect is explicitly labelled `dz`,
+`dav` or `drm` keeps its paired variants even when its df is fractional or its clause mentions
+Welch: the tier-2 cross-model check showed a correct `dz = 0.44` on a within-subject
+Satterthwaite contrast `t(45.3) = 3.00` falling from PASS to NOTE under the Welch gate.
+
+**Generalized eta-squared is no longer published as partial eta-squared.** The
+`generalized_eta2` column and `all_variants` computed it with the partial formula whenever the
+design was unclear -- on collabra.126266 it equalled `partial_eta2` on all 15 F rows beside a
+row message saying it cannot be computed. It depends on which factors are measured or
+within-subjects (Olejnik & Algina, 2003; Bakeman, 2005), which F and df do not carry, so it is
+now always NA. A row reporting it no longer carries two false notes ("unusual for F-test",
+"symbol unclear -- may be OCR"), checks its p-value (it was SKIP, "nothing checked"), and its
+interval is not graded against partial-eta-squared intervals (collabra.126266: 8 INCONSISTENT,
+5 PLAUSIBLE, 1 MATCH, all against the wrong estimand). The 9 bare abstract restatements the
+gold counts carry no test statistic; effectcheck extracts no bare effect size of any family,
+so that is a scope question, logged (d-368d63). (d-b1c193)
+
+**A sentence reporting both the average direct effect and the ACME yields both.** Chan &
+Feldman (2025, doi 10.1080/02699931.2024.2434156) print "The average direct effect was 0.15,
+95% CI [-0.13 to 0.45], p = .3, whereas the ... indirect effect (ACME) was 0.67, 95% CI
+[0.47-0.89], p < .001". 0.7.13 emitted one row: the direct effect, labelled
+`indirect_effect`; the ACME was absent. Now two rows, `direct_effect` and `indirect_effect`.
+A sentence mixing one CI-form and one Sobel-form effect still yields one row (pre-existing,
+logged d-564e1b). (d-4fe38e)
+
+**A statistic quoted twice is one result.** 10.24072/pci.rr.100726 is a review letter quoting
+`t(868) = -3.01, p = .006` twice to show comma placement; both copies were scored. v0.6.18
+withdrew three dedup rules because two distinct results can share every printed number, and
+named the missing signal: quoted material. Rows now merge only when the printed signature is
+identical, they are adjacent, and every copy is inside quotation marks; the kept row says so.
+The v0.6.18 guard-rail tests (distinct results must never merge) still pass. The N = 870
+provenance and the 2.2x p-value discrepancy on that paper were already fixed at 0.7.13.
+(d-43ed61)
+
+**An undecidable post-hoc contrast names the contrast reading.** collabra.90203's
+`t(998) = 0.097, d = 0.01` sits under a Bonferroni post-hoc announcement with an omnibus
+`F(2, 998)`; at a d that small, N = 1000 and the contrast N of about 667 both fit, so the
+incumbent N = 1000 stands -- and the row now says the contrast reading exists. The filed
+defect (the decisive contrasts binding N = 1000, a false WARN and two false CI flags) was
+already fixed at 0.7.13. (d-43c69d)
+
+**Already fixed at 0.7.13, closed on re-test:** collabra.57785's ambiguous-design t(742) row
+publishes N = 743 (gold 743) and names both readings (d-bd5e80); cog_emo Table 9's three false
+CI-mismatch flags are gone -- the rows keep N = 794 under the 2026-09-04 ruling to report, not
+silently correct, an ambiguous sample, and the one remaining INCONSISTENT is the paper's own
+dropped minus sign (d-4ea375).
+
+**The API returns every column on every row (worker).** JSON endpoints serialized rows with
+jsonlite's data-frame default, which drops a key whose value is NA; a row carried 62 keys where
+`check_text()` returns 138. Every row now carries every column, NA as `null`. No other response
+field changed (measured by diffing the full process-text response). A consumer that detects
+schema drift will log each newly visible key once. (d-c7c216)
+
+**Harness:** the gold lock is promoted to article-finder's 2026-09-25 page-checked correction of
+10.1016/j.jesp.2021.104154 (81 -> 81 results); `run_validation.R` refused on origin/main without it.
+
 # effectcheck 0.7.13
 
 **Rows from a table no caption claimed are no longer checked.** docpluck 2.4.145 (released and
