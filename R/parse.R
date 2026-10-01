@@ -1835,6 +1835,27 @@ parse_text <- function(text, context_window_size = 2) {
   # source stays pure ASCII (R CMD check warns on non-ASCII in code).
   chi_tok <- "(?:chi-?square|Chi-?square|chi\\s*\\^?2|\u03c7\\s*\\^?2|\u03c7\u00b2|X\\s*\\^?2|X\u00b2)"
 
+  # v0.6.16 (E10 / E-bare-mediation-ci): a BOOTSTRAPPED mediation effect is
+  # reported with a CI (and usually a p), never a Sobel Z -- so the Sobel-anchored
+  # pattern above never fired and the result was silently dropped. Cognition &
+  # Emotion 10.1080/02699931.2024.2434156 reports "The average direct effect was
+  # 0.15, 95% CI [-0.13 to 0.45], p = .3, whereas the bootstrapped unstandardised
+  # indirect effect (Average Causal Mediation Effect, ACME) was 0.67, 95% CI
+  # [0.47-0.89], p < .001." -- two extractable results, zero rows emitted. The
+  # text WAS delivered by the extractor (verified in the render), so this is an
+  # ESCImate parse defect, not a docpluck gap. Found by the Sonnet canary audit
+  # 2026-08-04.
+  #
+  # Anchored on an explicit mediation-effect NAME so an ordinary "the effect was
+  # 0.15, 95% CI [...]" sentence cannot be mistaken for a mediation path. The CI
+  # separator accepts "to", "-", or "," (all three appear in this paper alone).
+  pat_mediation_ci <- paste0(
+    "\\b(?:average\\s+(?:causal\\s+mediation|direct)\\s+effect|ACME|ADE|",
+    "indirect\\s+effect|direct\\s+effect)\\b",
+    "[^.]{0,120}?\\bwas\\s+([-+]?\\d*\\.?\\d+)",
+    "[^.]{0,40}?\\b(\\d{2})\\s*%\\s*CI\\s*[\\[\\(]\\s*",
+    "([-+]?\\d*\\.?\\d+)\\s*(?:to|,|-)\\s*([-+]?\\d*\\.?\\d+)\\s*[\\]\\)]"
+  )
   # Sub-chunk splitting: when a sentence contains multiple test statistics,
   # split it so each sub-chunk has exactly one test statistic.
   # This prevents str_match() from silently dropping 2nd/3rd/4th matches.
@@ -1922,6 +1943,26 @@ parse_text <- function(text, context_window_size = 2) {
     sub_chunks[nchar(trimws(sub_chunks)) > 0]
   }))
   chunks <- chunks[nchar(trimws(chunks)) > 0]
+
+  # v0.7.14 (d-4fe38e): a sentence reporting TWO named mediation effects with
+  # their own CIs -- "The average direct effect was 0.15, 95% CI [...], p = .3,
+  # whereas the ... indirect effect (ACME) was 0.67, 95% CI [...], p < .001" --
+  # carries no test statistic, so the splitter above leaves it whole and
+  # str_match() takes only the FIRST effect (the direct one), which v0.6.16 then
+  # labelled "indirect_effect" and the ACME was lost. Split at each complete
+  # mediation-effect-with-CI clause. Requires 2+ complete clauses, so a single
+  # effect (or the Sobel-Z form) is untouched.
+  chunks <- unlist(lapply(chunks, function(chunk) {
+    mm <- gregexpr(pat_mediation_ci, chunk, perl = TRUE, ignore.case = FALSE)[[1]]
+    if (length(mm) < 2L || mm[1] == -1L) return(chunk)
+    pos <- as.integer(mm)
+    out <- character(length(pos))
+    for (j in seq_along(pos)) {
+      out[j] <- substr(chunk, pos[j], if (j < length(pos)) pos[j + 1L] - 1L else nchar(chunk))
+    }
+    if (pos[1] > 1L) out[1] <- paste0(substr(chunk, 1L, pos[1] - 1L), out[1])
+    out[nchar(trimws(out)) > 0]
+  }))
 
   if (length(chunks) == 0) {
     return(tibble::tibble(
@@ -2185,27 +2226,7 @@ parse_text <- function(text, context_window_size = 2) {
     "indirect\\s+effect\\b.{0,40}?\\bwas\\s+([-+]?\\d*\\.?\\d+)",
     ".{0,80}?\\bSobel\\s+[Zz]\\s*=\\s*([-+]?\\d*\\.?\\d+)"
   )
-  # v0.6.16 (E10 / E-bare-mediation-ci): a BOOTSTRAPPED mediation effect is
-  # reported with a CI (and usually a p), never a Sobel Z -- so the Sobel-anchored
-  # pattern above never fired and the result was silently dropped. Cognition &
-  # Emotion 10.1080/02699931.2024.2434156 reports "The average direct effect was
-  # 0.15, 95% CI [-0.13 to 0.45], p = .3, whereas the bootstrapped unstandardised
-  # indirect effect (Average Causal Mediation Effect, ACME) was 0.67, 95% CI
-  # [0.47-0.89], p < .001." -- two extractable results, zero rows emitted. The
-  # text WAS delivered by the extractor (verified in the render), so this is an
-  # ESCImate parse defect, not a docpluck gap. Found by the Sonnet canary audit
-  # 2026-08-04.
-  #
-  # Anchored on an explicit mediation-effect NAME so an ordinary "the effect was
-  # 0.15, 95% CI [...]" sentence cannot be mistaken for a mediation path. The CI
-  # separator accepts "to", "-", or "," (all three appear in this paper alone).
-  pat_mediation_ci <- paste0(
-    "\\b(?:average\\s+(?:causal\\s+mediation|direct)\\s+effect|ACME|ADE|",
-    "indirect\\s+effect|direct\\s+effect)\\b",
-    "[^.]{0,120}?\\bwas\\s+([-+]?\\d*\\.?\\d+)",
-    "[^.]{0,40}?\\b(\\d{2})\\s*%\\s*CI\\s*[\\[\\(]\\s*",
-    "([-+]?\\d*\\.?\\d+)\\s*(?:to|,|-)\\s*([-+]?\\d*\\.?\\d+)\\s*[\\]\\)]"
-  )
+  # (pat_mediation_ci is defined above the sub-chunk splitter, which uses it.)
   # v0.5.16: clinical-trial risk ratio with two-proportion slash counts.
   # Form: "<n1>/<N1> (<pct1>%) versus|and|vs <n2>/<N2> (<pct2>%) ... RR <val>;
   # 95% CI <lo> to <hi>; p[-]?(value)? = <pval>". The two-proportion clause
@@ -3852,7 +3873,16 @@ parse_text <- function(text, context_window_size = 2) {
       effect_reported <- d_ci_nostat_effect
       effect_reported_decimals <- d_ci_nostat_effect_decimals
     } else if (isTRUE(is_mediation_indirect) && !is.na(mediation_indirect_effect)) {
-      effect_name <- "indirect_effect"
+      # v0.7.14 (d-4fe38e): name the effect the clause names. The CI form's
+      # anchor also matches the DIRECT effect (ADE), which v0.6.16 published as
+      # "indirect_effect".
+      effect_name <- if (!all(is.na(m_mediation_ci)) && all(is.na(m_mediation_indirect)) &&
+                         grepl("^(?:average\\s+direct\\s+effect|ADE|direct\\s+effect)\\b",
+                               m_mediation_ci[1], perl = TRUE, ignore.case = TRUE)) {
+        "direct_effect"
+      } else {
+        "indirect_effect"
+      }
       effect_reported <- mediation_indirect_effect
       effect_reported_decimals <- mediation_indirect_effect_decimals
     } else if (!all(is.na(m_f2))) {
@@ -3870,7 +3900,12 @@ parse_text <- function(text, context_window_size = 2) {
       effect_name <- "generalized_eta2"
       effect_reported <- numify(m_eta2_corrupted[2])
       effect_reported_decimals <- count_decimal_places(m_eta2_corrupted[2])
-      effect_fallback <- TRUE # Flag as uncertain extraction
+      # v0.7.14 (d-b1c193): only a CORRUPTED form ("2G", "n2G") is an uncertain
+      # symbol. An explicit label ("generalized eta-squared", "etaG2", Greek
+      # eta with a G subscript) is not, and flagging it told the reader the
+      # extraction was suspect when it was not.
+      effect_fallback <- !grepl(
+        "^(?:[Gg]eta|generalized|\u03b7[Gg]|etaG2)", m_eta2_corrupted[1], perl = TRUE)
     } else if (!all(is.na(m_eta2))) {
       effect_name <- "eta2"
       effect_reported <- numify(m_eta2[2])

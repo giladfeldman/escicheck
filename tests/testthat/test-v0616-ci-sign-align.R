@@ -50,8 +50,11 @@ test_that("v0.6.16: genuinely wrong CI magnitudes stay INCONSISTENT despite oppo
   # convert a real inconsistency into a pass.
   txt <- paste0(
     "Price sensitivity predicted higher estimates of self-interest in others, ",
-    "t(1596) = -7.67, p < .0001, d = 0.19 [0.45, 0.60]."
+    "t(1596) = -7.67, p < .0001, d = 0.19 [0.05, 0.33]."
   )
+  # v0.7.14: centred on the estimate, wrong in magnitude (true dz half-width ~0.05).
+  # The old fixture [0.45, 0.60] excluded its own estimate, which since 0.7.14
+  # makes the interval UNVERIFIABLE (referent) before sign alignment matters.
   res <- check_text(txt)
   expect_equal(nrow(res), 1L)
   expect_equal(res$ci_check_status[1], "INCONSISTENT")

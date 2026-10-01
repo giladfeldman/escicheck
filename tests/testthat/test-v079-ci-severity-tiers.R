@@ -30,9 +30,19 @@
 #     [0.54, 0.56]       INCONSISTENT      NOTE
 #     [8.00, 9.00]       INCONSISTENT      NOTE
 #
+# v0.7.14: the blocks below that used [8.00, 9.00] as their "absurd" interval now
+# use [0.40, 0.70] -- centred on the estimate, containing it, and far too narrow,
+# so it is wrong ON THE EFFECT'S OWN SCALE. [8.00, 9.00] excludes its own
+# estimate, and an interval that excludes its estimate cannot be graded as that
+# estimate's interval: since 0.7.14 it is UNVERIFIABLE with ci_referent =
+# "not_effect_reported", while `estimate_outside_ci` (and status NOTE) carry the
+# impossible-value finding. That case is pinned in test-v0714-ci-verdict-premise.R
+# and at the end of this file. The rows that still use [8.00, 9.00] assert
+# something else (bounded r range, a stated level of 263.95%, cross-family).
+#
 # A confidence interval wrong by 0.07 and one wrong by 8.0 published the IDENTICAL
 # verdict, while the effect-size arm grades PASS / WARN (3x) / ERROR (5x) on the
-# same input. Downstream, SciMeto maps NOTE -> severity "info" by explicit design,
+# same input. Downstream, a consumer maps NOTE -> severity "info" by explicit design,
 # so an interval that contradicts every computable method reached the author as a
 # neutral chip that turned no badge and counted toward no issue.
 #
@@ -87,7 +97,7 @@ test_that("an interval matching NO computed candidate does NOT escalate status",
   # measured at precision 0 of 3 on the corpus -- see the block comment at the
   # end of this file -- and now leaves `status` alone. The TIER is still
   # computed and still published; it is `ci_check_status` that carries it.
-  df <- ci_row("95% CI [8.00, 9.00]")
+  df <- ci_row("95% CI [0.40, 0.70]")
   expect_equal(nrow(df), 1L)
   expect_equal(df$ci_check_status[1], "INCONSISTENT")
   expect_equal(df$status[1], "NOTE")
@@ -130,7 +140,7 @@ test_that("the three tiers are genuinely distinguishable IN THE PUBLISHED ROW", 
   # parse, and without any way to accuse a correct paper.
   exact  <- ci_row("95% CI [0.03, 1.07]", tol_ci = 0.05)
   near   <- ci_row("95% CI [0.10, 1.00]", tol_ci = 0.05)
-  absurd <- ci_row("95% CI [8.00, 9.00]", tol_ci = 0.05)
+  absurd <- ci_row("95% CI [0.40, 0.70]", tol_ci = 0.05)
 
   tiers <- c(exact$ci_check_status[1], near$ci_check_status[1], absurd$ci_check_status[1])
   expect_equal(tiers, c("MATCH", "PLAUSIBLE", "INCONSISTENT"))
@@ -152,7 +162,7 @@ test_that("the three tiers are genuinely distinguishable IN THE PUBLISHED ROW", 
 test_that("ci_affects_status = FALSE still suppresses the CI's effect entirely", {
   # The escalation must honour the existing opt-out, or a consumer that has
   # deliberately turned the CI arm off would start seeing new WARNs.
-  df <- ci_row("95% CI [8.00, 9.00]", ci_affects_status = FALSE)
+  df <- ci_row("95% CI [0.40, 0.70]", ci_affects_status = FALSE)
   expect_equal(df$ci_check_status[1], "INCONSISTENT")
   expect_equal(df$status[1], "PASS")
 })
@@ -179,7 +189,7 @@ test_that("an INCONSISTENT CI never DOWNGRADES an existing ERROR", {
   )
   txt <- paste(
     "Groups were compared with an independent-samples t test.",
-    "The effect was reliable, t(58) = 2.10, p = .040, d = 1.10, 95% CI [8.00, 9.00]."
+    "The effect was reliable, t(58) = 2.10, p = .040, d = 1.10, 95% CI [1.00, 1.20]."
   )
   base <- as.data.frame(check_text(base_txt))
   df   <- as.data.frame(check_text(txt))
@@ -212,7 +222,7 @@ test_that("an ASSUMED confidence level is not escalated -- the universe was not 
   #
   # An INCONSISTENT verdict on an assumed level is therefore partly a statement
   # about OUR inference, not purely about the paper. It stays NOTE.
-  df <- ci_row("CI [8.00, 9.00]")   # no stated level -> ci_level_source assumed_95
+  df <- ci_row("CI [0.40, 0.70]")   # no stated level -> ci_level_source assumed_95
   expect_equal(nrow(df), 1L)
   expect_equal(as.character(df$ci_level_source[1]), "assumed_95")
   expect_equal(df$ci_check_status[1], "INCONSISTENT")
@@ -225,7 +235,7 @@ test_that("a STATED level reaches the same status -- level no longer changes sta
   # NOTE. The DISTINCTION still exists and is still published -- `ci_level_source`
   # tells a consumer whether the level was the paper's or ours -- it simply no
   # longer moves `status`, which is a contract read by three projects.
-  df <- ci_row("95% CI [8.00, 9.00]")
+  df <- ci_row("95% CI [0.40, 0.70]")
   expect_equal(nrow(df), 1L)
   expect_equal(as.character(df$ci_level_source[1]), "explicit_with_bounds")
   expect_equal(df$ci_check_status[1], "INCONSISTENT")
@@ -248,7 +258,8 @@ test_that("a CORRELATION with an impossible interval does not publish PASS", {
   df <- as.data.frame(check_text(
     "The correlation was significant, r(198) = .34, p < .001, 95% CI [8.00, 9.00]."))
   expect_equal(nrow(df), 1L)
-  expect_equal(df$ci_check_status[1], "INCONSISTENT")
+  expect_equal(df$ci_check_status[1], "UNVERIFIABLE")
+  expect_equal(df$ci_unverifiable_reason[1], "referent_not_effect")  # v0.7.14, see header
   expect_false(identical(df$status[1], "PASS"))
   expect_equal(df$status[1], "WARN")
 })
@@ -273,7 +284,8 @@ test_that("an IMPLAUSIBLE stated level is treated like an assumed one", {
     "263.95% CI [8.00, 9.00].")))
   expect_equal(nrow(df), 1L)
   expect_equal(as.character(df$ci_level_source[1]), "implausible_level")
-  expect_equal(df$ci_check_status[1], "INCONSISTENT")
+  expect_equal(df$ci_check_status[1], "UNVERIFIABLE")
+  expect_equal(df$ci_unverifiable_reason[1], "referent_not_effect")  # v0.7.14, see header
   expect_equal(df$status[1], "NOTE")
 })
 
@@ -291,7 +303,8 @@ test_that("a row whose EXTRACTION is suspect is not escalated by the CI arm", {
   df <- as.data.frame(check_text(txt))
   expect_equal(nrow(df), 1L)
   expect_true(isTRUE(df$extraction_suspect[1]))
-  expect_equal(df$ci_check_status[1], "INCONSISTENT")
+  expect_equal(df$ci_check_status[1], "UNVERIFIABLE")
+  expect_equal(df$ci_unverifiable_reason[1], "referent_not_effect")  # v0.7.14, see header
   expect_equal(df$status[1], "NOTE")
 })
 
@@ -354,7 +367,8 @@ test_that("a cross-family row with an ABSURD interval also stays NOTE", {
   r <- crossfam_row("95% CI [8.00, 9.00]")
   expect_equal(nrow(r), 1L)
   expect_equal(as.character(r$ambiguity_level[1]), "highly_ambiguous")
-  expect_equal(r$ci_check_status[1], "INCONSISTENT")
+  expect_equal(r$ci_check_status[1], "UNVERIFIABLE")
+  expect_equal(r$ci_unverifiable_reason[1], "referent_not_effect")  # v0.7.14, see header
   expect_equal(as.character(r$status[1]), "NOTE")
 })
 
@@ -370,7 +384,8 @@ test_that("the SAME-family row reaches the same status -- the exemption was subs
   # together justified the withdrawal.
   r <- ci_row("95% CI [8.00, 9.00]")
   expect_equal(as.character(r$ambiguity_level[1]), "clear")
-  expect_equal(r$ci_check_status[1], "INCONSISTENT")
+  expect_equal(r$ci_check_status[1], "UNVERIFIABLE")
+  expect_equal(r$ci_unverifiable_reason[1], "referent_not_effect")  # v0.7.14, see header
   expect_equal(as.character(r$status[1]), "NOTE")
 })
 
@@ -418,7 +433,8 @@ test_that("inferred_from_context is NOT escalated -- 15/15 corpus rows say it ne
   r <- as.data.frame(check_text(txt))
   expect_equal(nrow(r), 1L)
   expect_equal(as.character(r$ci_level_source[1]), "inferred_from_context")
-  expect_equal(r$ci_check_status[1], "INCONSISTENT")
+  expect_equal(r$ci_check_status[1], "UNVERIFIABLE")
+  expect_equal(r$ci_unverifiable_reason[1], "referent_not_effect")  # v0.7.14, see header
   expect_false(is.na(r$matched_value[1]))   # exclusion 1 is NOT doing the work here
   expect_equal(as.character(r$status[1]), "NOTE")
 })
@@ -431,7 +447,8 @@ test_that("the real corpus shape -- a raw-difference interval -- is not escalate
   r <- as.data.frame(check_text(txt))
   expect_equal(nrow(r), 1L)
   expect_equal(as.character(r$ci_level_source[1]), "inferred_from_context")
-  expect_equal(r$ci_check_status[1], "INCONSISTENT")
+  expect_equal(r$ci_check_status[1], "UNVERIFIABLE")
+  expect_equal(r$ci_unverifiable_reason[1], "no_estimate_parsed")  # v0.7.14, see header
   expect_true(as.character(r$status[1]) %in% c("OK", "NOTE"))
   expect_false(identical(as.character(r$status[1]), "WARN"))
 })
@@ -554,7 +571,10 @@ test_that("a WRONG BUT POSSIBLE correlation interval is NOT flagged", {
   df <- as.data.frame(check_text(
     "The correlation was significant, r(198) = .34, p < .001, 95% CI [0.90, 0.99]."))
   expect_equal(nrow(df), 1L)
-  expect_equal(df$ci_check_status[1], "INCONSISTENT")
+  # v0.7.14: the interval excludes its own estimate, so it is not graded as the
+  # estimate's interval (see header); `estimate_outside_ci` carries the finding.
+  expect_equal(df$ci_check_status[1], "UNVERIFIABLE")
+  expect_equal(df$ci_unverifiable_reason[1], "referent_not_effect")
   expect_false(impossible_ci(df))
   expect_equal(as.character(df$status[1]), "PASS")
 })
@@ -576,4 +596,16 @@ test_that("an UNBOUNDED family is never touched by the bounded-CI check", {
     "Groups differed, t(58) = 8.00, p < .001, d = 2.10, 95% CI [1.45, 2.75]."))
   expect_equal(nrow(df), 1L)
   expect_false(impossible_ci(df))
+})
+
+test_that("v0.7.14: an interval excluding its own estimate is UNVERIFIABLE, never PASS", {
+  # The old "absurd" fixture, pinned under the 0.7.14 semantics (see header).
+  df <- ci_row("95% CI [8.00, 9.00]")
+  expect_equal(df$ci_check_status[1], "UNVERIFIABLE")
+  expect_equal(df$ci_referent[1], "not_effect_reported")
+  expect_true(isTRUE(df$estimate_outside_ci[1]))
+  expect_equal(df$status[1], "NOTE")
+  # and the opt-out still suppresses the CI arm's effect on status entirely
+  off <- ci_row("95% CI [8.00, 9.00]", ci_affects_status = FALSE)
+  expect_equal(off$status[1], "PASS")
 })

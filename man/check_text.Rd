@@ -76,7 +76,26 @@ check_text(
 
 \item{method_context_action}{Action when method context detected in chunk ("NOTE", "WARN", or "SKIP"; default "NOTE")}
 
-\item{design_ambiguous_action}{Action when design-ambiguous t-test (or F(1,df)) effect size ERROR occurs ("WARN", "NOTE", or "ERROR"; default "WARN")}
+\item{design_ambiguous_action}{Action when a design-ambiguous t-test (or
+F(1,df), or z with d/g) effect-size ERROR occurs ("WARN", "NOTE", or
+"ERROR"; default "WARN").
+
+\strong{It has one exception, and it is deliberate.} The downgrade is
+applied only where design ambiguity is a candidate EXPLANATION for the
+discrepancy -- that is, where the reported effect lies within the range
+of the computed independent and paired variants plus a 50\\% margin. A
+reported effect matching NEITHER design is not explained by not knowing
+which design was used, so it keeps its ERROR and this parameter is inert
+on that row. Same principle as the v0.6.18 omnibus-df rule: an effect
+matching neither candidate keeps its flag. The row states the reason
+("Extreme discrepancy ... likely reflects data extraction error").
+
+Documented in v0.7.9 after a downstream consumer probed the parameter and found 2
+rows in 148,984 where a caller asking for "WARN" got "ERROR". The
+behaviour was correct and the SILENCE was the defect: a policy knob
+whose exception is not documented reads, from outside, exactly like a
+policy knob that does not work. Pinned by
+\code{test-v079-design-ambiguous-action-scope.R}, both directions.}
 
 \item{unknown_groups_action}{Action when d/g ERROR occurs with unknown group sizes n1/n2 ("WARN", "NOTE", or "ERROR"; default "WARN")}
 
@@ -155,6 +174,20 @@ reported with \code{95\% CI [-0.92, -0.30]}). FLAG ONLY: the parsed value
 is never mutated; the violation is also surfaced in
 \code{uncertainty_reasons}. NA on error/short-circuit rows, FALSE
 otherwise.}
+\item{\code{estimate_outside_ci}}{Logical (since v0.7.9). TRUE when the
+same estimate-in-CI invariant is violated with NO sign explanation:
+the reported estimate lies outside its reported CI \emph{and so does
+its sign-flip}, so a dropped minus cannot account for it and at least
+one of the three published numbers is wrong. Mutually exclusive with
+\code{sign_ci_violation}, which keeps its own, more specific
+diagnosis. Added because the invariant was evaluated but only ever
+REPORTED the dropped-minus shape, so a row whose estimate lay outside
+its own interval was indistinguishable from one where it lay inside --
+while the row's message said the invariant had been checked. Real
+instance: Chan & Feldman (2025), \emph{Cognition and Emotion} 39(6),
+p. 1238, Table 9 row 2a prints \code{r = .70, 95\% CI [0.73, 0.76]}.
+FLAG ONLY: the parsed value is never mutated. NA on
+error/short-circuit rows, FALSE otherwise.}
 }
 Plus all other columns: \code{location}, \code{raw_text}, test
 identification (\code{test_type}, \code{chisq_subtype}, \code{df1},

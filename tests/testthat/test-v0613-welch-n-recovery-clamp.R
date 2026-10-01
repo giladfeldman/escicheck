@@ -31,7 +31,11 @@ test_that("a small-d negative-t Welch clause recovers N clamped to the Welch flo
   # floor df + 2 = round(520.72) + 2 = 523.
   expect_true(rr$N[1] < 700)
   expect_equal(rr$N[1], round(520.72) + 2)
-  expect_equal(rr$N_source[1], "global_text")
+  # v0.7.14: the published N is the Welch floor df + 2, a df derivation -- the
+  # old "global_text" label named a provenance (N = 794) this value no longer
+  # has. And because it is NOT the back-solved value (516), the effect check at
+  # 523 is a real one, so the row is not "effect_backsolved".
+  expect_equal(rr$N_source[1], "df_inferred")
   # No spurious WARN from the wrong (global) N corrupting the recomputed d.
   expect_false(identical(rr$status[1], "WARN"))
 })

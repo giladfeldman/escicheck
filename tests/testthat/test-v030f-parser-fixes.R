@@ -82,11 +82,13 @@ test_that("generalized eta-squared (spelled out) parsed correctly", {
   expect_equal(r$effect_reported[1], 0.12)
 })
 
-test_that("generalized_eta2 gets SKIP (extraction_only) not ERROR in check_text", {
+test_that("generalized_eta2 is not ERROR, and a checked p is not SKIP", {
   # generalized_eta2 is mathematically unverifiable from summary statistics
-  # (Bakeman 2005) — routed to extraction_only, which becomes SKIP
+  # (Bakeman 2005). v0.7.14: the p-value still IS checked, so the row is a
+  # p_value check rather than a "nothing checked" SKIP.
   r <- check_text("F(1, 100) = 5.0, p = .028, geta-squared = 0.04")
-  expect_equal(r$status[1], "SKIP")
+  expect_equal(r$check_type[1], "p_value")
+  expect_false(r$status[1] %in% c("SKIP", "ERROR", "WARN"))
   expect_true(any(grepl("Generalized eta-squared cannot be verified", r$uncertainty_reasons)))
 })
 

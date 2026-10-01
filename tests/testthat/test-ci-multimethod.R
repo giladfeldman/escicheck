@@ -134,10 +134,19 @@ test_that("matching CI still gets ci_match=TRUE", {
 })
 
 test_that("badly wrong CI still gets ci_match=FALSE", {
-  # CI [0.90, 1.50] is way off for d=0.71 with n=52
-  r <- check_text("t(50) = 2.50, p = .016, d = 0.71, 95% CI [0.90, 1.50]")
+  # v0.7.14: centred on d = 0.71 but far too narrow for n = 52 -- wrong on the
+  # effect's own scale. (The old fixture, [0.90, 1.50], excludes its estimate;
+  # since 0.7.14 such an interval is UNVERIFIABLE -- see the next block.)
+  r <- check_text("t(50) = 2.50, p = .016, d = 0.71, 95% CI [0.60, 0.82]")
   expect_false(isTRUE(r$ci_match[1]))
   expect_equal(r$ci_check_status[1], "INCONSISTENT")
+})
+
+test_that("v0.7.14: a CI excluding its own estimate is not graded as its interval", {
+  r <- check_text("t(50) = 2.50, p = .016, d = 0.71, 95% CI [0.90, 1.50]")
+  expect_equal(r$ci_check_status[1], "UNVERIFIABLE")
+  expect_true(is.na(r$ci_match[1]))
+  expect_true(isTRUE(r$estimate_outside_ci[1]))
 })
 
 # =========================================================================

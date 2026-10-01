@@ -427,7 +427,7 @@ VARIANT_METADATA <- list(
     closest_method = NA_character_,
     delta_effect_abs = NA_real_, ci_match = as.logical(NA),
     ci_delta_lower = NA_real_, ci_delta_upper = NA_real_,
-    ci_check_status = NA_character_, ci_method_match = NA_character_, ci_referent = NA_character_,
+    ci_check_status = NA_character_, ci_method_match = NA_character_, ci_referent = NA_character_, ci_unverifiable_reason = NA_character_,
     effect_guard_rejected = isTRUE(g1("effect_guard_rejected", FALSE)),
     effect_guard_reason = as.character(g1("effect_guard_reason", NA_character_)),
     SE_guard_rejected = isTRUE(g1("SE_guard_rejected", FALSE)),
@@ -642,6 +642,101 @@ VARIANT_METADATA <- list(
   hit <- match(vkey(parsed$stat_value[recipients]), names(agreed))
   parsed$matched_r_df[recipients] <- unname(agreed[hit])
   parsed
+}
+
+#' Is a parsed statistic inside quotation marks in its own clause?
+#'
+#' v0.7.14. Looks at the row's own `raw_text` only (never the context window,
+#' which bleeds neighbouring sentences). The statistic is located by its printed
+#' value after "=", and it is inside a quotation when an odd number of straight
+#' quotes, or more opening than closing curly quotes, precede it -- or, when
+#' the clause starts inside a quotation that opened in the previous chunk,
+#' when nothing opens before it and an unmatched closing quote follows it.
+#'
+#' @param raw The row's `raw_text`.
+#' @param stat The parsed statistic value.
+#' @param decs Decimal places it was printed with (may be NA).
+#' @return TRUE, FALSE, or NA when the statistic cannot be located.
+#' @keywords internal
+.stat_in_quotation <- function(raw, stat, decs) {
+  if (is.na(raw) || !nzchar(raw) || is.na(stat)) return(NA)
+  d <- if (is.na(decs)) 2L else as.integer(decs)
+  num <- formatC(abs(stat), format = "f", digits = d)
+  num_alt <- sub("^0\\.", ".", num)
+  num_re <- paste0("(?:", gsub(".", "\\.", num, fixed = TRUE), "|",
+                   gsub(".", "\\.", num_alt, fixed = TRUE), ")")
+  m <- regexpr(paste0("=\\s*[-\u2212\u2013]?\\s*", num_re, "(?![0-9])"), raw, perl = TRUE)
+  if (m < 1) return(NA)
+  before <- substr(raw, 1L, m - 1L)
+  after <- substr(raw, m, nchar(raw))
+  cnt <- function(s, ch) lengths(regmatches(s, gregexpr(ch, s, fixed = TRUE)))
+  sq_before <- cnt(before, "\"")
+  if (sq_before %% 2L == 1L) return(TRUE)
+  if (cnt(before, "\u201c") > cnt(before, "\u201d")) return(TRUE)
+  opened_before <- sq_before > 0L || cnt(before, "\u201c") > 0L
+  if (!opened_before) {
+    if (cnt(after, "\"") %% 2L == 1L) return(TRUE)
+    if (cnt(after, "\u201d") > cnt(after, "\u201c")) return(TRUE)
+  }
+  FALSE
+}
+
+#' Collapse a statistic QUOTED more than once into one row
+#'
+#' v0.7.14 (d-43ed61). 10.24072/pci.rr.100726 is a peer-review letter whose
+#' reviewer quotes one t-test twice to illustrate comma placement, and both
+#' copies were scored. v0.6.18 withdrew three dedup rules because two distinct
+#' results can share every printed number (v0.6.14: `r(797) = .16` twice in one
+#' sentence, different variables) -- see test-v0618-prose-restatement-dedup.R,
+#' which names the missing signal: quoted material. Distinct results in running
+#' prose are not quoted, so the rule requires ALL of: an identical printed
+#' signature, adjacent chunks (location gap <= 2), prose rows only, and EVERY
+#' copy inside quotation marks. The first copy is kept and carries
+#' `quoted_restatement_count` so the row can say so; nothing is dropped silently.
+#'
+#' @param parsed A parsed-row tibble (prose rows).
+#' @return `parsed` with quoted duplicates removed.
+#' @keywords internal
+.dedup_quoted_restatements <- function(parsed) {
+  if (is.null(parsed)) return(parsed)
+  parsed$quoted_restatement_count <- rep(0L, nrow(parsed))
+  if (nrow(parsed) < 2L ||
+      !all(c("raw_text", "stat_value", "location") %in% names(parsed))) {
+    return(parsed)
+  }
+  sig_cols <- intersect(c("test_type", "stat_value", "df1", "df2", "p_symbol",
+                          "p_reported", "effect_reported_name", "effect_reported",
+                          "ciL_reported", "ciU_reported"), names(parsed))
+  sig <- do.call(paste, c(lapply(sig_cols, function(cn) {
+    v <- parsed[[cn]]
+    if (is.numeric(v)) formatC(v, format = "g", digits = 10) else as.character(v)
+  }), sep = "\r"))
+  decs <- if ("stat_value_decimals" %in% names(parsed)) parsed$stat_value_decimals else rep(NA_integer_, nrow(parsed))
+  quoted <- vapply(seq_len(nrow(parsed)), function(i) {
+    isTRUE(.stat_in_quotation(as.character(parsed$raw_text[i]),
+                              as.numeric(parsed$stat_value[i]), decs[i]))
+  }, logical(1))
+  is_table <- if ("from_table" %in% names(parsed)) {
+    vapply(parsed$from_table, isTRUE, logical(1))
+  } else rep(FALSE, nrow(parsed))
+  drop <- rep(FALSE, nrow(parsed))
+  cand <- which(quoted & !is_table & !is.na(parsed$stat_value))
+  for (s in unique(sig[cand])) {
+    grp <- cand[sig[cand] == s]
+    if (length(grp) < 2L) next
+    grp <- grp[order(parsed$location[grp])]
+    keep <- grp[1L]
+    for (j in grp[-1L]) {
+      if (!is.na(parsed$location[j]) && !is.na(parsed$location[keep]) &&
+          parsed$location[j] - parsed$location[keep] <= 2L) {
+        drop[j] <- TRUE
+        parsed$quoted_restatement_count[keep] <- parsed$quoted_restatement_count[keep] + 1L
+      } else {
+        keep <- j
+      }
+    }
+  }
+  parsed[!drop, , drop = FALSE]
 }
 
 #' Drop docpluck table rows that duplicate a text-parsed (prose) row
@@ -1229,7 +1324,7 @@ compute_and_compare_one <- function(row,
       closest_method = NA_character_,
       delta_effect_abs = NA_real_, ci_match = as.logical(NA),
       ci_delta_lower = NA_real_, ci_delta_upper = NA_real_,
-      ci_check_status = NA_character_, ci_method_match = NA_character_, ci_referent = NA_character_,
+      ci_check_status = NA_character_, ci_method_match = NA_character_, ci_referent = NA_character_, ci_unverifiable_reason = NA_character_,
       effect_guard_rejected = effect_guard_rejected,
       effect_guard_reason = effect_guard_reason,
       SE_guard_rejected = SE_guard_rejected,
@@ -1347,7 +1442,7 @@ compute_and_compare_one <- function(row,
     } else if (tt == "F") {
       # F-tests/ANOVA: eta\u00b2, partial eta\u00b2, omega\u00b2, Cohen's f, R\u00b2
       # When df1=1, F is equivalent to t\u00b2, so d/g/r are also valid
-      valid_types <- c("eta", "eta2", "etap2", "omega2", "partial_omega2", "epsilon_squared", "cohens_f", "R2", "f2")
+      valid_types <- c("eta", "eta2", "etap2", "generalized_eta2", "omega2", "partial_omega2", "epsilon_squared", "cohens_f", "R2", "f2")
       if (!is.na(df1) && df1 == 1) {
         valid_types <- c(valid_types, "d", "g", "dz", "dav", "drm", "r")
       }
@@ -1405,6 +1500,15 @@ compute_and_compare_one <- function(row,
   if (effect_guard_rejected) {
     uncertainty <- c(uncertainty, effect_guard_reason)
   }
+  # v0.7.14 (d-43ed61): say when adjacent quoted copies of this statistic
+  # were collapsed into this row, so the count change is never silent.
+  if ("quoted_restatement_count" %in% names(row) &&
+      isTRUE(as.integer(row$quoted_restatement_count[1]) > 0L)) {
+    uncertainty <- c(uncertainty, sprintf(paste0(
+      "This statistic is quoted %d times in the same passage (inside quotation ",
+      "marks, identical printed values); it is scored once, as one result."),
+      as.integer(row$quoted_restatement_count[1]) + 1L))
+  }
   # v0.7.6: same treatment for a refused standard error -- a suppressed value
   # must never be indistinguishable from an absent one.
   if (SE_guard_rejected && !is.na(SE_guard_reason)) {
@@ -1436,7 +1540,7 @@ compute_and_compare_one <- function(row,
   # Define which effect sizes are valid for which test types
   valid_effects_for_test <- list(
     t = c("d", "g", "dz", "dav", "drm", "r"), # t-tests: d family, g family, r
-    F = c("eta2", "etap2", "omega2", "cohens_f", "R2", "f2"), # F-tests: ANOVA effects
+    F = c("eta2", "etap2", "generalized_eta2", "omega2", "cohens_f", "R2", "f2"), # F-tests: ANOVA effects
     r = c("r", "R2"), # Correlation tests
     chisq = c("phi", "V", "h"), # Chi-square tests (h: one-proportion / GOF chi-square)
     # v0.6.20 (downstream O-5) -- RULING: a z-test reporting an odds ratio is NOT
@@ -1546,6 +1650,8 @@ compute_and_compare_one <- function(row,
   # "ambiguous_b_equals_effect" or "unknown". Set in the regression branch;
   # stays NA for every other test type, where the question does not arise.
   ci_referent <- NA_character_
+  # v0.7.14: why an interval is UNVERIFIABLE, machine-readably (NA otherwise).
+  ci_unverifiable_reason <- NA_character_
 
   # Note: uncertainty and assumptions already initialized at top of function (line 275-276)
   # Do NOT reset them here or earlier messages will be lost
@@ -1584,6 +1690,11 @@ compute_and_compare_one <- function(row,
   } else {
     NA_character_
   }
+
+  # v0.7.14 (d-48266c): TRUE when N was back-solved from the reported effect
+  # size (Welch, group sizes unstated). Recomputing that effect from that N
+  # reproduces it by construction, so the effect-size check is then circular.
+  N_from_effect_backsolve <- FALSE
 
   if (tt == "t") {
     # ------ T-TEST COMPUTATIONS ------
@@ -1635,7 +1746,13 @@ compute_and_compare_one <- function(row,
     if (is_welch) {
       uncertainty <- c(
         uncertainty,
-        sprintf("Non-integer df (%.2f) suggests Welch's t-test (unequal variances)", df1)
+        if (abs(df1 - round(df1)) > 0.01) {
+          sprintf("Non-integer df (%.2f) suggests Welch's t-test (unequal variances)", df1)
+        } else {
+          # v0.7.14: an integer df reaches here only because the clause names
+          # Welch; "Non-integer df (223.00)" was false.
+          sprintf("The clause states a Welch test; df = %.0f is taken as a (possibly rounded) Welch df", df1)
+        }
       )
       assumptions <- c(assumptions, "Welch's t-test assumed (unequal variances)")
     }
@@ -1706,11 +1823,42 @@ compute_and_compare_one <- function(row,
           if (N_from_d >= round(0.85 * min_N_welch) && N_from_d < N) {
             N_original <- N
             N <- max(N_from_d, min_N_welch)
+            # v0.7.14: only an N that IS the back-solved value makes the effect
+            # check circular. When the back-solve dipped under the Welch floor the
+            # N is clamped to df + 2 -- a df-derived value the effect was not fit
+            # to -- so the check stays real and the label says df, not global text.
+            if (N > N_from_d) {
+              N_from_df_inference <- TRUE
+            } else {
+              N_from_effect_backsolve <- TRUE
+            }
             assumptions <- c(assumptions,
               sprintf("Welch: global N=%d likely from different study; used N=%d from reported d",
                       as.integer(N_original), as.integer(N)))
             uncertainty <- c(uncertainty,
               "Global sample size overridden by back-computation from reported effect size")
+          } else if (N_from_d < N && {
+                       # v0.7.14: the band above tests the POINT value of d. A
+                       # tiny d printed to two decimals (d = 0.04 on t = 0.24)
+                       # back-solves anywhere from ~114 to ~188, so a point
+                       # N_from_d of 144 can miss the band although the Welch
+                       # floor df + 2 reproduces the printed d within its own
+                       # rounding. Then the floor is the evidence-backed N, and
+                       # the scraped study total is not (jesp.2020.104052:
+                       # N = 827 turned d = 0.04 into a WARN).
+                       d_dec <- if (!is.na(effect_reported_decimals)) effect_reported_decimals else 2L
+                       d_at_floor <- 2 * abs(stat) / sqrt(min_N_welch)
+                       abs(d_at_floor - abs(eff_as_d)) <= 0.5 * 10^(-d_dec) + 1e-9
+                     }) {
+            N_original <- N
+            N <- min_N_welch
+            N_from_df_inference <- TRUE
+            assumptions <- c(assumptions,
+              sprintf(paste0("Welch: global N=%d likely from different study; the reported d is ",
+                             "reproduced within its rounding at the Welch minimum N=%d (df + 2)"),
+                      as.integer(N_original), as.integer(N)))
+            uncertainty <- c(uncertainty,
+              "Global sample size overridden by the Welch minimum N (df + 2), which reproduces the reported d")
           }
         }
       } else {
@@ -1841,6 +1989,18 @@ compute_and_compare_one <- function(row,
       }
     }
 
+    # v0.7.14 (d-48266c): stated group sizes ARE the sample size. Until 0.7.14
+    # a row with parsed n1/n2 but no N fell through to the inference below, and
+    # on a Welch row that back-solved N from the reported d (circular) while
+    # "n1 = 131, n2 = 135" sat in the same clause.
+    N_from_group_sizes <- FALSE
+    if (is.na(N) && !is.na(n1) && !is.na(n2) && n1 > 0 && n2 > 0) {
+      N <- n1 + n2
+      N_from_group_sizes <- TRUE
+      assumptions <- c(assumptions,
+        sprintf("N = n1 + n2 = %d from the stated group sizes", as.integer(N)))
+    }
+
     # Infer N when not reported (or if replaced above)
     if (is.na(N) && !is.na(df1) && df1 > 0) {
       if (is_welch) {
@@ -1860,6 +2020,7 @@ compute_and_compare_one <- function(row,
 
         if (!is.na(N_from_d)) {
           N <- N_from_d
+          N_from_effect_backsolve <- TRUE
           assumptions <- c(assumptions,
             sprintf("Welch: estimated N=%d from reported d (validated against df+2=%d)",
                     as.integer(N), as.integer(N_from_df)))
@@ -2006,6 +2167,11 @@ compute_and_compare_one <- function(row,
         N <- omni_N
         N_independent <- omni_N
         N_source_omnibus_adopted <- TRUE
+        # The N is no longer the back-solved value, so the circularity flag must
+        # not survive it (unreachable today by arithmetic -- a back-solve needs
+        # N >= 0.85 * (df + 2), an omnibus contrast is ~2/3 of it -- cleared so
+        # the claim is true by construction; Sonnet consult 2026-09-28).
+        N_from_effect_backsolve <- FALSE
         assumptions <- c(
           assumptions,
           sprintf(
@@ -2022,6 +2188,20 @@ compute_and_compare_one <- function(row,
                    "N~%.0f assuming balanced cells); the reported df=%.0f appears to be ",
                    "the omnibus error df, not this contrast's"),
             omni_N, df1
+          )
+        )
+      } else if (posthoc_stated) {
+        # v0.7.14 (d-43c69d): the effect size cannot decide between the two
+        # readings (a d near 0 fits both), so the incumbent df + 2 stands --
+        # but the row sits under a post-hoc announcement, so say that the
+        # contrast reading exists rather than publishing one reading as fact.
+        uncertainty <- c(
+          uncertainty,
+          sprintf(
+            paste0("This t may be a post-hoc contrast reprinting the omnibus ANOVA ",
+                   "error df (df=%.0f); if so its N~%.0f (balanced cells), not ",
+                   "N=%.0f. The reported effect size cannot tell the two apart."),
+            df1, omni_N, N
           )
         )
       }
@@ -2172,7 +2352,18 @@ compute_and_compare_one <- function(row,
       assumptions <- c(assumptions, "Using N for paired computation (df unavailable)")
     }
 
-    if (!is.na(n_paired) && n_paired > 0) {
+    # v0.7.14 (review finding 2026-09-30): a Welch test compares two
+    # INDEPENDENT groups by definition, so paired-design effect sizes (dz, dav,
+    # drm and their g forms) cannot describe it. Offering them let a wrong
+    # d = 0.70 on Welch t(223) = 8.11 with n1 = 131, n2 = 135 (true ~0.99)
+    # publish PASS against drm = 0.685.
+    # An explicit paired label (dz / dav / drm) is the author's own design
+    # evidence and outranks is_welch, which fires on a fractional df or the bare
+    # word "Welch": a within-subject Satterthwaite contrast reporting dz, or a
+    # clause saying "Welch's correction not needed", fell from PASS to NOTE
+    # (tier-2 cross-model finding, 2026-09-30).
+    paired_label <- !is.na(canonical_type) && canonical_type %in% c("dz", "dav", "drm")
+    if (!is.na(n_paired) && n_paired > 0 && (!isTRUE(is_welch) || paired_label)) {
       dz <- tryCatch(dz_from_t(stat, n_paired), error = function(e) NA_real_)
       if (!is.na(dz)) {
         computed_variants$dz <- list(
@@ -4723,7 +4914,10 @@ compute_and_compare_one <- function(row,
     # rho as an effect and flag a spurious WARN -- the defect this fixes).
     # collabra.126266 (Outcome Bias replication+extension): H2 + H5 mediation rows.
     check_type <- "extraction_only"
-    reported_type <- "indirect_effect"
+    # v0.7.14 (d-4fe38e): the CI form also carries the DIRECT effect (ADE); the
+    # type is whatever parse.R named, never a hard-coded "indirect_effect".
+    reported_type <- if (!is.na(effect_reported_name)) effect_reported_name else "indirect_effect"
+    med_has_sobel <- !is.na(stat)
     matched_value <- NA_real_
     matched_variant <- NA_character_
     delta_effect_abs <- NA_real_
@@ -4735,13 +4929,19 @@ compute_and_compare_one <- function(row,
     # Mirrors the interaction_p handler above. collabra.126266 H2/H5 mediation rows.
     N <- NA_real_
     N_source <- NA_character_
+    med_label <- if (identical(reported_type, "direct_effect")) {
+      "mediation direct effect (ADE)"
+    } else {
+      "mediation indirect effect"
+    }
     uncertainty <- c(uncertainty,
-      paste("Bootstrapped mediation indirect effect reported with a Sobel Z: the",
-            "indirect effect and its bootstrapped CI are surfaced, but the indirect",
-            "effect is not independently recomputable from the reported statistics",
-            "(it depends on the a/b path coefficients), so this is extraction-only.",
-            "Any 'ACME robust until rho = ...' value is a sensitivity-analysis bound,",
-            "not the reported effect size."))
+      paste0("Bootstrapped ", med_label,
+             if (med_has_sobel) " reported with a Sobel Z" else " reported with a CI",
+             ": the estimate and its CI are surfaced, but it is not independently ",
+             "recomputable from the reported statistics (it depends on the path ",
+             "coefficients or resampled draws), so this is extraction-only.",
+             if (med_has_sobel) paste(" Any 'ACME robust until rho = ...' value is a",
+                                      "sensitivity-analysis bound, not the reported effect size.") else ""))
   } else if (tt == "mcnemar_or") {
     # ------ McNEMAR TEST REPORTED AS AN ODDS RATIO ------
     # v0.6.11 (E-mcnemar-OR): a McNemar test reported only as a discordant-pairs odds
@@ -5896,6 +6096,184 @@ compute_and_compare_one <- function(row,
     }
   }
 
+  # ------------------------------------------------------------------
+  # v0.7.14 (d-cf56d6, d-4efdc1): INCONSISTENT NEEDS AN AFFIRMATIVE PREMISE.
+  # ------------------------------------------------------------------
+  # INCONSISTENT says the PAPER's interval is wrong. That follows from "no
+  # candidate matched" only if the candidates were comparable with what the
+  # paper printed: the same tail, the same group allocation, the same quantity.
+  # v0.7.9 withdrew the status escalation after it accused 3 correct papers out
+  # of 3, but this column kept publishing INCONSISTENT on the same premises.
+  # Three ways the premise is false are recognisable from the row itself, and
+  # each is checked here. Each can only move INCONSISTENT to UNVERIFIABLE -- a
+  # MATCH / PLAUSIBLE is affirmative evidence and is never touched -- and each
+  # is scoped so that a genuinely wrong interval of the same shape still fails
+  # (the controls in test-v0714-ci-verdict-premise.R).
+  #
+  # 1. REFERENT (widens ci_referent beyond regression rows, as CLAUDE.md says it
+  #    must be). An interval on the reported effect contains it; one that does
+  #    not -- and whose sign-flip does not either, so it is not a dropped minus --
+  #    cannot be an interval on that effect. For the d family, whose intervals
+  #    are near-symmetric by construction (Wald exactly; noncentral t skews by a
+  #    few percent of the half-width even at d = 3 with n = 5 per group), a
+  #    midpoint far from d says the same thing. Asymmetric families (r, OR,
+  #    eta2) use containment only. The impossible-value finding is NOT
+  #    laundered: it stays in `estimate_outside_ci`, the field that owns it.
+  if (is.na(ci_referent) && !is.na(ciL_rep) && !is.na(ciU_rep) &&
+      is.finite(ciL_rep) && is.finite(ciU_rep) && ciL_rep < ciU_rep) {
+    ref_est <- if (!is.na(effect_reported)) effect_reported else NA_real_
+    d_family_ref <- !is.na(canonical_type) &&
+      canonical_type %in% c("d", "g", "dz", "dav", "drm")
+    mid_far <- FALSE
+    if (d_family_ref && !is.na(ref_est)) {
+      decs_mid <- c(effect_reported_decimals, ciL_reported_decimals, ciU_reported_decimals)
+      decs_mid <- decs_mid[!is.na(decs_mid)]
+      eps_mid <- if (length(decs_mid) > 0) 10^(-min(decs_mid)) else 0.01
+      half_w <- (ciU_rep - ciL_rep) / 2
+      mid_far <- abs((ciL_rep + ciU_rep) / 2 - ref_est) > 0.25 * half_w + eps_mid
+    }
+    if (isTRUE(estimate_outside_ci) || mid_far) {
+      ci_referent <- "not_effect_reported"
+    }
+  }
+  # 0. ESTIMAND NOT COMPUTABLE (d-b1c193). A generalized eta-squared interval
+  #    was graded against PARTIAL eta-squared intervals -- a different
+  #    estimand -- beside a row message saying generalized eta-squared cannot be
+  #    computed from F and df. Any verdict from that comparison (collabra.126266:
+  #    8 INCONSISTENT, 5 PLAUSIBLE, 1 MATCH) says nothing about the paper.
+  if (!is.na(canonical_type) && canonical_type == "generalized_eta2" &&
+      !is.na(ci_check_status) &&
+      ci_check_status %in% c("MATCH", "PLAUSIBLE", "INCONSISTENT")) {
+    ci_check_status <- "UNVERIFIABLE"
+    ci_unverifiable_reason <- "estimand_not_computable"
+    ci_match <- as.logical(NA)
+    uncertainty <- c(uncertainty, paste0(
+      "The reported interval is on generalized eta-squared, which cannot be ",
+      "computed from F and df, so it was not graded (the intervals computed ",
+      "here are on partial eta-squared, a different quantity)."))
+  }
+  if (identical(ci_check_status, "INCONSISTENT")) {
+    premise_reason <- NA_character_
+    premise_note <- NA_character_
+
+    if (identical(ci_referent, "not_effect_reported")) {
+      premise_reason <- "referent_not_effect"
+      premise_note <- paste0(
+        "The reported interval cannot be an interval on the reported effect ",
+        "(it is not centred on it, or does not contain it), so it was not ",
+        "graded as one. It may belong to another quantity, such as an ",
+        "unstandardized difference.")
+    }
+
+    # 1b. NO ESTIMATE. With no reported effect size the interval's referent is
+    #    unstated, and grading it as a standardized interval assumes the answer.
+    #    Measured by v0.7.9 (test-v079-ci-severity-tiers.R): 11 of the 15
+    #    corpus rows of this shape come from one paper whose intervals are raw
+    #    mean differences ("95%CI difference [0.102, 0.776]"). A correlation is
+    #    exempt: its statistic IS its estimate (adopted into effect_reported
+    #    only later in the pipeline, so it is NA here).
+    if (is.na(premise_reason) && is.na(effect_reported) &&
+        !(!is.na(tt) && tt == "r")) {
+      premise_reason <- "no_estimate_parsed"
+      premise_note <- paste0(
+        "No effect size was read beside this interval (none is printed, or it ",
+        "could not be parsed), so what it is an interval OF is not established ",
+        "(often an unstandardized difference); it was not graded as a ",
+        "standardized one.")
+    }
+
+    # 2. TAIL. Every candidate computed here is two-sided. A one-sided interval
+    #    either says so or runs to the parameter's limit (r = 1 / -1).
+    if (is.na(premise_reason)) {
+      raw_txt <- if ("raw_text" %in% names(row) && length(row$raw_text) > 0) {
+        as.character(row$raw_text[1])
+      } else ""
+      says_one_sided <- !is.na(raw_txt) &&
+        grepl("one[- ]?(sided|tailed)", raw_txt, ignore.case = TRUE)
+      is_r_row <- (!is.na(tt) && tt == "r") ||
+        (!is.na(canonical_type) && canonical_type == "r")
+      at_r_limit <- is_r_row && (isTRUE(ciU_rep >= 1) || isTRUE(ciL_rep <= -1))
+      if (says_one_sided || at_r_limit) {
+        premise_reason <- "one_sided_interval"
+        premise_note <- paste0(
+          "The reported interval is one-sided (", if (says_one_sided)
+            "stated as such" else "it runs to the parameter's limit",
+          "); every interval computed here is two-sided, so they are not ",
+          "comparable and the interval was not graded.")
+      }
+    }
+
+    # 3. ALLOCATION. With group sizes unstated, the candidates were built at an
+    #    assumed n1 = n2 = N/2. The equal split gives the NARROWEST interval for
+    #    a given t and N, so an unequal split can reproduce a wider one. Search
+    #    every split (normal approximation, the Wald form ci_d_ind() uses as its
+    #    large-sample engine): if one reproduces both bounds within tol_ci, the
+    #    mismatch is the assumption's, not the paper's. If none does -- e.g. an
+    #    interval narrower than the equal split's -- INCONSISTENT stands.
+    if (is.na(premise_reason) && !is.na(ci_method_match) &&
+        grepl("^(d|g)_ind_equalN", ci_method_match) &&
+        !is.na(effect_reported) &&
+        !is.na(tt) && tt == "t" && !is.na(stat) &&
+        (is.na(n1) || is.na(n2))) {
+      N_alloc <- if (!is.na(N)) as.integer(round(N)) else
+        if (!is.na(df1)) as.integer(round(df1)) + 2L else NA_integer_
+      if (!is.na(N_alloc) && N_alloc >= 6L && N_alloc <= 100000L) {
+        n1s <- 2:(N_alloc - 2L)
+        n2s <- N_alloc - n1s
+        d_a <- stat * sqrt(1 / n1s + 1 / n2s)
+        if (startsWith(ci_method_match, "g_ind")) {
+          J_a <- hedges_J(N_alloc - 2L)
+          if (!is.na(J_a)) d_a <- d_a * J_a
+        }
+        se_a <- sqrt((n1s + n2s) / (n1s * n2s) + d_a^2 / (2 * (n1s + n2s)))
+        z_a <- stats::qnorm(1 - (1 - ci_level_used) / 2)
+        # The split must explain the WHOLE row -- the printed d as well as the
+        # interval. Matching the interval alone searches a one-dimensional
+        # family of intervals for a coincidence (Sonnet consult 2026-09-28:
+        # d = 0.20 printed with the n1 = 10 / n2 = 90 interval of d = 0.10 was
+        # reported as an unstated allocation).
+        fits <- which(abs(d_a - z_a * se_a - ciL_rep) <= tol_ci &
+                        abs(d_a + z_a * se_a - ciU_rep) <= tol_ci &
+                        abs(d_a - abs(effect_reported)) <= tol_ci)
+        if (length(fits) > 0) {
+          best <- fits[which.min(abs(d_a[fits] - z_a * se_a[fits] - ciL_rep) +
+                                   abs(d_a[fits] + z_a * se_a[fits] - ciU_rep))]
+          premise_reason <- "unstated_allocation"
+          premise_note <- sprintf(paste0(
+            "Group sizes are not stated and the interval was graded at an ",
+            "assumed equal split; the reported interval is reproduced at ",
+            "n1 = %d, n2 = %d (or the mirror split), so the mismatch is the ",
+            "assumption's, not evidence against the paper."),
+            as.integer(min(n1s[best], n2s[best])),
+            as.integer(max(n1s[best], n2s[best])))
+        }
+      }
+    }
+
+    if (!is.na(premise_reason)) {
+      ci_check_status <- "UNVERIFIABLE"
+      ci_unverifiable_reason <- premise_reason
+      # `ci_match` is a separate contract column; leaving it FALSE would
+      # republish the withdrawn verdict through another field (same reasoning
+      # as the sample-size ambiguity cap above).
+      ci_match <- as.logical(NA)
+      uncertainty <- c(uncertainty, premise_note)
+    }
+  }
+  if (identical(ci_check_status, "UNVERIFIABLE") && is.na(ci_unverifiable_reason)) {
+    # Name the pre-existing causes too, so the column is never NA on an
+    # UNVERIFIABLE row: a consumer filtering on it must not read NA as "none".
+    ci_unverifiable_reason <- if (is.na(ciL_rep) || is.na(ciU_rep)) {
+      "one_bound_reported"
+    } else if (isTRUE(corr_matched_df_ambiguous)) {
+      "sample_size_ambiguous"
+    } else if (isTRUE(paired_ci_independent_approx_only)) {
+      "paired_design_independent_approximation"
+    } else {
+      "no_comparable_interval_computed"
+    }
+  }
+
   # If no CI was matched but we computed some, extract the "primary" CI for display
   if (is.na(computed_ciL) || is.na(computed_ciU)) {
     primary_effects <- if (tt == "t") {
@@ -6047,7 +6425,7 @@ compute_and_compare_one <- function(row,
   # that to `delta <= tol_ci`, so until now PLAUSIBLE and INCONSISTENT produced
   # the IDENTICAL published status -- a CI wrong by 0.07 and one wrong by 8.0
   # both read NOTE, while the effect-size arm grades PASS / WARN (3x) / ERROR
-  # (5x) on the same row. Downstream, SciMeto maps NOTE to severity "info" by
+  # (5x) on the same row. Downstream, a consumer maps NOTE to severity "info" by
   # design, so an interval contradicting every computable method reached the
   # author as a neutral chip that counted toward no issue.
   #
@@ -6189,6 +6567,14 @@ compute_and_compare_one <- function(row,
         "allocation, tail or estimand not computed here, so this is a limit of ",
         "the check rather than a finding about the paper."))
     }
+  }
+  # v0.7.14: an estimate outside its own interval is an impossible combination
+  # of published numbers whatever the interval's referent, so the row can never
+  # present as a clean PASS. Until 0.7.14 the CI mismatch above supplied the
+  # NOTE; now that such an interval is UNVERIFIABLE (not graded as the effect's
+  # own), the invariant supplies it directly. Same opt-out as the CI arm.
+  if (ci_affects_status && isTRUE(estimate_outside_ci) && status == "PASS") {
+    status <- "NOTE"
   }
 
   # Determine check_type (Issue 4): what drove the status classification
@@ -6335,7 +6721,10 @@ compute_and_compare_one <- function(row,
   # Route to NOTE with explanation rather than false ERROR.
   if (!is.na(canonical_type) && canonical_type == "generalized_eta2" &&
       check_type == "effect_size") {
-    check_type <- "extraction_only"
+    # v0.7.14 (d-b1c193): the EFFECT SIZE is unverifiable, the p-value is not.
+    # Falling to extraction_only made a row whose p had been recomputed and
+    # matched publish SKIP ("nothing was checked"), which is false.
+    check_type <- if (!is.na(p_reported)) "p_value" else "extraction_only"
     matched_value <- NA_real_
     matched_variant <- NA_character_
     delta_effect_abs <- NA_real_
@@ -6344,6 +6733,24 @@ compute_and_compare_one <- function(row,
       paste0("Generalized eta-squared cannot be verified from summary ",
              "statistics (requires full SS decomposition; Bakeman 2005). ",
              "Only partial eta-squared is computable from F and df."))
+  }
+
+  # v0.7.14 (d-48266c): an N back-solved from the reported effect size cannot
+  # then verify that effect size -- d recomputed from N = 4t^2/d^2 IS d. Until
+  # 0.7.14 this published PASS for any d at all on a Welch row with unstated
+  # group sizes (measured: d = 0.70 on t(223) = 8.11, true ~0.99, was PASS at
+  # N = 537). The p-value does not depend on N and is still checked.
+  if (isTRUE(N_from_effect_backsolve) && check_type == "effect_size") {
+    check_type <- if (!is.na(p_reported)) "p_value" else "extraction_only"
+    matched_value <- NA_real_
+    matched_variant <- NA_character_
+    delta_effect_abs <- NA_real_
+    if (status %in% c("ERROR", "WARN", "PASS")) status <- "NOTE"
+    uncertainty <- c(uncertainty, paste0(
+      "The effect size is NOT verified: group sizes are not stated, a Welch df ",
+      "only bounds N from below, and the N used here was back-solved from the ",
+      "reported effect size itself, so recomputing the effect from it would ",
+      "reproduce the reported value by construction."))
   }
 
   # CI mismatch overrides check_type when the CI arm is what moved the status.
@@ -8744,6 +9151,15 @@ compute_and_compare_one <- function(row,
   if (exists("N_source_omnibus_adopted") && isTRUE(N_source_omnibus_adopted)) {
     N_source_out <- "omnibus_df_contrast"
   }
+  # v0.7.14: an N back-solved from the reported effect size is neither observed
+  # nor a df derivation, and it is what makes that effect unverifiable.
+  if (isTRUE(N_from_effect_backsolve)) {
+    N_source_out <- "effect_backsolved"
+  }
+  if (exists("N_from_group_sizes") && isTRUE(N_from_group_sizes) &&
+      (is.na(N_source_out[1]) || as.character(N_source_out[1]) == "not_found")) {
+    N_source_out <- "group_sizes"
+  }
 
   tibble::tibble(
     location = row$location,
@@ -8869,6 +9285,7 @@ compute_and_compare_one <- function(row,
     # explicitly so a consumer can DISTINGUISH a suppressed effect size from
     # an absent one, which needs a column to filter on.
     ci_referent = ci_referent,
+    ci_unverifiable_reason = ci_unverifiable_reason,
     effect_guard_rejected = effect_guard_rejected,
     effect_guard_reason = effect_guard_reason,
     SE_guard_rejected = SE_guard_rejected,
@@ -9442,6 +9859,9 @@ check_text <- function(text,
     parsed <- parsed[parsed$test_type %in% stats, ]
   }
 
+  # v0.7.14 (d-43ed61): one statistic quoted twice is one result.
+  parsed <- .dedup_quoted_restatements(parsed)
+
   # v0.6.4: map docpluck structured table rows and append them. Bound AFTER the
   # whitelist filter so a "table_estimate" row is never dropped, then
   # deduplicated against any identical prose row (a table cell that restates a
@@ -9636,7 +10056,7 @@ check_text <- function(text,
           closest_method = NA_character_,
           delta_effect_abs = NA_real_, ci_match = as.logical(NA),
           ci_delta_lower = NA_real_, ci_delta_upper = NA_real_,
-          ci_check_status = NA_character_, ci_method_match = NA_character_, ci_referent = NA_character_,
+          ci_check_status = NA_character_, ci_method_match = NA_character_, ci_referent = NA_character_, ci_unverifiable_reason = NA_character_,
           effect_guard_rejected = FALSE, effect_guard_reason = NA_character_,
           SE_guard_rejected = FALSE, SE_guard_reason = NA_character_,
           df_guard_rejected = FALSE, df_guard_reason = NA_character_,
