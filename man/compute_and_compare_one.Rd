@@ -48,7 +48,7 @@ compute_and_compare_one(
 
 \item{plausibility_filter}{Whether to apply plausibility bounds filter (default TRUE)}
 
-\item{sign_sensitive}{Whether sign differences affect status (default FALSE)}
+\item{sign_sensitive}{Intended to make sign differences affect status (default FALSE) -- accepted and recorded in the result's settings, but currently has NO effect on any computed value or status}
 
 \item{method_context_action}{Action when method context detected in chunk ("NOTE", "WARN", "SKIP")}
 

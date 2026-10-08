@@ -50,15 +50,15 @@ check_text(
 
 \item{assume_equal_ns_when_missing}{Logical, assume equal group sizes when missing (default TRUE)}
 
-\item{ci_method_phi}{CI method for phi coefficient (default "bonett_price")}
+\item{ci_method_phi}{CI method for phi coefficient (default "bonett_price") -- accepted and recorded in the result's settings, but currently has NO effect on any computed value or status}
 
-\item{ci_method_V}{CI method for Cramer's V (default "bonett_price")}
+\item{ci_method_V}{CI method for Cramer's V (default "bonett_price") -- accepted and recorded in the result's settings, but currently has NO effect on any computed value or status}
 
 \item{tol_effect}{List of tolerances for effect sizes by type}
 
 \item{tol_ci}{Tolerance for CI bounds (default 0.02)}
 
-\item{tol_p}{Tolerance for p-values (default 0.001)}
+\item{tol_p}{Tolerance for p-values (default 0.001) -- accepted and recorded in the result's settings, but currently has NO effect on any computed value or status}
 
 \item{messages}{Logical, show progress messages (default FALSE)}
 
@@ -72,7 +72,7 @@ check_text(
 
 \item{plausibility_filter}{Whether to apply plausibility bounds filter (default TRUE)}
 
-\item{sign_sensitive}{Whether sign differences affect status (default FALSE)}
+\item{sign_sensitive}{Intended to make sign differences affect status (default FALSE) -- accepted and recorded in the result's settings, but currently has NO effect on any computed value or status}
 
 \item{method_context_action}{Action when method context detected in chunk ("NOTE", "WARN", or "SKIP"; default "NOTE")}
 
