@@ -20,15 +20,13 @@ knitr::opts_chunk$set(
 > Results should be independently verified before use in any consequential
 > context. Use is at your sole responsibility. Corrections, verification
 > reports, and contributions are welcome at
-> <https://github.com/giladfeldman/escicheck> or by contacting
-> Gilad Feldman (<giladfel@gmail.com>).
+> <https://github.com/giladfeldman/escicheck/issues>.
 
 ## Overview
 
 **effectcheck** is a conservative, assumption-aware statistical consistency
-checker for APA-style research results. It parses test statistics from text,
-PDF, HTML, and Word documents, recomputes effect sizes and p-values, and flags
-discrepancies.
+checker for research results. It parses test statistics from already-extracted
+text, recomputes effect sizes and p-values, and flags discrepancies.
 
 Key design principles:
 
@@ -72,10 +70,15 @@ summary(results)
 Each row in the results represents one detected statistic. Key columns:
 
 - **test_type**: The type of test (t, F, r, chisq, z, U, W, H, regression)
-- **status**: PASS, WARN, or ERROR based on the discrepancy
-- **effect_size_reported / effect_size_recomputed**: The comparison
-- **delta**: Absolute difference between reported and recomputed values
-- **uncertainty**: How confident effectcheck is in its assumptions
+- **status**: PASS, OK, NOTE, WARN, ERROR or SKIP (see "Status levels" below)
+- **effect_reported / matched_value**: the reported effect size and the closest
+  same-type computed variant (`matched_variant` names it)
+- **delta_effect**: absolute difference between the two
+- **uncertainty_level** (`low`, `medium`, `high`) with **uncertainty_reasons** and
+  **assumptions_used**: what effectcheck had to assume
+
+Every column is described in `docs/output-columns.md` in the source repository
+(<https://github.com/giladfeldman/escicheck/blob/main/docs/output-columns.md>).
 
 ## Working with results
 
@@ -107,19 +110,16 @@ format_variants(result, 1)
 get_variant_metadata("d_ind")
 ```
 
-## Checking files
+## Checking documents
 
-For PDF, HTML, DOCX, or plain text files:
+effectcheck checks **text**. Since version 0.4.0 it does not read PDF, DOCX or HTML files;
+the former file functions (`check_file()`, `check_files()`, `check_dir()`, `checkPDF()` and
+friends) are defunct. Extract the text with a document extractor such as docpluck
+(<https://docpluck.app>) and pass it to `check_text()`:
 
 ```{r files, eval=FALSE}
-# Single file
-result <- check_file("manuscript.pdf")
-
-# Multiple files
-results <- check_files(c("study1.pdf", "study2.html"))
-
-# Entire directory
-results <- check_dir("manuscripts/")
+paper_text <- paste(readLines("paper.txt", warn = FALSE), collapse = "\n")
+result <- check_text(paper_text)
 ```
 
 ## Exporting results
@@ -145,15 +145,18 @@ comp <- compare_with_statcheck("t(28) = 2.21, p = .035, d = 0.80")
 print(comp)
 ```
 
-## Status thresholds
+## Status levels
 
-effectcheck uses three status levels:
+Every detected statistic receives one of six statuses:
 
 | Status | Meaning |
 |--------|---------|
-| **PASS** | Delta within tolerance (or APA rounding match) |
-| **WARN** | Delta within 3x tolerance, or ambiguous match |
-| **ERROR** | Delta exceeds 5x tolerance |
+| **PASS** | Reported effect size matches a same-type computed variant within tolerance (or an APA rounding match) |
+| **OK** | The p-value is consistent; no effect size was checked |
+| **NOTE** | Could not be fully verified (missing information, CI mismatch, extraction suspect, cross-type comparison) |
+| **WARN** | Effect-size distance above the tolerance and up to 5x it, or a downgraded error on an ambiguous design |
+| **ERROR** | Effect-size distance above 5x the tolerance |
+| **SKIP** | Extracted, but nothing could be checked |
 
 ## Supported test types
 

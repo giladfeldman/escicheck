@@ -1,0 +1,34 @@
+cff-version: 1.2.0
+message: "If you use effectcheck, please cite it as below."
+title: "effectcheck: Statistical Consistency Checker for Published Research Results"
+type: software
+authors:
+  - family-names: Feldman
+    given-names: Gilad
+    affiliation: University of Innsbruck
+    orcid: "https://orcid.org/0000-0003-2812-6599"
+version: "0.7.17"
+license: MIT
+repository-code: "https://github.com/giladfeldman/escicheck"
+url: "https://escimate.app"
+abstract: >-
+  A conservative, assumption-aware statistical consistency checker for
+  already-extracted research-results text. It parses test statistics, effect
+  sizes, p-values and confidence intervals, recomputes every plausible
+  effect-size variant, compares reported values with same-type computed
+  variants, detects decision errors, and records every assumption it made.
+keywords:
+  - meta-science
+  - statistical consistency
+  - effect sizes
+  - confidence intervals
+  - reproducibility
+  - R
+references:
+  - type: report
+    title: "Guide to Effect Sizes and Confidence Intervals"
+    authors:
+      - family-names: Jané
+        given-names: Matthew B.
+    year: 2024
+    doi: "10.17605/OSF.IO/D8C4G"

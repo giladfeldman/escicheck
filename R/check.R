@@ -919,7 +919,7 @@ no_variants_reason <- function(reported_type) {
 #' @param cross_type_action Action when cross-type match found ("NOTE", "WARN", or "ERROR")
 #' @param ci_affects_status Whether CI mismatches affect status (default TRUE)
 #' @param plausibility_filter Whether to apply plausibility bounds filter (default TRUE)
-#' @param sign_sensitive Whether sign differences affect status (default FALSE)
+#' @param sign_sensitive Intended to make sign differences affect status (default FALSE) -- accepted and recorded in the result's settings, but currently has NO effect on any computed value or status
 #' @param method_context_action Action when method context detected in chunk ("NOTE", "WARN", "SKIP")
 #' @param design_ambiguous_action Action when a design-ambiguous t-test (or
 #'   F(1,df), or z with d/g) effect-size ERROR occurs ("WARN", "NOTE", or
@@ -1789,7 +1789,40 @@ compute_and_compare_one <- function(row,
                     row$N_source[1] %in% .SCRAPED_N_SOURCES &&
                     N > 1.5 * min_N_welch &&
                     !is.na(effect_reported) && abs(effect_reported) > 0.001 &&
-                    !is.na(canonical_type) && canonical_type %in% c("d", "g")) {
+                    !is.na(canonical_type) && canonical_type %in% c("d", "g") &&
+                    # v0.7.17 (d-99842a): override only a stated N that
+                    # CONTRADICTS the reported d. A Welch df bounds N from below
+                    # only, so N far above df + 2 is legitimate under unequal
+                    # variances. When the equal-n d at the stated N already
+                    # reproduces the printed d (within the d tolerance or its
+                    # rounding), nothing says that N belongs to another study,
+                    # and replacing it with a value chosen FROM d made the
+                    # correct d = 0.03 (t(150.2) = 0.24, N = 300) read NOTE
+                    # while a wrong d = 0.04 read PASS at a swapped N. The
+                    # tolerance is the one the effect check itself applies, so
+                    # a kept N grades exactly as the same row with N in its own
+                    # clause would. (At tiny d an absolute 0.02 is wide: a PASS
+                    # there means "not contradicted", Sonnet consult 2026-10-07.)
+                    !is.na(stat) && {
+                      eff_d_stated <- abs(effect_reported)
+                      if (identical(canonical_type, "g") && !is.na(df1) && df1 > 1) {
+                        J_stated <- 1 - 3 / (4 * df1 - 1)
+                        if (is.finite(J_stated) && J_stated > 0) eff_d_stated <- eff_d_stated / J_stated
+                      }
+                      d_at_stated <- 2 * abs(stat) / sqrt(N)
+                      tol_d_stated <- tol_effect[[canonical_type]]
+                      if (is.null(tol_d_stated)) tol_d_stated <- tol_effect$d
+                      if (is.null(tol_d_stated)) tol_d_stated <- 0.02
+                      stated_n_fits_d <- abs(d_at_stated - eff_d_stated) <= tol_d_stated + 1e-9 ||
+                        round(d_at_stated, 2) == round(eff_d_stated, 2)
+                      if (stated_n_fits_d) {
+                        assumptions <- c(assumptions, sprintf(paste0(
+                          "Welch: stated N=%d kept although well above the Welch minimum ",
+                          "(df + 2 = %d); the equal-n d at that N (%.3f) reproduces the reported effect"),
+                          as.integer(N), as.integer(min_N_welch), d_at_stated))
+                      }
+                      !stated_n_fits_d
+                    }) {
           # Global N is much larger than df+2 -- likely from a different study.
           # Cross-validate: back-compute N from reported d (equal-n assumption)
           #
@@ -9564,18 +9597,18 @@ compute_and_compare_one <- function(row,
 #' @param one_tailed Logical, assume one-tailed tests (default FALSE)
 #' @param paired_r_grid Numeric vector of correlation values for paired t-test grid search
 #' @param assume_equal_ns_when_missing Logical, assume equal group sizes when missing (default TRUE)
-#' @param ci_method_phi CI method for phi coefficient (default "bonett_price")
-#' @param ci_method_V CI method for Cramer's V (default "bonett_price")
+#' @param ci_method_phi CI method for phi coefficient (default "bonett_price") -- accepted and recorded in the result's settings, but currently has NO effect on any computed value or status
+#' @param ci_method_V CI method for Cramer's V (default "bonett_price") -- accepted and recorded in the result's settings, but currently has NO effect on any computed value or status
 #' @param tol_effect List of tolerances for effect sizes by type
 #' @param tol_ci Tolerance for CI bounds (default 0.02)
-#' @param tol_p Tolerance for p-values (default 0.001)
+#' @param tol_p Tolerance for p-values (default 0.001) -- accepted and recorded in the result's settings, but currently has NO effect on any computed value or status
 #' @param messages Logical, show progress messages (default FALSE)
 #' @param max_text_length Maximum total text length in characters (default 10^7)
 #' @param max_stats_per_text Maximum number of stats to process per text (default 10000)
 #' @param cross_type_action Action when cross-type match found ("NOTE", "WARN", or "ERROR"; default "NOTE")
 #' @param ci_affects_status Whether CI mismatches affect status (default TRUE)
 #' @param plausibility_filter Whether to apply plausibility bounds filter (default TRUE)
-#' @param sign_sensitive Whether sign differences affect status (default FALSE)
+#' @param sign_sensitive Intended to make sign differences affect status (default FALSE) -- accepted and recorded in the result's settings, but currently has NO effect on any computed value or status
 #' @param method_context_action Action when method context detected in chunk ("NOTE", "WARN", or "SKIP"; default "NOTE")
 #' @param design_ambiguous_action Action when a design-ambiguous t-test (or
 #'   F(1,df), or z with d/g) effect-size ERROR occurs ("WARN", "NOTE", or

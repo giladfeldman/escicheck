@@ -7,3 +7,7 @@
 ^\.claude$
 ^effectcheck_.*\.tar\.gz$
 ^\.winbuilder-logs$
+^docs$
+^tools$
+^CITATION\.cff$
+^CONTRIBUTING\.md$

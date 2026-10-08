@@ -478,6 +478,19 @@ normalize_text <- function(x) {
     }
   }
 
+  # --- Markdown emphasis around a short token (*t*, **p**, _d_, ***F***) ---
+  # APA italicises statistic symbols, so markdown and DOCX/HTML-converted text
+  # carries `*t*(17) = -1.32, *p* = .453`. Every pattern below anchors on the bare
+  # symbol, so an italic statistic lost the whole row and an italic p alone was
+  # dropped silently (row kept, p_reported NA, status SKIP). Reported by a
+  # downstream consumer 2026-08-21 against 0.7.6; still true at 0.7.15.
+  # Only a matched marker pair around ONE short token that starts with a letter is
+  # removed: the opening marker may not follow a word character or another marker
+  # (so `model_t_value` and `2*3*4` are untouched) and significance stars after a
+  # number (`.32**`) have no partner to pair with.
+  x <- gsub("(?<![\\w*])(\\*{1,3}|_{1,3})([A-Za-z\\p{Greek}][A-Za-z0-9\\p{Greek}]{0,7})\\1(?![*_])",
+            "\\2", x, perl = TRUE)
+
   # Unicode normalization (simple replacements)
   # --- Minus/dash variants (all to ASCII hyphen-minus) ---
   x <- gsub("\u2212", "-", x)  # Unicode minus sign (U+2212)
@@ -676,6 +689,28 @@ normalize_text <- function(x) {
   # green. Scoped to an optional underscore on THIS token rather than a general
   # `_`-eater, so no unrelated identifier changes meaning.
   x <- gsub("(?:eta2_?p|\u03b72_?p|etap2|\u03b7p2|eta_p2|eta_p\\^2|\u03b7_p2|\u03b7_p\\^2)\\s*=", "partial eta-squared =", x, perl = TRUE)
+  # v0.7.16: eta with a Greek RHO subscript is partial eta-squared. Linotype
+  # MathematicalPi typesetting (APA journals, e.g. 10.1037/xge0000057) draws the
+  # partial "p" with the rho glyph, and docpluck 2.4.150 emits it as printed:
+  # `\u03b7\u03c12 = .06` (pdftotext order) or `\u03b72\u03c1`. We know of no other use of rho as an
+  # eta subscript in this literature, and the printed values agree with partial eta-squared recomputed
+  # from the F. Anchored on the eta, so a standalone rho is untouched.
+  # Sonnet consult 2026-10-06: runs BEFORE the superscript-2 rewrite below, so it
+  # takes `\u00b2` and `^2` itself, plus `_` joins and the rho variants U+03F1 and
+  # math-italic U+1D70C. Horizontal space only, and none between `2` and a
+  # trailing rho: `\u03b72\n\u03c1 = .31` is eta-squared followed by a separate rho.
+  rho_ <- "[\u03c1\u03f1\U0001D70C]"
+  sq_  <- "(?:2|\u00b2|\\^2)"
+  hs_  <- "[ \t\u00a0\u2009]*"
+  x <- gsub(paste0("\u03b7(?:_?", rho_, hs_, sq_, "|", sq_, "_?", rho_, ")", hs_, "="),
+            "partial eta-squared =", x, perl = TRUE)
+  # ...and the ASCII spelling, which is what the worker actually receives: docpluck's
+  # normalized text (normalize=academic) transliterates the glyphs, so
+  # 10.1037/xge0000057 arrives as `eta2rho = .06` (measured on 2.4.150, 2026-10-06).
+  # Same `sq_`/`hs_` tolerances as the Greek line; an identifier (`my_eta2rho`,
+  # `x1eta2rho`) is not a statistic (Sonnet consult round 2, 2026-10-06).
+  x <- gsub(paste0("(?<![A-Za-z0-9_])eta(?:_?rho", sq_, "|", sq_, "_?rho)(?![A-Za-z])", hs_, "="),
+            "partial eta-squared =", x, perl = TRUE)
   # Also handle n2p (PDF corruption of eta2p) but only if followed by = and a number
   x <- gsub("(?<![a-zA-Z])n2p\\s*=\\s*(\\d)", "partial eta-squared = \\1", x, perl = TRUE)
   # v0.3.0a: omega2p / omegap2 notation -> partial omega-squared = value

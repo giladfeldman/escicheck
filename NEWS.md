@@ -1,3 +1,196 @@
+# effectcheck 0.7.17
+
+## Welch t-test effect sizes (changes verdicts on Welch rows with a stated N far above df + 2 only)
+
+- **A stated sample size that already reproduces the reported d is no longer replaced.** A
+  Welch df only bounds N from below (N >= df + 2), so a stated N far above df + 2 is legitimate
+  when variances and group sizes are unequal. The Welch branch treated any scraped N above
+  1.5 x (df + 2) as "likely from a different study" and replaced it with a value chosen from the
+  reported d itself. Measured at 0.7.16 on "N = 300 participants ... Welch t(150.2) = 0.24,
+  p = .81, d = X": the correct d = 0.03 (2 x 0.24 / sqrt(300) = 0.028) read NOTE with N
+  back-solved to 256, while d = 0.04 read PASS at a swapped N = 152, so the correct value graded
+  worse than a wrong one and the N a row was checked against depended on the value being checked.
+  The override now fires only when the equal-n d at the stated N misses the reported d by more
+  than the effect-size tolerance and its rounding (the cases it was built for, a global N of 794
+  or 827 contradicting the reported d, still take it). A kept N is named in `assumptions_used`.
+  Test: `tests/testthat/test-v0717-welch-stated-n-kept.R` (watched failing first).
+- **The d tolerance was audited for tiny effects and left unchanged.** d = 0.04 against an
+  equal-n 0.028 still grades PASS, through the same absolute tolerance (0.02) any row with N in
+  its own clause gets. Welch versus pooled-SD conventions and two-decimal rounding spread
+  legitimate printed values over roughly 0.017-0.039 at this t, so a tolerance tight enough to
+  flag 0.04 would flag correct values. At very small d a PASS means "not contradicted", not
+  "verified to two decimals". Cross-checked by a second model (Sonnet, tier 2), which agreed on
+  both points and found three gaps fixed here (no note for a kept N, the g path used the d
+  tolerance, a missing t could error).
+
+# effectcheck 0.7.16
+
+## Parser (changes rows on markdown input and on rho-subscript eta-squared only)
+
+- **Markdown emphasis around a statistic symbol no longer destroys the result.** APA style
+  italicises statistic symbols, so markdown and DOCX/HTML-converted text carries
+  `*t*(17) = -1.32, *p* = .453`. An italic statistic produced zero rows, and an italic `p`
+  alone was worse: the row survived with `p_reported = NA` and status SKIP, a row that looks
+  checked and is not. `normalize_text()` now removes a matched marker pair (`*`, `**`, `***`,
+  `_`, `__`, `___`) around one short token that starts with a letter, before any statistic
+  pattern runs. Significance stars after a number (`.32**`), interaction terms (`Group*Time`),
+  identifiers (`model_t_value`) and star legends (`*p < .05`) are untouched. Reported by a
+  downstream consumer against 0.7.6 (2026-08-21/22); still true at 0.7.15. Cross-checked by a
+  second model (Sonnet, tier 2): no input found whose value changes; its four edge cases were
+  reproduced and none moves a number. Test: `tests/testthat/test-markdown-emphasis.R`
+  (watched failing first). Plain (non-markdown) text parses exactly as before.
+- **Eta-squared with a Greek rho subscript is read as partial eta-squared.** APA journals
+  typeset in Linotype MathematicalPi fonts draw the "p" of partial eta-squared with the rho
+  glyph; docpluck 2.4.150 decodes those fonts and emits the glyphs as printed, which its
+  normalized text (what the worker receives) spells `eta2rho = .06` (DOI 10.1037/xge0000057:
+  9 eta rows now carry their value, each equal to partial eta-squared recomputed from its F).
+  Every such row previously published `effect_reported = NA` at status OK. Accepts the ASCII
+  forms `eta2rho`, `eta2_rho`, `etarho2`, `eta_rho2`, `eta_rho^2` and the Greek forms `ηρ2`,
+  `η2ρ`, `ηρ²`, `ηρ^2`, `η_ρ2` (rho variants U+03F1 and U+1D70C included). Cross-checked by a second model (Sonnet, tier 2), whose two defects (superscript,
+  caret and underscore forms missed; a line break could join eta-squared to a separate rho
+  statistic) were reproduced and fixed. Test: `tests/testthat/test-eta-rho-subscript.R`
+  (watched failing first).
+
+## Worker: submit, then poll
+
+- **`?async=1` on every analysis route.** The worker answers `202` with a job id at once and
+  `GET /api/v1/jobs/<id>` returns the response the synchronous call would have given (same
+  status, headers and bytes; tested on all six routes in `worker/tests/test-async-jobs.R`).
+  Why: escimate.app reaches the worker through a Vercel rewrite that cuts a request at 120 s
+  (measured 2026-10-05: 260 statistics -> `502 ROUTER_EXTERNAL_TARGET_ERROR` at 120.2 s); the
+  worker kept computing and the page re-sent the same job, which was refused as busy or doubled
+  the work. Without `?async=1` nothing changes, so direct API clients are unaffected. Results
+  are held in memory for 15 minutes; an id the server no longer holds is `410 unknown_job`.
+
+## Frontend
+
+- The audit page submits analyses and report downloads with `?async=1` and polls
+  (`frontend/lib/async-job.ts`, guarded by `lib/async-job.test.mjs`): no single request
+  outlives the proxy limit however long the paper takes. A poll that fails in transit is
+  retried without resending the job; a `410` resubmits once as a transient failure. When
+  polling gives up (5 failed polls in a row, or the 15-minute backstop) the page says the
+  analysis may still be running and does NOT resend it (found in review; node and E2E tests
+  watched failing first).
+- The zero-result message's "unreadable operator" detector now treats ANY glyph in the operator
+  slot that is not a letter, digit, comparison sign or ordinary punctuation as unreadable. The
+  first version listed known garbage glyphs (`!`, `&`, `'`, private-use area) and saw none of
+  what the Windows poppler build emits for the same PDF (U+2AFD where `=` was printed).
+- When docpluck reports a math font it could not decode (`metadata.engine` ending
+  `+unmapped_glyph_fonts:<fonts>`, docpluck 2.4.150+), the audit page shows a warning above
+  the results naming the font and saying its symbols (`=`, `<`, minus, Greek) may be wrong, so
+  statistics from that document are unreliable; a zero-result run says the same instead of
+  "no statistics". Guarded by `lib/zero-result-diagnosis.test.mjs` and an E2E test.
+
+## QA
+
+- **Zero-yield tripwire** (`tests/harness/zero_yield_tripwire.R`, run by `/escicheck-qa`): a
+  paper whose extracted text holds three or more statistic-shaped strings but parses to zero
+  rows FAILS the gate. Every existing gate scored rows that were found, so a paper yielding
+  nothing was invisible to all of them (10.1037/xge0000057 returned 0 of ~70 statistics on
+  2026-10-05). Papers with a filed, unfixed upstream defect are listed in
+  `tests/harness/zero_yield_known_upstream.json` and reported as KNOWN-UPSTREAM FAIL, never
+  PASS; an entry whose paper starts yielding rows fails the gate until it is removed.
+- **Known, waived for this release:** `npm audit --audit-level=high` reports GHSA-vfj7-8cjw-p6xm
+  in `braces` 3.0.3, reached only through the frontend's lint dev dependencies
+  (eslint-config-next -> fast-glob -> micromatch); nothing that ships to users includes it, and
+  no patched release exists. Waived by the owner for 0.7.16 only (2026-10-06); tracked as
+  d-79b4e4.
+
+# effectcheck 0.7.15
+
+**Worker only: no file under `R/` changed.** The worker's analysis code moved into
+`worker/jobs.R` unchanged, and responses from the new background worker are byte-identical to
+the in-process path (tested on all six analysis routes). What changes is what happens when the
+server is asked to do two things at once.
+
+**Frontend follow-up, added after the worker release (no file under `R/` or `worker/`
+changed; the package version stays 0.7.15 because nothing the R package or worker returns
+changed).**
+
+- **The audit progress panel names the step that is really happening.** It reports
+  connecting (the 8 s pre-flight), starting the server (only when that pre-flight got no
+  answer), sending the file (with the browser's upload percentage), processing on the server
+  (docpluck extraction, then ESCImate's recomputation), retrying after a failed request (with
+  the HTTP status and "retry N of M"), or busy. A failed request is no longer labelled
+  "waking up the server": the Vercel proxy also answers 502 when one analysis outlasts its
+  2-minute limit on a server that is awake (measured 2026-10-05). When the browser reports
+  upload progress without a total, the panel says so rather than showing a stale percentage,
+  and the percentage is cleared before a retry re-sends the file. The panel is now a
+  `role="status"` live region (the decorative bar is `aria-hidden`).
+- **A zero-result upload whose text contains statistics with unreadable operators now says
+  so.** Some PDFs set "=" and "<" in math fonts that carry no Unicode map, so extractors
+  read `F(2, 126) = 4.04` as `F(2, 126) ! 4.04` (10.1037/xge0000057). The parser finds
+  nothing, and the site used to report "No statistical results were detected". With three or
+  more such strings in the returned text, the message now says the statistics did not come
+  through as text and that this is a text-extraction limitation, not a finding about the
+  paper. ESCImate does not repair the text; the extraction fix was sent to docpluck
+  (thread `M-escimate-docpluck-20261005T060853Z`). Guard:
+  `frontend/lib/zero-result-diagnosis.test.mjs` fires on garbled text and stays silent on clean
+  APA text and on prose containing `!` and `&`.
+- Fixed a React duplicate-key warning on the audit page's animated panels, and added an
+  `eslint-disable` for the legitimate `<head>` in the string-rendered email layout.
+- The docpluck boundary-contract golden was refreshed from 2.4.147 to 2.4.149 (owner
+  decision; metadata-only diff: version, identity, shas and `table_extraction_version`
+  2.4.18 to 2.4.20).
+
+**Concurrent requests are refused with a retryable 503 instead of queueing into a 502
+(d-8fa65b).** The R worker is single-threaded. Measured on the live free-tier worker
+(2026-08-09): three concurrent `/api/v1/process-text` calls finished at 98s / 120s / 120s, two
+came back as HTTP 502 from the proxy, and `/health` was unanswerable for ~120s. Every analysis
+route now runs its work in a background R process (`future` + `promises`, new
+`worker/jobs.R`), so the HTTP process stays free. While an analysis runs, a further request to
+any analysis route is refused at once with `503`, `Retry-After: 15` and
+`{"busy": true, "reason": "server_busy", ...}`. The refusal has no `error` field on purpose: a
+client that treats an unknown `error` code as fatal (SciMeto does) would otherwise give up on a
+document that was never looked at. `/health` now answers during an analysis and reports an
+`admission` block (`mode`, `workers`, `in_flight`, `refused_since_start`, ...).
+
+- **Why not just count requests in a filter.** Measured locally before building this: on the
+  synchronous worker a counting filter saw `inflight = 0` for all three concurrent requests,
+  because R ran request 2's filter only after request 1 had finished. The cap needed the work
+  moved off the HTTP thread first.
+- **The background worker takes its extraction settings from the server process.** An R
+  session lets the user's `.Renviron` override the environment it inherits (measured), so on a
+  developer machine a freshly started worker would have read a production `DOCPLUCK_URL` while
+  `/health` reported the local one. The five `DOCPLUCK_*` variables are copied across
+  explicitly.
+- **Frontend.** The audit page recognises the refusal, says the server is busy with another
+  request, and retries automatically after the advertised wait (up to 8 times), without
+  spending the cold-start retries; if the server stays busy it says so instead of showing a
+  generic failure. The report download shows a busy message too.
+- **What it costs, measured** in the production image under Render free-tier limits
+  (`docker run --cpus=0.1 --memory=512m`), 0.7.14 vs 0.7.15: port answering after a cold start
+  28s vs 34-39s; first analysis finished after a cold start ~65s vs ~100-114s (two R processes
+  now load on the same 0.1 CPU); a warm single request ~39s vs ~42s; memory idle 110 vs 174 MB,
+  peak 165 vs 224 MB of 512, no out-of-memory kill. The same run reproduced the defect on
+  0.7.14 (three requests finished at 37s / 88s / 116s, `/health` waited 37s) and showed the fix
+  on 0.7.15 (two refusals and `/health` at ~3s). The worker is started with base R's
+  `parallel::makePSOCKcluster` (7s at 0.1 CPU, vs 15s for `parallelly`) and loads the
+  analysis code on its first job, off the path to binding the port.
+- A background worker killed from outside (the OOM killer, on Render) costs the request it was
+  running a retryable 503 (reason `worker_restarted`); the pool is replaced and the next request
+  is analysed (tested).
+- **A deadline per analysis** (`ESCIMATE_JOB_TIMEOUT`, default 300s, counted from when the
+  worker is ready, not from submission -- counting the worker's loading abandoned jobs that had
+  not started, measured). Past it the hung worker process is killed (stopping the cluster alone left it running and burning CPU, measured) and replaced, and the request gets a retryable 503
+  (reason `job_timeout`), so one hung analysis cannot hold the only slot (tested).
+- Restarting the worker blocks the HTTP process for the few seconds a new R process takes to
+  start (7s at 0.1 CPU). This happens only after a crash or a timeout.
+- `ESCIMATE_WORKERS` (1, or 0 = the old in-process behaviour, for tests; other values stop the
+  server -- with 2 workers one crash failed both in-flight requests, measured),
+  `ESCIMATE_BUSY_RETRY_AFTER` (default 15) and `ESCIMATE_JOB_TIMEOUT` configure it. The Docker image adds `future`,
+  `parallelly` and `promises` to its build-completeness gate.
+- Tests: `worker/tests/test-admission-cap.R` starts the real worker on a loopback port, fires
+  three concurrent requests and requires one 200, two prompt 503s with `Retry-After` and no
+  `error` field, and `/health` answered mid-analysis; it failed on 0.7.14 (the requests
+  completed at 18s / 31s / 46s, `/health` waited behind the first). A second test requires
+  the background worker and the in-process path to return byte-identical bodies on all six
+  analysis routes (`/process`, `/process-text`, `/compare`, `/compare-text`, `/report`,
+  `/report-text`). A killed background worker is answered with a code-less retryable `503`
+  (reason `worker_restarted`), not a `500` with an `error` sentence, so SciMeto treats it as
+  "unavailable" rather than a fatal document failure. Three Playwright tests cover the busy
+  panel and the give-up message, and both fail against the 0.7.14 page.
+
 # effectcheck 0.7.14
 
 Ten open defects, re-tested on 0.7.13 first; the ones that still reproduced are fixed here. Every
@@ -140,6 +333,24 @@ pointed out that `n_table_rows` alone counted rows that were never looked at).
 
 The docpluck version-comparison harness (`tests/harness/diff_endtoend_versions.py`) no longer
 crashes on a Windows console when a row label holds a character outside cp1252.
+
+**Documentation rewritten and kept honest by a gate.** The README now covers every exported
+function with its real signature, every `check_text()` argument, the six statuses and the
+result attributes, and `docs/output-columns.md` describes all 140 result columns (the README
+previously listed 18). Stale claims corrected: the README cited version 0.5.7; it documented
+`filter_by_source(x, sources)` and `filter_by_delta(x, min, max)`, whose arguments are `files`,
+`pattern`, `min_delta` and `max_delta`; it described the `effectsize` package as the primary
+computation engine, but its code path in `compute.R` has an empty body and is never reached
+(interval methods come from `MBESS` and analytic formulas); and the vignette still showed the
+defunct file functions and a three-status table. Four `check_text()` arguments -- `tol_p`,
+`sign_sensitive`, `ci_method_phi`, `ci_method_V` -- are accepted and recorded in the settings but
+read by no computation; this was measured (changing each leaves the full result identical, while
+changing `tol_effect` or `ci_affects_status` does not) and is now stated in their help and the
+README rather than implied away. `tools/check_docs_coverage.R` derives the public surface from
+the code and fails when any export, argument, value, column, setting or option is missing from
+the docs, or when the README quickstart does not run against a fresh install; it is pinned
+two-sided by `tests/testthat/test-docs-coverage-gate.R`. Added `CITATION.cff` and
+`CONTRIBUTING.md`. No behaviour change.
 
 # effectcheck 0.7.12
 

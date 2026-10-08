@@ -88,7 +88,11 @@ has_effectsize <- function() {
 }
 
 # CI computation priority system
-# Priority 1: effectsize::confidence_interval()
+# Priority 1: effectsize::confidence_interval() -- NOT WIRED. The two
+#   `if (has_effectsize())` blocks below have empty bodies, so the effectsize
+#   package is never called, installed or not (verified 2026-09-27). The CIs
+#   come from MBESS where it is used (ci.smd / ci.sm) and otherwise from the
+#   analytic formulas. Do not describe effectsize as a computation engine.
 # Priority 2: Analytic formulas
 # Priority 3: Large-sample approximations
 # Priority 4: Explicit failure with reason
